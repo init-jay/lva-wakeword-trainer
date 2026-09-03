@@ -7,7 +7,8 @@ Usage:
     python train.py --wake-word "okay jarvis" --samples-per-voice 300 --training-steps 75000
 
 Docker:
-    docker compose run --rm trainer python -m train.oww.train --wake-word "hey seeree"
+    docker compose run --rm oww-trainer python -m train.oww.train \\
+        --wake-word "hey seeree"
 """
 
 import argparse

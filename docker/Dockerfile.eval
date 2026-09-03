@@ -1,6 +1,6 @@
 # Evaluation harness - ARCHITECTURE.md step 3. CPU only, and built to run ON THE MAC.
 #
-# WHY A THIRD IMAGE. The two trainers cannot host this. `trainer` pins numpy<2 for
+# WHY A THIRD IMAGE. The two trainers cannot host this. `oww-trainer` pins numpy<2
 # torch and openWakeWord's training path; `mww` needs numpy>=2 and a CUDA TensorFlow
 # stack. Both are also linux/amd64 GPU images that exist to run on the training
 # server. Evaluation is the one step that wants to run where the person deciding what

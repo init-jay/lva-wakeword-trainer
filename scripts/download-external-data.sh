@@ -7,8 +7,8 @@
 #   ./scripts/download-external-data.sh oww        # openWakeWord only
 #   ./scripts/download-external-data.sh mww        # microWakeWord only
 #
-#   docker compose run --rm trainer ./scripts/download-external-data.sh
-#   docker compose run --rm mww     ./scripts/download-external-data.sh mww
+#   docker compose run --rm oww-trainer ./scripts/download-external-data.sh
+#   docker compose run --rm mww-trainer ./scripts/download-external-data.sh mww
 #
 # WHY A TARGET AND NOT JUST "DOWNLOAD EVERYTHING". Almost none of this is actually
 # shared, and each trainer's private half is large. Sizes measured on disk after a
@@ -270,7 +270,8 @@ if [ "$want_mww" = 1 ]; then
         echo "         These are the augmentation corpora, shared with the"
         echo "         openWakeWord side. Fetch them from the TRAINER image, which"
         echo "         has the Python stack that resamples them:"
-        echo "           docker compose run --rm trainer ./scripts/download-external-data.sh oww"
+        echo "           docker compose run --rm oww-trainer \\"
+        echo "               ./scripts/download-external-data.sh oww"
         echo
     fi
 

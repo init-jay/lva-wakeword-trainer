@@ -57,7 +57,7 @@ trap cleanup EXIT
 # validation-batching fix appeared to have no effect and the OOM recurred. Cached
 # layers make this a few seconds when nothing has changed.
 echo "=== $(date '+%H:%M:%S')  building trainer image"
-docker compose build trainer
+docker compose build oww-trainer
 
 # Piper, only when the run actually asks for it. Unlike Kokoro it is NOT stopped
 # before training: it runs CPU-only (--use-cuda measured 2.5x slower, see
@@ -129,7 +129,7 @@ WATCH_PID=$!
 
 # Build the command with each argument quoted, so it survives being passed to
 # `script` as a single string.
-CMD="docker compose run --rm trainer python -m train.oww.train"
+CMD="docker compose run --rm oww-trainer python -m train.oww.train"
 CMD="$CMD --wake-word $(printf '%q' "$WAKE_WORD") --data-dir /app/data"
 for arg in "$@"; do CMD="$CMD $(printf '%q' "$arg")"; done
 

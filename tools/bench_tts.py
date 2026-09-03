@@ -18,7 +18,7 @@ more clients will never help. Whether more INSTANCES help is the second question
 and --instances answers it.
 
     python bench_tts.py --engine piper --port 10200
-    python bench_tts.py --engine piper --instances 10200 10201
+    python bench_tts.py --engine piper --instances 10200 10201   # see --instances
     python bench_tts.py --engine kokoro --url http://localhost:8880
 
 Run it on the machine that will generate the corpus. Numbers from a laptop - worse,
@@ -96,10 +96,10 @@ def main():
     p.add_argument("--instances", nargs="+", default=None, metavar="HOST:PORT",
                    help="piper: several instances, to test whether adding instances "
                         "adds throughput. Takes 'host:port' or a bare port (which "
-                        "uses --host). Both forms matter: from the host the "
-                        "instances are localhost:10200 and localhost:10201, but on "
-                        "the compose network they are piper:10200 and piper2:10200 "
-                        "- the 10201 mapping does not exist inside it.")
+                        "uses --host). COMPOSE DEFINES ONLY ONE PIPER, because a "
+                        "second measured 0.60x - see docker-compose.yml. To re-test "
+                        "that, start another instance by hand on a free port and "
+                        "pass both here.")
     args = p.parse_args()
 
     def split(spec):
@@ -126,14 +126,11 @@ def main():
         sys.exit(
             f"\nCould not reach {args.host}:{args.port} - {e}\n\n"
             "  * Is the service up?  `docker compose ps` should show it running.\n"
-            "    Start it with `docker compose up -d piper` (add `--profile bench`\n"
-            "    and piper2 for the --instances test). Note `docker compose down\n"
-            "    <service>` tears down the network too - use `stop`.\n"
+            "    Start it with `docker compose up -d piper`. Note `docker compose\n"
+            "    down <service>` tears down the network too - use `stop`.\n"
             "  * Are you using the right names for where this is running?\n"
-            "    Inside the compose network:  --host piper   --instances piper:10200 "
-            "piper2:10200\n"
-            "    From the host:               --host localhost "
-            "--instances localhost:10200 localhost:10201\n")
+            "    Inside the compose network:  --host piper\n"
+            "    From the host:               --host localhost --port 10200\n")
 
     print(f"\n{args.clips} clips per row\n")
     print(f"{'mode':<16}{'clips/s':>9}{'RTF':>8}{'med ms':>9}{'p90 ms':>9}")
