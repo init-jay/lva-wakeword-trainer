@@ -73,15 +73,32 @@ deep-phonemizer==0.0.19
 # ONNX and refuses to write a model that disagrees, so a bad combination fails
 # loudly at conversion time rather than shipping.
 #
-# ONLY WHAT onnx2tf DOES NOT ALREADY PIN. Its own requires include exact pins for
-# onnx==1.20.1, sng4onnx==2.0.1 and psutil==5.9.5, so listing those unpinned here
-# added nothing except a resolver step that installs one version and then replaces
-# it. onnx-graphsurgeon and tf_keras are NOT in its requires and some conversion
-# paths need them, so they stay.
+# onnx2tf's HELPERS ARE LISTED EXPLICITLY, EVEN THOUGH ITS METADATA CLAIMS THEM.
+#
+# PyPI says onnx2tf requires onnx, sng4onnx and psutil at exact pins, so they look
+# like pure duplication here. They were removed on exactly that reasoning and the
+# build broke:
+#
+#     File "onnx2tf/utils/common_functions.py", line 8, in <module>
+#         import psutil
+#     ModuleNotFoundError: No module named 'psutil'
+#
+# Declared and installed are different things. Whatever the cause - a resolver
+# outcome, a version whose metadata and imports disagree - the empirical fact is
+# that onnx2tf imports psutil and pip did not put it there. Do not trim these back
+# out on the strength of a `requires_dist` listing; the environment is the authority,
+# and it disagreed once already.
+#
+# The build check below this in Dockerfile.oww is what caught it, which is precisely
+# why that check exists: conversion runs AFTER a ~16 minute training run, so a
+# dependency set that only resolves on paper would surface at the worst moment.
 tensorflow==2.21.0
 onnx2tf
+onnx
 onnx-graphsurgeon
+sng4onnx
 tf_keras
+psutil
 # Declared by openWakeWord and by onnx2tf, kept explicit because this repo imports it
 # directly: eval/check_model_alignment.py reads a .tflite through it, and the eval
 # image deliberately does not carry it - the trainer image is where that path runs.
