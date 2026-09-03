@@ -8,7 +8,7 @@ A Docker-based wakeword training pipeline for [Linux Voice Assistant](https://gi
 - **A microphone and speaker are required**, for the voice capture and preflight check steps.
 - **macOS is first class**, Linux is second class, and Windows is not supported.
 - **GPU acceleration is optional**, and only applies to the training step.
-- **Agent first.** This repo is meant to be handed to an agent or coding harness. The in-repo skills are written so an agent can drive the whole pipeline, but you can also run it by hand by following the docs.
+- **Agent first.** This repo is meant to be handed to an agent or coding harness. The in-repo skills are written so an agent can drive the whole pipeline, but you can also run it by hand by following the docs. Each of the .py file's top comment has examples for how to run the file.
 
 
 ## The pipeline
