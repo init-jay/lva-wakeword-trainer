@@ -7,8 +7,8 @@
 #   ./scripts/download-external-data.sh oww        # openWakeWord only
 #   ./scripts/download-external-data.sh mww        # microWakeWord only
 #
-#   docker compose run --rm trainer ./download-external-data.sh
-#   docker compose run --rm mww     ./download-external-data.sh mww
+#   docker compose run --rm trainer ./scripts/download-external-data.sh
+#   docker compose run --rm mww     ./scripts/download-external-data.sh mww
 #
 # WHY A TARGET AND NOT JUST "DOWNLOAD EVERYTHING". Almost none of this is actually
 # shared, and each trainer's private half is large. Sizes measured on disk after a
@@ -46,7 +46,10 @@ TARGET="${1:-all}"
 case "$TARGET" in
     all|oww|mww) ;;
     -h|--help|help)
-        sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+        # The usage block is lines 2-11 of this file. Kept as a line range rather
+        # than a duplicated here-doc so the two cannot drift; if you add a line to
+        # the header, extend this range.
+        sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
         exit 0 ;;
     *)
         echo "unknown target: $TARGET (expected all, oww or mww)" >&2
@@ -267,7 +270,7 @@ if [ "$want_mww" = 1 ]; then
         echo "         These are the augmentation corpora, shared with the"
         echo "         openWakeWord side. Fetch them from the TRAINER image, which"
         echo "         has the Python stack that resamples them:"
-        echo "           docker compose run --rm trainer ./download-external-data.sh oww"
+        echo "           docker compose run --rm trainer ./scripts/download-external-data.sh oww"
         echo
     fi
 

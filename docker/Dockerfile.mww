@@ -126,14 +126,19 @@ print('ai-edge-litert OK')"
 # The corpus layer is shared with the openWakeWord trainer - same 16 kHz mono WAVs,
 # different frontend downstream. mWW reads them through Clips(input_directory, ...),
 # so nothing needs converting.
+# COPIED so the import check below runs at BUILD time - a package that does not
+# import should fail the build, not a run. docker-compose then mounts this same
+# directory over the top, so editing a trainer does not mean rebuilding a CUDA image:
+# the copy is what the build verified, the mount is what actually runs.
 COPY train/ ./train/
-# The same script the trainer image carries. Run it here with the `mww` target:
+
+# scripts/ IS ONLY MOUNTED, never copied. Nothing in this build depends on it, and a
+# shell script needing an image rebuild to fix a typo is the liability
+# Dockerfile.eval already calls out. Run the downloader here with the `mww` target:
 # that one needs only curl and unzip, which this image has, while `oww` and `all`
 # resample audio through Python `datasets` and must run in the trainer image.
 #
-#     docker compose run --rm mww ./download-external-data.sh mww
-COPY scripts/download-external-data.sh .
-RUN chmod +x download-external-data.sh
+#     docker compose run --rm mww ./scripts/download-external-data.sh mww
 
 RUN python3 -c "import train.corpus.augment, train.corpus.negatives, \
                        train.corpus.real, train.corpus.piper"

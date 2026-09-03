@@ -237,6 +237,12 @@ services:
       # rmtree above cannot reach a model even in principle.
       - ./output:/app/output
       - ./wordlists:/app/wordlists:ro       # the phrases, per wake word
+      # SOURCE IS MOUNTED, NOT BAKED IN. The images COPY train/ so their build-time
+      # import check has something to check, and these mounts shadow that copy at
+      # runtime - so editing a trainer or a script does not mean rebuilding a CUDA
+      # image. Read-only: the trainers read their source, they never write it.
+      - ./train:/app/train:ro
+      - ./scripts:/app/scripts:ro
     shm_size: "8gb"
 
   trainer:
@@ -256,6 +262,12 @@ services:
       - ./data:/app/data
       - ./output:/app/output
       - ./wordlists:/app/wordlists:ro
+      # SOURCE IS MOUNTED, NOT BAKED IN. The images COPY train/ so their build-time
+      # import check has something to check, and these mounts shadow that copy at
+      # runtime - so editing a trainer or a script does not mean rebuilding a CUDA
+      # image. Read-only: the trainers read their source, they never write it.
+      - ./train:/app/train:ro
+      - ./scripts:/app/scripts:ro
     environment:
       # Both instances; each is a separate single-threaded process.
       - KOKORO_URL=http://kokoro:8880,http://kokoro2:8880

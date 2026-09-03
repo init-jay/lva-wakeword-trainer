@@ -108,8 +108,19 @@ RUN python3 -c "import tensorflow as tf; print('tensorflow', tf.__version__)" \
 # train.corpus by that name - without the package root the container fails at import,
 # before any of the expensive setup runs.
 COPY train/ ./train/
-COPY scripts/download-external-data.sh .
-RUN chmod +x download-external-data.sh
+
+# scripts/ IS NOT COPIED - docker-compose bind-mounts it, as it does train/ over the
+# copy above. The two are treated differently on purpose:
+#
+#   COPY train/   so the import check below runs at BUILD time. A package that does
+#                 not import should fail the build, not a training run that has
+#                 already spent an hour building a corpus.
+#   mount train/  so editing a trainer does not mean rebuilding a CUDA image. The
+#                 mount shadows the copy at runtime; the copy is what the build
+#                 checked, the mount is what actually runs.
+#   mount scripts/ only. Nothing in the build depends on it, and a shell script that
+#                 needed an image rebuild to fix a typo is the liability
+#                 Dockerfile.eval already calls out.
 
 # Fail the build rather than a training run if the package does not import.
 RUN python3 -c "import train.corpus.augment, train.corpus.negatives, \
