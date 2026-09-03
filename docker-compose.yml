@@ -194,6 +194,11 @@ services:
       # train/ for `python -m train.mww.manifest`, which cuts the ESPHome manifest
       # from a measured cutoff - an evaluation decision, so it belongs in this image.
       - ./train:/app/train:ro
+      # The per-wake-word phrase lists the eval corpus is generated from. Read-only:
+      # generate_negatives.py renders them, it does not edit them - they are written
+      # by hand or by the `write-wordlists` skill, and a corpus that silently stopped
+      # matching its wordlist would be untraceable.
+      - ./wordlists:/app/wordlists:ro
       - ./output:/app/output
       - ./data/recordings/holdout:/app/data/recordings/holdout:ro
       # Training positives, for the rare deliberate check against them. Scoring here

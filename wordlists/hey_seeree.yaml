@@ -1,0 +1,145 @@
+wake_word: hey seeree
+
+eval:
+
+  # THE PHRASE, THEN THE WORD KEEPS GOING. The category a model is most likely to
+  # fail on, and the one trailing context is supposed to protect against. The model
+  # has only ever seen the phrase end, so it can learn "starts like the phrase"
+  # rather than "is the phrase". Aim for real words that begin with the wake word's
+  # own syllables and then diverge.
+  extend:
+    - hey serious
+    - hey seriously
+    - hey series
+    - hey Sirius
+    - hey syrup
+    - hey cereal
+    - hey searing pain
+    - hey sear it on both sides
+    - hey ceiling
+    - hey seedling
+    - hey sequel
+    - hey secret
+    - hey CD player
+    - hey seagull
+    - hey senior
+    - hey Sierra
+    - hey silly
+    - hey city hall
+    - hey seeker
+    - hey seaweed
+
+  # THE SAME SOUNDS INSIDE ORDINARY SPEECH, WITH NO CARRIER WORD. Tests that the
+  # model needs the whole phrase rather than its distinctive second syllable.
+  # Full sentences, because the surrounding speech is what makes it realistic.
+  running:
+    - I watched the whole series last night and it was seriously good.
+    - He takes everything far too seriously these days.
+    - Sirius radio was playing in the background the entire time.
+    - We need to buy cereal and syrup before the shop closes.
+    - The series finale was a serious disappointment to everyone.
+    - She was searing the steak when the smoke alarm went off.
+    - The ceiling in the sitting room needs repainting this year.
+    - It is a serious situation and we should treat it as such.
+    - Sierra Nevada is beautiful in the early spring.
+    - The secretary said the seminar starts at seven.
+    - Can you see the sea from the seaside cottage?
+    - That is a seriously impressive series of results.
+
+  # THE CARRIER WORD PLUS A DIFFERENT NAME. Tests that "hey" alone is not the
+  # trigger. Names that start with the wake word's second syllable are the hard
+  # ones; a couple of bare "hey ..." openers cover the easy case.
+  hey_other:
+    - hey Sarah
+    - hey Cindy
+    - hey Sydney
+    - hey Sammy
+    - hey Sonny
+    - hey there, how are you doing today?
+    - hey you, over here!
+    - hey Sophie, can you pass me that?
+    - hey Sally, what time is it?
+    - hey, did you remember to lock the door?
+    - hey Sean, are you coming?
+    - hey Cecily, the food is ready.
+
+  # BARE COMMANDS, NO WAKE WORD. Checks that command-shaped speech alone cannot trip
+  # it. These are also spliced onto positives by eval_model.py to build the
+  # command-following gate, and rendered after the phrase by generate_positives.py -
+  # so the same list does three jobs and must stay ordinary and unremarkable.
+  #
+  # DISJOINT FROM train/corpus/negatives.py:TRAINING_COMMANDS on purpose. Those are
+  # trained on; these are measured on.
+  command:
+    - what's the time?
+    - turn on the lights please
+    - play some music
+    - set a timer for five minutes
+    - what's the weather like today?
+    - turn the volume down a bit
+    - add milk to the shopping list
+    - how long until the oven is ready?
+    - remind me to call my sister
+    - what's on my calendar tomorrow?
+    - switch off the kitchen lights
+    - play the next track please
+
+  # OTHER ASSISTANTS' WAKE WORDS. Transfers unchanged to any wake word.
+  other_ww:
+    - hey Google, what's the time?
+    - OK Google, turn on the lights
+    - Alexa, play some music
+    - hey Alexa, set a timer
+    - computer, open the pod bay doors
+    - hey Portal, call mum
+    - Cortana, what's my schedule?
+    - hey Bixby, take a photo
+
+  # ORDINARY CONVERSATION - the realistic background rate, and the sanity check that
+  # the model is not simply firing on speech. Should read as unremarkable; anything
+  # sharing sounds with the wake word belongs in `running` instead. Transfers
+  # unchanged to any wake word.
+  general:
+    - The train leaves from platform nine in about twenty minutes.
+    - I think we should probably head home before it gets dark.
+    - Could you pass me the salt and pepper when you get a chance?
+    - The meeting has been moved to Thursday afternoon instead.
+    - It rained all weekend so we stayed inside and watched films.
+    - My brother is coming to visit us at the end of the month.
+    - There is a new bakery that opened on the corner last week.
+    - She has been learning to play the piano since she was six.
+    - We drove for hours without seeing another car on the road.
+    - The garden needs weeding but I keep putting it off.
+    - He said he would call back later this afternoon.
+    - That restaurant is usually booked up weeks in advance.
+    - I left my umbrella on the bus again this morning.
+    - The dog barked at the postman for a solid five minutes.
+    - They are renovating the house before they move in.
+    - It took three attempts to get the recipe right.
+    - The concert was cancelled due to the weather forecast.
+    - I have been meaning to read that book for ages.
+    - We should leave earlier to avoid the traffic.
+    - The battery on this laptop barely lasts an hour now.
+    - Everyone agreed it was the best decision available.
+    - She works from home three days a week these days.
+    - The package should arrive sometime on Wednesday.
+    - I could not find my keys anywhere this morning.
+    - The film was much longer than I expected it to be.
+    - We planted tomatoes and basil in the back garden.
+    - He has been training for the marathon since January.
+    - The wifi keeps dropping out in the upstairs rooms.
+    - There were far more people there than we anticipated.
+    - I will send you the details once everything is confirmed.
+    - The coffee machine broke down again this morning.
+    - They are talking about moving to the coast next year.
+    - It is much colder today than the forecast suggested.
+    - The children spent the afternoon building a fort.
+    - I need to renew my passport before we travel.
+    - The lecture covered far more material than expected.
+
+# A `train:` section belongs here too - the confusable negatives and run-on commands
+# that train/corpus/negatives.py still holds as Python constants. It is deliberately
+# absent rather than duplicated: two sources of truth for the same phrases is worse
+# than one in the wrong place. wordlists/__init__.py already validates that a
+# `train:` section shares no phrase with `eval:` above, so the move is safe whenever
+# the trainer is migrated.

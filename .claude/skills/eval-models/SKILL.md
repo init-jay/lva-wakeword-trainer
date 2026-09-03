@@ -27,13 +27,24 @@ If the negatives are missing, `eval_model.py` and `compare_models.py` both exit 
 scoring anything — 100 utterances across 6 categories, so it is not a long run.
 
 Generation is self-contained — the `kokoro` service defaults to the CPU image, which
-publishes linux/arm64, so it runs natively on the same Mac as the eval image:
+publishes linux/arm64, so it runs natively on the same Mac as the eval image. Measured
+on an M-series Mac: ready in ~5 s, ~1 s per clip, the whole 100-clip corpus in under
+two minutes.
 
 ```bash
 docker compose up -d kokoro
 docker compose run --rm eval python -m eval.generate_negatives \
     --url http://kokoro:8880/v1/audio/speech
 docker compose stop kokoro
+```
+
+If the image pull hangs at "Pulling fs layer" with no bytes moving, it is the
+multi-arch index — use the arch-suffixed tag instead, and see docker/Dockerfile.kokoro
+for the diagnosis:
+
+```bash
+KOKORO_IMAGE=ghcr.io/remsky/kokoro-fastapi-cpu:v0.8.1-arm64 \
+    docker compose up -d --build kokoro
 ```
 
 On the training server, add the GPU overlay for the faster image — same command

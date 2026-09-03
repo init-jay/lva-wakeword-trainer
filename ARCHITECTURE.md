@@ -59,7 +59,11 @@ far.
 .
 ├── .claude/skills/               agent instructions, one per pipeline step
 │   ├── record-samples/SKILL.md   1 · how to get usable recordings, and verify them
+│   ├── write-wordlists/SKILL.md  2+3 · the phrases, the one part that does not transfer
 │   └── eval-models/SKILL.md      3 · how to read a scorecard without misreading it
+├── wordlists/                    per-wake-word phrase lists
+│   ├── __init__.py               loader + the checks that keep eval and train disjoint
+│   └── hey_seeree.yaml           one file per wake word
 ├── record/                       1 · record and check
 │   ├── record_samples.py
 │   ├── check_alignment.py
