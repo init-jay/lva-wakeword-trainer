@@ -1,10 +1,10 @@
-# microWakeWord trainer - the ESP32 target (plan.md phase 2).
+# microWakeWord trainer - the ESP32 target (ARCHITECTURE.md step 2).
 #
 # SEPARATE FROM THE openWakeWord IMAGE ON PURPOSE, and not by preference: mWW's
 # setup.py requires `numpy>=2.0` while requirements.txt here pins `numpy<2` for
 # openWakeWord and torch. They cannot coexist in one environment. That turns out to be
 # the better arrangement anyway - it keeps a numpy-2 TensorFlow stack away from the
-# image whose behaviour seventeen runs of tuning.md are calibrated against.
+# image whose behaviour seventeen tuning runs are calibrated against.
 #
 # Base is the TensorFlow GPU image rather than nvidia/cuda + pip tensorflow, because
 # the CUDA/cuDNN pairing is already solved in it, and because it is the stack proven

@@ -7,14 +7,14 @@ Moved verbatim from train.py. Both trainers need these for the same reasons:
   The openWakeWord mechanism is documented in trim_silence below; microWakeWord's
   clip duration differs (1500 ms vs 2000 ms) but the failure mode does not.
 - Child-range copies, because the corpus is otherwise adult-only. This was the
-  largest single win in tuning.md (run 13: a 4-year-old 24% -> 83%).
+  largest single win in the tuning log (run 13: a 4-year-old 24% -> 83%).
 
 CAVEAT FOR THE microWakeWord PORT: add_child_range_copies reads the voice's sex from
 the Kokoro filename convention (kokoro_af_bella_<uuid> -> "af" -> female). Piper voice
 names carry no such marker - en_US-libritts_r-medium with a numeric speaker id says
 nothing about sex - so this function will skip every Piper clip rather than
 mis-shift it. Making the lever work for Piper needs a sex mapping per voice/speaker,
-which is phase 2 work and is listed as an open question in plan.md.
+which is open work rather than something this module already handles.
 """
 
 from fractions import Fraction

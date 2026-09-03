@@ -43,7 +43,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 # The engine-agnostic half of corpus construction, shared with the microWakeWord
-# trainer (see plan.md). Moved out of this file without behaviour change; the
+# trainer (see ARCHITECTURE.md). Moved out of this file without behaviour change; the
 # reasoning that used to live here moved with it.
 from train.corpus.augment import (CHILD_STRETCH, CHILD_STRETCH_FRACTION,  # noqa: E402
                                   add_child_range_copies, trim_directory,
@@ -550,7 +550,7 @@ def generate_runon_samples(pool: "KokoroPool", voices: list, output_dir: Path,
                            batch: int = 16):
     """Positives where the phrase runs straight into a command.
 
-    The model measured in tuning.md detects 97% of "hey seeree, what's the time?"
+    The model measured in the tuning log detects 97% of "hey seeree, what's the time?"
     (comma, so the TTS puts a pause in) but only 83% of "hey seeree what's the time?"
     spoken as one breath. Splicing a command onto a separately-recorded phrase does
     not reproduce that, because the phrase keeps its isolated ending; the final
@@ -791,7 +791,7 @@ def main():
                              "100k: detection looked better at threshold 0.5, but at "
                              "MATCHED false-accept rates it was worse everywhere. It "
                              "moved the operating point, it did not improve the "
-                             "model. See tuning.md, run 11.")
+                             "model. Measured in tuning run 11.")
     parser.add_argument("--layer-size", type=int, default=64, choices=[32, 64, 128], help="Network layer size")
     parser.add_argument("--kokoro-url", default=os.environ.get("KOKORO_URL", "http://localhost:8880"),
                         help="Kokoro TTS URL. Comma-separate several to split the work "
@@ -826,7 +826,7 @@ def main():
                         help="How hard false positives are penalised by the end of "
                              "training (default: %(default)s). Higher trades "
                              "detection for precision - but so does the detection "
-                             "threshold, for free. See tuning.md, run 8. Recommend to leave at default.")
+                             "threshold, for free. Measured in tuning run 8. Recommend to leave at default.")
     parser.add_argument("--augmentation-rounds", type=int, default=3,
                         help="How many differently-augmented copies of each clip to "
                              "compute features for (default: %(default)s). Multiplies "

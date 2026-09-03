@@ -3,7 +3,7 @@
 Compare trained wake-word models at MATCHED false-accept rates.
 
 This exists because comparing models at a fixed threshold is misleading, and that
-mistake cost several wrong conclusions during the tuning documented in tuning.md.
+mistake cost several wrong conclusions over the seventeen tuning runs.
 Two runs of an IDENTICAL configuration measured 77% and 67% on held-out run-on
 speech at threshold 0.5, and both reached 95% at 8/32 false accepts. What varies
 between training runs is largely where the score distribution sits, not how well the
@@ -77,7 +77,7 @@ ADVERSARIAL_PREFIXES = ("extend_", "hey_other_")
 FA_POINTS = (2, 4, 6, 8, 10, 12)
 
 # Spans both backends' useful ranges, which do not overlap much. openWakeWord's
-# operating point sits LOW - tuning.md ships run 17 at 0.15 - while microWakeWord's
+# operating point sits LOW - tuning run 17 ships at 0.15 - while microWakeWord's
 # scores are a sliding-window mean of an int8 output and saturate: measured, every
 # adversarial negative and every ordinary one fires at 0.15 and below, so its usable
 # range is 0.25 upwards. A sweep that stopped at 0.5 would show the mWW model only

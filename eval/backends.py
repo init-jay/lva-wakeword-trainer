@@ -59,7 +59,7 @@ WHAT USING THE DEPLOYMENT RUNTIME SETTLED, that reading the training repo did no
 THE ONE PLACE THIS DOES NOT USE THE DEPLOYMENT RUNTIME, and why. `pyopen-wakeword` is
 TFLite-only, and this repo's openWakeWord ship candidates are `.onnx` - only some runs
 were ever converted. `OpenWakeWordOnnxBackend` scores those through
-`openwakeword.model.Model`, the path all seventeen runs of tuning.md were measured on.
+`openwakeword.model.Model`, the path all seventeen tuning runs were measured on.
 It is comparability with the notebook, NOT a deployment measurement, and `describe()`
 says so on every report. To measure a `.onnx` candidate as it would actually run,
 convert it first with `onnx2tflite.py` and score the `.tflite`.
@@ -216,7 +216,7 @@ class OpenWakeWordOnnxBackend(Backend):
 
     NOT THE DEPLOYMENT RUNTIME. It exists because this repo's ship candidates are
     .onnx and pyopen-wakeword cannot read them, and because all seventeen runs in
-    tuning.md were measured on exactly this path - so a number from here is
+    the tuning log were measured on exactly this path - so a number from here is
     comparable with the notebook and a number from the LVA backend is not.
     """
 
@@ -243,7 +243,7 @@ class OpenWakeWordOnnxBackend(Backend):
 
     def describe(self):
         return (f"openWakeWord via openwakeword.model.Model ({self.framework}) - "
-                f"the tuning.md path, NOT the deployment runtime")
+                f"the tuning-run path, NOT the deployment runtime")
 
 
 def _tflite_c_path():
@@ -292,7 +292,7 @@ def load(path, sliding_window_size=None):
     .json               microWakeWord, manifest and all - the deployment case
     .tflite (1,s,40)    microWakeWord without its manifest
     .tflite otherwise   openWakeWord on the deployment runtime
-    .onnx               openWakeWord on the tuning.md path, which is not deployment
+    .onnx               openWakeWord on the tuning-run path, which is not deployment
     """
     path = Path(path)
     if is_microwakeword(path):

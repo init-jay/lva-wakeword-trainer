@@ -10,7 +10,7 @@ one has to match how the model was trained.
 THE CUTOFF COMES FROM THE MEASUREMENT, NOT FROM A DEFAULT. Training writes
 tflite_streaming_roc.txt: false rejection rate and false accepts per hour at every
 cutoff. Picking a number without reading it is the same mistake as evaluating an
-openWakeWord model at threshold 0.5, which tuning.md opens by warning about - two
+openWakeWord model at threshold 0.5, which the tuning log opens by warning about - two
 runs of one configuration read 77% and 67% there.
 
     Cutoff 0.86: frr=0.0245; faph=0.000     <- zero false accepts, 97.6% recall

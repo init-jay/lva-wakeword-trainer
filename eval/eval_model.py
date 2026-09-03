@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Score a trained wake-word model against the four gates in tuning.md.
+Score a trained wake-word model against the four gates below.
 
 Everything here is measured by streaming - `Model.predict_clip` slides the model
 over the clip 80 ms at a time, exactly as live detection does - because that is
@@ -9,7 +9,7 @@ what the gates are about. `eval/check_model_alignment.py` answers a different qu
 a clip that misses at one offset may well fire at the next one in streaming, so the
 two scripts are not interchangeable.
 
-Gates (from tuning.md):
+Gates:
 
     extend + hey_other false accepts at 0.5    < 2/32
     clean positive detection at 0.5            >= 55/56
@@ -17,9 +17,9 @@ Gates (from tuning.md):
     detection with a command immediately after >= 27/30
     median latency from end of speech          < 120 ms
 
-The weakest-speaker gate is not in tuning.md; it is here because everything else on
-that list is an average over speakers, and an average is what let a 4-year-old sit at
-24% detection behind a 97% adult for long enough to need train/corpus/augment.py.
+The weakest-speaker gate is not one of the original four. It is here because everything
+else on that list is an average over speakers, and an average is what let a 4-year-old
+sit at 24% detection behind a 97% adult for long enough to need train/corpus/augment.py.
 
 Two details of the method matter enough to state:
 
@@ -41,7 +41,7 @@ is arithmetic over scores. Two consequences worth stating rather than discoverin
 * The gates were calibrated on openWakeWord and are reported for either, but a
   microWakeWord score is a sliding-window average with different threshold
   semantics - `--sliding-window-size` is printed with every result for that reason.
-  Keep mWW numbers in tuning_mww.md.
+  Keep mWW numbers apart from the oww ones.
 * Latency is measured the same way for both and is the one number that transfers
   directly: it is the deployed quantity either way.
 
@@ -81,7 +81,7 @@ NOISE_FLOOR = 30.0          # std dev in 16-bit counts; stands in for room tone
 PAD_S = 1.0                 # noise before and after each clip
 SPEECH_END_FRAC = 0.02      # "end of speech" = last sample above 2% of peak
 
-# Gates from tuning.md, as rates so they survive a different corpus size.
+# Gates, as rates so they survive a different corpus size.
 GATE_FALSE_ACCEPT = 2 / 32
 GATE_POSITIVE = 55 / 56
 GATE_COMMAND = 27 / 30
@@ -166,7 +166,7 @@ def load_by_speaker(directories, limit=None):
     """{speaker: clips}, one entry per directory, in the order given.
 
     THE SPEAKER TRAVELS BESIDE THE CLIPS, NOT INSIDE THEM. Folding it into the clip
-    name instead - `jay/hey_seeree_0001.wav` - would be tidier and would silently
+    name instead - `speaker1/hey_seeree_0001.wav` - would be tidier and would silently
     invalidate every number this harness has ever produced: `clip_rng` derives each
     clip's padding noise from its name, so renaming the clips reseeds the noise and
     moves the scores. Hence a mapping alongside, and `wav.name` left alone.
@@ -268,9 +268,9 @@ def group_key(clip_name):
 def evaluate_with_command(backend, clips, commands, threshold, rng, gap_ms, verbose):
     """Detection when a command follows the phrase, with an optional pause between.
 
-    The gap is the discriminating variable: tuning.md measured 20/30 with the command
-    butted straight on and 28/30 with 300 ms of pause, which is the signature of a
-    model that learned the phrase is followed by quiet.
+    The gap is the discriminating variable: 20/30 was measured with the command butted
+    straight on and 28/30 with 300 ms of pause, which is the signature of a model that
+    learned the phrase is followed by quiet.
     """
     detected, misses = 0, []
     for i, (clip_name, data) in enumerate(clips):
@@ -307,7 +307,7 @@ def verdict(ok):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Score a wake-word model against the tuning.md gates",
+        description="Score a wake-word model against the pipeline's gates",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model", required=True, help="Trained .onnx or .tflite model")
     parser.add_argument("--positives", nargs="+", default=None,
@@ -449,7 +449,7 @@ def main():
               f"{detected_gap}/{n} ({detected_gap / n:.0%})")
         if detected_gap - detected_cmd >= max(2, 0.05 * n):
             print("  The pause recovers detections, which is the signature of a model")
-            print("  trained on 'wake word, then quiet' (tuning.md, Priority 3).")
+            print("  trained on 'wake word, then quiet' (a measured result).")
     else:
         print(f"\nNo command_*.wav in {args.negatives}; skipping the command-following gate.")
 

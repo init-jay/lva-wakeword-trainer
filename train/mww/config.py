@@ -38,7 +38,7 @@ import yaml
 #
 # THE FRONTEND. A clip that sits comfortably in a 2 s window may not in 1.5 s.
 # corpus/augment.py's trimming makes that survivable - it is why the phrase is flush
-# to the end - but the alignment reasoning in tuning.md does NOT carry over unchecked.
+# to the end - but the alignment reasoning behind it does NOT carry over unchecked.
 #
 # THE QUANTIZATION CONSTRAINT. `spectrogram_length` must be divisible by `stride`,
 # and int8 calibration asserts it AFTER training completes (utils.py:321) - so
@@ -74,8 +74,8 @@ IMPULSE_DIRS = ["data/mit_rirs"]
 BACKGROUND_DIRS = ["data/audioset_16k", "data/fma"]
 
 # Upstream notebook defaults, kept verbatim as the starting point. Change one at a
-# time and record it, tuning.md style - the notebook's own README says a usable model
-# takes a lot of experimentation, which is seventeen runs of this repo restated.
+# time and record it - the notebook's own README says a usable model takes a lot of
+# experimentation, which is seventeen runs of this repo restated.
 DEFAULT_TRAINING_STEPS = [10000]
 DEFAULT_LEARNING_RATES = [0.001]
 DEFAULT_BATCH_SIZE = 128
@@ -248,7 +248,7 @@ def main():
         print("  WARNING: no ambient negative sets. Training against this repo's ~100")
         print("           adversarial negatives alone will produce a model that fires")
         print("           on ordinary speech - those sets are what teach silence and")
-        print("           background. Fetch them first (plan.md phase 2).")
+        print("           background. Fetch them first (ARCHITECTURE.md step 2).")
 
 
 if __name__ == "__main__":

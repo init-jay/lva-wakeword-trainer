@@ -57,6 +57,9 @@ far.
 
 ```
 .
+├── .claude/skills/               agent instructions, one per pipeline step
+│   ├── record-samples/SKILL.md   1 · how to get usable recordings, and verify them
+│   └── eval-models/SKILL.md      3 · how to read a scorecard without misreading it
 ├── record/                       1 · record and check
 │   ├── record_samples.py
 │   ├── check_alignment.py

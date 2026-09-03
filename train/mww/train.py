@@ -52,7 +52,7 @@ ROC_FILE = "tflite_streaming_roc.txt"
 # Values below are upstream's notebook defaults, kept verbatim as a starting point -
 # they differ from mixednet.py's own argparse defaults, which are narrower
 # (pointwise_filters "48, 48, 48, 48", kernels "[5], [9], [13], [21]", stride 1).
-# Change one at a time and record it, tuning.md style.
+# Change one at a time and record it, one change at a time.
 MODEL = "mixednet"
 MODEL_FLAGS = [
     "--pointwise_filters", "64,64,64,64",

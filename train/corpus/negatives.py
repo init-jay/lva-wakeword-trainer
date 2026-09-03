@@ -5,7 +5,7 @@ phrases are rendered to WAVs by whichever TTS the trainer uses, and both trainer
 need the same list for the same measured reason.
 
 Kept deliberately DISJOINT from the eval corpus in generate_negatives.py. The
-false-accept gates in tuning.md are scored on that corpus, so a phrase appearing in
+false-accept gates in the tuning log are scored on that corpus, so a phrase appearing in
 both would turn a generalisation measurement into a memorisation one. Check any new
 phrase against EXTEND/RUNNING/HEY_OTHER over there before adding it here.
 """
@@ -88,7 +88,7 @@ MISPRONOUNCING_VOICES = {
 # required rather than optional.
 #
 # These are deliberately DISJOINT from the eval corpus in generate_negatives.py.
-# The gates in tuning.md are scored on that corpus, so any phrase appearing in
+# The gates are scored on that corpus, so any phrase appearing in
 # both turns a generalisation measurement into a memorisation one. When adding
 # phrases here, check them against EXTEND/RUNNING/HEY_OTHER over there first.
 CONFUSABLE_NEGATIVES = {

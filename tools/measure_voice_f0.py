@@ -2,7 +2,7 @@
 """Median F0 per TTS voice, to fill in PIPER_VOICE_SEX without listening to 96 voices.
 
 WHY THIS EXISTS. add_child_range_copies picks a pitch/formant ratio from the voice's
-sex, and that lever is the largest single win in tuning.md - a 4-year-old went from
+sex, and that lever is the largest single win in the tuning log - a 4-year-old went from
 24% detection to 83% once the corpus stopped being adult-only (run 13). Kokoro
 encodes sex in the voice id (af_/am_/bf_/bm_), so it was free there. Piper voice
 names do not, and a voice with no entry gets NO child-range copy, so the lever

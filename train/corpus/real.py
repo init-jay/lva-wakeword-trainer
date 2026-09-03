@@ -43,7 +43,7 @@ def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10
     that augments by globbing a directory. microWakeWord generates spectrogram
     features up front, so N identical copies would be N identical feature rows
     rather than N augmented variants - actively worse than one. Weighting there has
-    to happen through its own sampling/class weights instead. See plan.md phase 2.
+    to happen through its own sampling/class weights instead. See ARCHITECTURE.md.
     """
     real_samples_dir = Path(real_samples_dir)
     if not real_samples_dir.exists():

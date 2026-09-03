@@ -16,7 +16,7 @@ feature pipeline can be blamed for the result.
 What to expect: `trim_silence` leaves `pad_ms=30` and `create_fixed_size_clip` adds
 `end_jitter` from U(0, 200) ms, so a model trained on trimmed clips should peak
 around 100-200 ms. A peak up near 400 ms means the clips carried trailing silence
-into training - untrimmed Kokoro output sits about there (see tuning.md, Priority 2).
+into training - untrimmed Kokoro output sits about there (a measured result).
 
 The peak also *is* the latency: the model cannot fire until that much audio has
 arrived after you stop speaking.
@@ -25,7 +25,7 @@ Takes either the .onnx or the .tflite. Prefer the .tflite when that is what you
 deploy: a wrong-axis conversion loads cleanly and returns plausible scores while
 detecting nothing, so the artifact that ships is the one worth measuring.
 
-WHY THIS KEEPS ITS OWN LOADER INSTEAD OF USING `eval/backends.py`. plan.md's phase 3
+WHY THIS KEEPS ITS OWN LOADER INSTEAD OF USING `eval/backends.py`. Step 3
 said to point all three eval tools at the shared backend layer; the other two are on
 it and this one is not, deliberately. That contract is `score(pcm) -> scores`, fed 16
 kHz audio and streamed. This tool never has PCM at the point it calls the model - it

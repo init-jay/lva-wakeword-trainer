@@ -1,4 +1,4 @@
-# Evaluation harness - plan.md phase 3. CPU only, and built to run ON THE MAC.
+# Evaluation harness - ARCHITECTURE.md step 3. CPU only, and built to run ON THE MAC.
 #
 # WHY A THIRD IMAGE. The two trainers cannot host this. `trainer` pins numpy<2 for
 # torch and openWakeWord's training path; `mww` needs numpy>=2 and a CUDA TensorFlow
@@ -41,7 +41,7 @@ RUN pip install --no-cache-dir \
 
 # The openWakeWord .onnx path, which is NOT the deployment runtime.
 #
-# It is here because every ship candidate in tuning.md is a .onnx and pyopen-wakeword
+# It is here because every ship candidate so far is a .onnx and pyopen-wakeword
 # is TFLite-only, so without this there is nothing to compare a microWakeWord model
 # against. Numbers from it are comparable with the notebook's seventeen runs and are
 # not a deployment measurement; eval/backends.py labels them that way in every report.
@@ -86,4 +86,4 @@ print('eval image OK: numpy', numpy.__version__, \
 
 # Source is mounted, not copied: the harness is edited far more often than the
 # dependencies are, and a rebuild per edit would make the image a liability.
-CMD ["python3", "-c", "print('mount the repo and run a tool; see plan.md phase 3')"]
+CMD ["python3", "-c", "print('mount the repo and run a tool; see ARCHITECTURE.md step 3')"]

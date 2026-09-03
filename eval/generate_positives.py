@@ -30,7 +30,7 @@ time?" as a single utterance instead gives the prosody of someone actually talki
 to a device: the phrase runs into the command, and its final syllable is shaped by
 what follows. It is generated in two variants, `cmd_run` with no punctuation and
 `cmd_pause` with a comma, because the TTS puts a natural pause in for the comma and
-tuning.md found a 300 ms pause was worth six detections to the pre-alignment model.
+the tuning log found a 300 ms pause was worth six detections to the pre-alignment model.
 
 The commands are the same ones `generate_negatives.py` renders WITHOUT the wake
 word, so the two corpora form a matched pair: identical trailing speech, differing
@@ -178,7 +178,7 @@ def plan(args):
                              ("noise", snr), phrase))
     if "command" in args.sweeps:
         # The comma is the whole difference between the two variants: the TTS reads
-        # it as a pause, which is the interaction style tuning.md found the model
+        # it as a pause, which is the interaction style the tuning log found the model
         # used to depend on.
         for variant, template in (("run", "{phrase} {command}"),
                                   ("pause", "{phrase}, {command}")):

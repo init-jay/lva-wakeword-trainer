@@ -29,7 +29,7 @@ which is already true of the Kokoro path (train.py sets no seed).
 EXERCISED AGAINST A LIVE SERVICE. piper_voices enumerated 2005 (voice, speaker)
 pairs across en_US/en_GB, and piper_render returns 16 kHz int16 at exact speed
 ratios (0.7000, 1.2501, 1.6001 measured on one clip). Not yet used to build a
-training corpus - that is --piper-fraction, staged as run 17 in tuning.md.
+training corpus - that is --piper-fraction, staged as tuning run 17.
 
 MEASURE SPEED ON ONE CLIP, NOT ACROSS CALLS. Three separate renderings at 1.0/1.6/0.7
 gave 0.964 s / 0.501 s / 1.194 s, which looks wrong and is not: VITS samples

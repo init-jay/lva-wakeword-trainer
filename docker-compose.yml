@@ -13,7 +13,7 @@ x-kokoro: &kokoro
             count: all
             capabilities: [gpu]
 
-# Piper, for the microWakeWord corpus (plan.md) and as a second engine for this one.
+# Piper, for the microWakeWord corpus and as a second engine for this one.
 # Built here rather than pulled: rhasspy/wyoming-piper is debian-slim with CPU
 # onnxruntime and cannot use a GPU at all. See Dockerfile.piper.
 #
@@ -155,7 +155,7 @@ services:
     command: ["--uri", "tcp://0.0.0.0:10200", "--data-dir", "/data",
               "--download-dir", "/data", "--voice", "en_US-lessac-medium"]
 
-  # Evaluation harness (plan.md phase 3). CPU only, no GPU reservation, and the one
+  # Evaluation harness - step 3. CPU only, no GPU reservation, and the one
   # service here meant to run ON THE MAC rather than on the training server - it
   # builds native for linux/arm64. It carries both inference stacks and neither
   # trainer, because scoring a model and training one have incompatible pins.
@@ -164,12 +164,19 @@ services:
   #   docker compose run --rm eval python -m eval.backends --model M
   #   docker compose run --rm eval python -m eval.compare_models --models A B --sweep
   #
-  # THE RECORDINGS AND CORPORA ARE READ-ONLY, THE MODEL DIRECTORY IS NOT. Evaluation
-  # itself writes nothing, and a stray write into a holdout or the negative corpus is
-  # the most expensive kind there is - it would silently change every number measured
-  # after it. output/ is writable because `train.mww.manifest` writes the ESPHome
-  # manifest beside the model, and choosing its probability_cutoff from the ROC is an
-  # evaluation decision, not a training one.
+  # THE RECORDINGS ARE READ-ONLY. Evaluation writes nothing, and a stray write into a
+  # holdout would silently change every number measured after it - on data that cannot
+  # be regenerated, only re-recorded.
+  #
+  # The TTS corpus is NOT read-only, because generate_negatives.py writes it and runs
+  # in this image. That is a deliberate weakening of the rule above, and it is safe for
+  # a different reason than the recordings are: the corpus is reproducible from the
+  # wordlists and the TTS server, so the worst case is regenerating it. Do not extend
+  # the same reasoning to the holdout.
+  #
+  # output/ is writable because `train.mww.manifest` writes the ESPHome manifest beside
+  # the model, and choosing its probability_cutoff from the ROC is an evaluation
+  # decision, not a training one.
   #
   # THE HOLDOUT IS MOUNTED SEPARATELY FROM THE SAMPLES, not as one data/ mount, and
   # that is deliberate. eval/paths.py keeps them apart in the filesystem because the
@@ -187,12 +194,11 @@ services:
       - ./output:/app/output
       - ./data/recordings/holdout:/app/data/recordings/holdout:ro
       # Training positives, for the rare deliberate check against them. Scoring here
-      # reports TRAINING accuracy - see rule 1 in tuning.md, and eval/paths.py warns
-      # when a run is pointed at this path.
+      # reports TRAINING accuracy, and eval/paths.py warns when a run is pointed here.
       - ./data/recordings/samples:/app/data/recordings/samples:ro
-      - ./data/corpus/eval:/app/data/corpus/eval:ro
+      - ./data/corpus/eval:/app/data/corpus/eval
 
-  # microWakeWord trainer, for the ESP32 target (plan.md phase 2). A SEPARATE image
+  # microWakeWord trainer, for the ESP32 target - step 2. A SEPARATE image
   # from `trainer` because mWW requires numpy>=2 and this repo pins numpy<2 for
   # openWakeWord and torch - they cannot share an environment. See Dockerfile.mww.
   #

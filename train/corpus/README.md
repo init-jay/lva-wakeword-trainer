@@ -4,7 +4,7 @@ Everything here operates on 16 kHz mono WAVs and knows nothing about how those c
 later become features. That is the seam between openWakeWord (melspectrogram →
 embedding model → 96-dim embeddings, 2000 ms window) and microWakeWord (40 features
 per 10 ms into a streaming MixConv net, 1500 ms clip): shared up to a directory of
-WAVs, separate after it. See `../plan.md`.
+WAVs, separate after it. See `../ARCHITECTURE.md`.
 
 | module | what it holds |
 |---|---|
@@ -13,8 +13,8 @@ WAVs, separate after it. See `../plan.md`.
 | `real.py` | real recordings into a corpus, weighted by repetition |
 | `piper.py` | Piper generation over Wyoming, plus Piper voice metadata |
 
-These were moved out of `train/oww/train.py` without behaviour change — sixteen runs of
-`../tuning.md` are calibrated against that behaviour. Anything that looks like it
+These were moved out of `train/oww/train.py` without behaviour change — sixteen tuning
+runs are calibrated against that behaviour. Anything that looks like it
 wants tidying probably encodes a measured result; check the notebook first.
 
 ## Auditing TTS voices before you generate a corpus

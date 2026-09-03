@@ -6,7 +6,7 @@ split is a SAFETY PROPERTY and not a naming convention. `train/corpus/real.py`
 globs the samples tree RECURSIVELY for positives, so a holdout nested anywhere
 inside it is trained on, and every number this harness reports silently becomes
 training accuracy - it overstated detection by ~10 points during the tuning
-written up in tuning.md, and nothing in the output looked wrong. `holdout/` is
+written up in the tuning log, and nothing in the output looked wrong. `holdout/` is
 therefore a SIBLING of `samples/`, never a child, and `warn_if_trained_on` says
 so out loud when a run is pointed back inside the training set anyway.
 
@@ -86,7 +86,7 @@ def speaker_label(directory):
     """Short name for a speaker directory, for keying a per-speaker report on.
 
     Relative to the recordings tree when it sits inside one, so
-    data/recordings/holdout/jay reads as `jay` rather than as a path - and a
+    data/recordings/holdout/speaker1 reads as `speaker1` rather than a path - and a
     directory somewhere else entirely still gets its own basename rather than
     colliding with everything.
     """

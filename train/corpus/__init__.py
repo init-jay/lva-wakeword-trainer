@@ -6,8 +6,8 @@ clips will later be turned into features. That is the seam between openWakeWord
 microWakeWord (40 features per 10 ms into a streaming MixConv net, 1500 ms clip):
 everything up to a directory of WAVs is shared, everything after it is not.
 
-See plan.md. The modules here were moved out of train.py without behaviour change -
-sixteen runs of tuning.md are calibrated against that behaviour, so this package is
+See ARCHITECTURE.md. The modules here were moved out of train.py without behaviour
+change - sixteen tuning runs are calibrated against that behaviour, so this package is
 code motion, not cleanup. Anything that looks like it wants tidying probably encodes
-a measured result; check tuning.md before changing it.
+a measured result; check the tuning log before changing it.
 """
