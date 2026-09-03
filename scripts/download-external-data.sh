@@ -1,14 +1,22 @@
 #!/bin/bash
-# Download training data (~17GB) into data/ directory.
-# Run once before training. Skips files that already exist.
+# Download the external training corpora (~17GB) into data/external/.
+# Run once before training. Skips anything already present.
 #
-# Docker:  docker compose run --rm trainer ./setup-data.sh
-# Manual:  ./setup-data.sh
+# Docker:  docker compose run --rm trainer ./download-external-data.sh
+# Manual:  ./scripts/download-external-data.sh
+#
+# WHY data/external/ AND NOT data/. Everything under data/ is untracked, but not
+# everything under it is the same KIND of thing. These are third-party downloads:
+# fixed, enormous, and reproducible from a URL. The recordings beside them are
+# irreplaceable, and the corpora are regenerated every run. Keeping downloads in
+# their own subtree is what lets `du -sh data/*` and a backup rule tell those three
+# apart - and it is why train/provenance.py can hash the other two without ever
+# walking these.
 
 set -e
 
-# Use /app/data inside container, ./data on host
-DATA_DIR="${DATA_DIR:-./data}"
+# /app/data/external inside the container, ./data/external on the host.
+DATA_DIR="${DATA_DIR:-./data/external}"
 mkdir -p "$DATA_DIR"
 
 echo "=== Downloading training data to $DATA_DIR ==="

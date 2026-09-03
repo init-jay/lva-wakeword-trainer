@@ -3,7 +3,7 @@
 # Download the microWakeWord ambient negative sets. ~5.7 GB.
 #
 # THIS DELIBERATELY DOWNLOADS NOTHING ELSE. mWW's augmentation wants impulse
-# responses and background audio, and those are the SAME three corpora setup-data.sh
+# responses and background audio, and those are the SAME three corpora download-external-data.sh
 # already fetched for openWakeWord - MIT RIRs, AudioSet and FMA, from the same URLs.
 # train/mww/config.py points `impulse_paths` and `background_paths` at them in place.
 # Re-fetching would cost another ~10 GB for identical bytes.
@@ -21,11 +21,11 @@
 # Idempotent: each set is skipped if already unpacked.
 #
 #   ./setup-mww-data.sh
-#   DATA_DIR=/mnt/big/data ./setup-mww-data.sh
+#   DATA_DIR=/mnt/big/external ./setup-mww-data.sh
 
 set -euo pipefail
 
-DATA_DIR="${DATA_DIR:-./data}"
+DATA_DIR="${DATA_DIR:-./data/external}"
 AMBIENT_DIR="$DATA_DIR/mww_ambient"
 BASE_URL="https://huggingface.co/datasets/kahrendt/microwakeword/resolve/main"
 
@@ -48,7 +48,7 @@ done
 if [ -n "$missing" ]; then
     echo "WARNING: missing from $DATA_DIR:$missing"
     echo "         These are the augmentation corpora, shared with the openWakeWord"
-    echo "         side. Run ./setup-data.sh - this script does not duplicate them."
+    echo "         side. Run ./download-external-data.sh - not duplicated here."
     echo
 fi
 

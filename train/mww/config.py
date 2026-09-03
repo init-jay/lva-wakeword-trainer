@@ -68,10 +68,10 @@ CLIP_DURATION_MS = 1500
 # `stride * window_step_ms` = 30 ms here. See CLIP_DURATION_MS.
 WINDOW_STEP_MS = 10
 
-# Augmentation corpora already on disk from setup-data.sh. mWW's Augmentation takes
+# Augmentation corpora already on disk from download-external-data.sh. mWW takes
 # the same two things openWakeWord's does, from the same downloads.
-IMPULSE_DIRS = ["data/mit_rirs"]
-BACKGROUND_DIRS = ["data/audioset_16k", "data/fma"]
+IMPULSE_DIRS = ["data/external/mit_rirs"]
+BACKGROUND_DIRS = ["data/external/audioset_16k", "data/external/fma"]
 
 # Upstream notebook defaults, kept verbatim as the starting point. Change one at a
 # time and record it - the notebook's own README says a usable model takes a lot of
@@ -218,7 +218,7 @@ def main():
                         "(default: %(default)s)")
     p.add_argument("--ambient", nargs="*", default=[],
                    help="RaggedMmap feature dirs for the ambient negatives")
-    p.add_argument("--data-dir", default=".",
+    p.add_argument("--data-dir", default="data/external",
                    help="where mit_rirs/audioset_16k/fma live (default: %(default)s)")
     p.add_argument("--output-dir", default="output")
     p.add_argument("--training-steps", type=int, nargs="+")

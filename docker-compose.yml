@@ -224,11 +224,13 @@ services:
               count: all
               capabilities: [gpu]
     volumes:
-      # ONE MOUNT COVERS THE INPUTS. data/ now holds the external datasets
-      # (mit_rirs, audioset_16k, fma, ambient sets), the recordings under
-      # data/recordings/, and the generated corpora under data/corpus/<wake_word>/,
-      # one directory per trainer: .../oww/ from train.py, .../mww/ from
-      # mww/corpus.py. Neither reaches into the other's, which matters because
+      # ONE MOUNT COVERS THE INPUTS, and data/ separates them by how replaceable
+      # they are:
+      #   data/external/   third-party downloads - huge, fixed, re-fetchable
+      #   data/recordings/ the real clips - irreplaceable
+      #   data/corpus/     generated per run, one directory per trainer:
+      #                    .../oww/ from train.py, .../mww/ from mww/corpus.py
+      # Neither trainer reaches into the other's corpus, which matters because
       # train.py rmtree's its own at the start of every run.
       - ./data:/app/data
       # Trained models and their manifests. A SEPARATE TREE from the corpus, so the

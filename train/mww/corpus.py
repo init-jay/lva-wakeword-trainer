@@ -163,7 +163,7 @@ def main():
     print(f"\nDONE  {n_pos} positives, {n_neg} negatives under {root}")
     print("\nNext:")
     print(f'  python -m mww.config --wake-word "{args.wake_word}" \\')
-    print("      --ambient data/mww_ambient/speech data/mww_ambient/no_speech \\")
+    print("      --ambient data/external/mww_ambient/speech data/external/mww_ambient/no_speech \\")
     print("      --data-dir data --out training_parameters.yaml")
 
 

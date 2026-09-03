@@ -13,7 +13,8 @@ lessons from it that cost the most:
     The config is checked before training starts.
 
     python -m mww.train --wake-word "hey seeree" \\
-        --ambient data/mww_ambient/speech data/mww_ambient/no_speech
+        --ambient data/external/mww_ambient/speech \\
+                  data/external/mww_ambient/no_speech
 
 Everything after --  is passed through to microwakeword.model_train_eval.
 """
@@ -121,9 +122,9 @@ def main():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--wake-word", default="hey seeree")
     p.add_argument("--ambient", nargs="*", default=[],
-                   help="RaggedMmap dirs from setup-mww-data.sh")
+                   help="RaggedMmap dirs from setup-mww-data.sh, under data/external/")
     p.add_argument("--corpus-root", default="data/corpus")
-    p.add_argument("--data-dir", default="data")
+    p.add_argument("--data-dir", default="data/external")
     p.add_argument("--output-dir", default="output")
     p.add_argument("--training-steps", type=int, nargs="+")
     p.add_argument("--batch-size", type=int, default=mww_config.DEFAULT_BATCH_SIZE)
@@ -198,7 +199,7 @@ def main():
             "no validation_ambient or testing_ambient data in any feature set. "
             "average_viable_recall will be 0.000 at every step and model selection "
             "will not work - the *_eval archives are the ones that carry these "
-            "splits (e.g. data/mww_ambient/dinner_party_eval)")
+            "splits (e.g. data/external/mww_ambient/dinner_party_eval)")
     if problems:
         print("\nREFUSING TO TRAIN:")
         for problem in problems:

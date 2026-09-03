@@ -7,7 +7,7 @@ Usage:
     python train.py --wake-word "okay jarvis" --samples-per-voice 300 --training-steps 75000
 
 Docker:
-    docker compose run --rm trainer python train.py --wake-word "hey seeree" --data-dir /app/data
+    docker compose run --rm trainer python -m train.oww.train --wake-word "hey seeree"
 """
 
 import argparse
@@ -806,7 +806,10 @@ def main():
                              "across them: one Kokoro process is single-threaded and "
                              "saturates one core, so more PROCESSES scale where more "
                              "client threads do not.")
-    parser.add_argument("--data-dir", default=".", help="Directory containing training data (features, audioset, fma, mit_rirs)")
+    parser.add_argument("--data-dir", default="data/external",
+                        help="Where the third-party downloads live: the ACAV100M "
+                        "and validation feature .npy files, audioset_16k, fma, "
+                        "mit_rirs (default: %(default)s)")
     parser.add_argument("--no-trim", action="store_true",
                         help="Skip silence trimming before augmentation (not recommended)")
     parser.add_argument("--negatives-file",

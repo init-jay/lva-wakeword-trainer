@@ -115,7 +115,9 @@ def main():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--wake-word", default="hey seeree")
     p.add_argument("--corpus-root", default="data/corpus")
-    p.add_argument("--data-dir", default="data")
+    # Joined with only the BASENAME of IMPULSE_DIRS/BACKGROUND_DIRS below, so this
+    # is the single place that decides where the third-party corpora are read from.
+    p.add_argument("--data-dir", default="data/external")
     p.add_argument("--split-seed", type=int, default=10)
     p.add_argument("--split-count", type=float, default=0.1)
     p.add_argument("--clean", action="store_true",
@@ -143,7 +145,7 @@ def main():
     print(f"\nDONE  features under {corpus / 'features'}")
     print("\nNext:")
     print(f'  python -m mww.train --wake-word "{args.wake_word}" \\')
-    print("      --ambient data/mww_ambient/speech data/mww_ambient/no_speech")
+    print("      --ambient data/external/mww_ambient/speech data/external/mww_ambient/no_speech")
 
 
 if __name__ == "__main__":

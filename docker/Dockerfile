@@ -108,8 +108,8 @@ RUN python3 -c "import tensorflow as tf; print('tensorflow', tf.__version__)" \
 # train.corpus by that name - without the package root the container fails at import,
 # before any of the expensive setup runs.
 COPY train/ ./train/
-COPY scripts/setup-data.sh .
-RUN chmod +x setup-data.sh
+COPY scripts/download-external-data.sh .
+RUN chmod +x download-external-data.sh
 
 # Fail the build rather than a training run if the package does not import.
 RUN python3 -c "import train.corpus.augment, train.corpus.negatives, \
