@@ -102,7 +102,9 @@ far.
 │   ├── Dockerfile.piper
 │   ├── Dockerfile.kokoro
 │   └── Dockerfile.eval
-└── scripts/
-    ├── download-external-data.sh
-    └── run-training.sh
+├── scripts/
+│   ├── download-external-data.sh
+│   └── run-training.sh
+├── docker-compose.yml            CPU by default, so eval runs anywhere
+└── docker-compose.gpu.yml        overlay: nvidia for the TTS servers, on the trainer
 ```

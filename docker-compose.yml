@@ -3,15 +3,18 @@
 # therefore just queue - 4 client threads measured 15.0 it/s against 14.1 sequential.
 # More INSTANCES scale, roughly linearly, until the cores run out. Run `nproc` and
 # leave a core or two for the trainer, then add or remove kokoroN services to match.
+#
+# CPU BY DEFAULT so that corpus generation is self-contained on whatever machine is
+# doing the evaluation. The GPU variant and its device reservation live in
+# docker-compose.gpu.yml - see docker/Dockerfile.kokoro for why the tag is pinned.
+# The numbers above were measured on the GPU image; the CPU one is slower, and how
+# much slower has not been measured here.
 x-kokoro: &kokoro
-  image: ghcr.io/remsky/kokoro-fastapi-gpu:latest
-  deploy:
-    resources:
-      reservations:
-        devices:
-          - driver: nvidia
-            count: all
-            capabilities: [gpu]
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.kokoro
+    args:
+      KOKORO_IMAGE: ${KOKORO_IMAGE:-ghcr.io/remsky/kokoro-fastapi-cpu:v0.8.1}
 
 # Piper, for the microWakeWord corpus and as a second engine for this one.
 # Built here rather than pulled: rhasspy/wyoming-piper is debian-slim with CPU

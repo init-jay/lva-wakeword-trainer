@@ -26,18 +26,21 @@ ls data/corpus/eval/negatives_tts/   # the adversarial corpus
 If the negatives are missing, `eval_model.py` and `compare_models.py` both exit before
 scoring anything — 100 utterances across 6 categories, so it is not a long run.
 
-Generating them needs a Kokoro TTS server, and **the `kokoro` compose service reserves
-an nvidia device**, so it does not start on the Mac where the eval image otherwise
-lives. Point at one on the LAN:
+Generation is self-contained — the `kokoro` service defaults to the CPU image, which
+publishes linux/arm64, so it runs natively on the same Mac as the eval image:
 
 ```bash
-docker compose run --rm eval python -m eval.generate_negatives \
-    --url http://<training-server>:8880/v1/audio/speech
-
-# or, on the training server itself
 docker compose up -d kokoro
 docker compose run --rm eval python -m eval.generate_negatives \
     --url http://kokoro:8880/v1/audio/speech
+docker compose stop kokoro
+```
+
+On the training server, add the GPU overlay for the faster image — same command
+otherwise, and the two render the same voices, so the corpora are interchangeable:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d kokoro
 ```
 
 `--dry-run` prints the wordlists without calling the server; use it to check the

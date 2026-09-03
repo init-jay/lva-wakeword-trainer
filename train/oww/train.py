@@ -271,7 +271,10 @@ def get_kokoro_voices(kokoro_url: str) -> list:
     except Exception as e:
         print(f"ERROR: Cannot connect to Kokoro at {kokoro_url}: {e}")
         print("Make sure Kokoro is running:")
-        print("  docker run -d --gpus all -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-gpu:latest")
+        print("  docker compose up -d kokoro kokoro2")
+        print("  # on the training server, for the GPU image:")
+        print("  docker compose -f docker-compose.yml -f docker-compose.gpu.yml \\")
+        print("      up -d kokoro kokoro2")
         sys.exit(1)
 
 
