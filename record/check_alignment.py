@@ -9,9 +9,9 @@ each clip's speech actually ends from the window end, so you can check your samp
 before committing to a multi-hour training run.
 
 Usage:
-    python check_alignment.py my_real_samples/
-    python check_alignment.py my_custom_model/hey_seeree/oww/positive_train --verbose
-    python check_alignment.py my_real_samples/ --total-length 32000
+    python check_alignment.py ../data/recordings/samples/
+    python check_alignment.py ../output/hey_seeree/oww/positive_train --verbose
+    python check_alignment.py ../data/recordings/samples/ --total-length 32000
 
 Only needs numpy + scipy, so it runs on the host where you record.
 """

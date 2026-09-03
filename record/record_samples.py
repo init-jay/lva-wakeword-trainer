@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Record real voice samples for wake word training.
-Creates 16kHz mono WAV files in the repo's my_real_samples/.
+Creates 16kHz mono WAV files in the repo's data/recordings/samples/.
 
 Lives in its own directory with its own uv environment: it runs on the host for
 microphone access and needs only numpy, whereas the training environment pins torch
@@ -22,15 +22,17 @@ sufficient.
 PyAudio needs PortAudio:  brew install portaudio && uv sync --extra pyaudio
 
 Usage:
-    cd record_real_sample
+    cd record
     uv run record_samples.py --list-devices
     uv run record_samples.py --wake-word "hey seeree"
-    uv run record_samples.py --wake-word "hey seeree" --output-dir ../my_real_samples/speaker1
+    uv run record_samples.py --wake-word "hey seeree" --output-dir ../data/recordings/samples/speaker1
 """
 
 import argparse
 import re
 import subprocess
+import sys
+import termios
 import time
 import wave
 from pathlib import Path
@@ -44,15 +46,18 @@ DURATION = 2.0  # seconds of usable audio captured after the cue
 WARMUP = 0.6    # seconds discarded after opening the device, before the cue
 
 # Samples belong to the repo, not to this tool's directory, so the default output
-# path is anchored to the repo root rather than the working directory.
+# path is anchored to the repo root rather than the working directory. Everything
+# the pipeline records or generates lives under data/, which keeps the repo root
+# clean and means one ignore rule covers the lot.
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SAMPLES_DIR = REPO_ROOT / "my_real_samples"
+RECORDINGS_DIR = REPO_ROOT / "data" / "recordings"
+SAMPLES_DIR = RECORDINGS_DIR / "samples"
 
-# Unsplit recordings go OUTSIDE my_real_samples/. train.py globs that tree
+# Unsplit recordings go OUTSIDE data/recordings/samples/. train.py globs that tree
 # recursively for positives, so a three-minute raw file left there becomes a
 # training positive - and after trimming, only its first 2 s survives, which is a
 # few utterances and a lot of silence presented as one example of the wake word.
-RAW_DIR = REPO_ROOT / "my_real_samples_raw"
+RAW_DIR = RECORDINGS_DIR / "raw"
 
 FULL_SCALE = 32768.0
 # Speech should peak somewhere near -12 dBFS.
@@ -73,14 +78,55 @@ LOW_SNR_DB = 20.0
 def raw_dir_for(output_dir: Path) -> Path:
     """Where the unsplit recording for `output_dir` belongs.
 
-    Mirrors the speaker subdirectory under my_real_samples_raw/, so
-    my_real_samples/speaker1 -> my_real_samples_raw/speaker1. Outside the samples tree
-    entirely, because train.py searches that tree recursively for positives.
+    Mirrors the speaker subdirectory under data/recordings/raw/, so
+    data/recordings/samples/speaker1 -> data/recordings/raw/speaker1. Outside the
+    samples tree entirely, because train.py searches that tree recursively for
+    positives.
     """
     try:
         return RAW_DIR / output_dir.resolve().relative_to(SAMPLES_DIR.resolve())
     except ValueError:
         return RAW_DIR
+
+
+class Terminal:
+    """Keeps the tty in the state we found it, take after take.
+
+    A capture backend can leave the terminal non-canonical - ffmpeg puts it in
+    cbreak mode for its own keyboard controls, and a killed ffmpeg never restores
+    it. The damage outlives the program: ENTER then echoes as ^M and never submits
+    a line, in this process and in the shell afterwards, until someone runs
+    `stty sane`. Nothing in this file asks for that mode, which is exactly why it
+    has to be undone here rather than avoided.
+
+    So the settings are read once at startup and put back after every take, and
+    again on the way out. Restoring costs nothing when nothing broke.
+
+    All of it is a no-op off a TTY: piped stdin has no terminal settings, and its
+    buffered input is a script's deliberate input rather than stray keystrokes.
+    """
+
+    def __init__(self):
+        self.saved = None
+        if sys.stdin.isatty():
+            try:
+                self.saved = termios.tcgetattr(sys.stdin)
+            except (termios.error, ValueError, OSError):
+                pass
+
+    def restore(self):
+        """Put the line discipline back, then drop anything typed during the take.
+
+        Order matters: flushing first would leave the queue to refill from whatever
+        arrives before the mode is fixed.
+        """
+        if self.saved is None:
+            return
+        try:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.saved)
+            termios.tcflush(sys.stdin, termios.TCIFLUSH)
+        except (termios.error, ValueError, OSError):
+            pass                           # not a settable terminal; harmless
 
 
 def next_index(output_dir: Path, safe_name: str) -> int:
@@ -159,14 +205,22 @@ def list_devices(backend: str = "ffmpeg"):
 
 
 def open_stream(device: str) -> subprocess.Popen:
-    """Spawn ffmpeg streaming raw 16kHz mono 16-bit PCM to stdout."""
+    """Spawn ffmpeg streaming raw 16kHz mono 16-bit PCM to stdout.
+
+    `-nostdin` and a closed stdin are both needed, and not for tidiness: ffmpeg
+    reads the terminal for its own keyboard controls, so an inherited stdin lets it
+    eat the ENTER meant for the next take's prompt - the take-by-take loop then
+    looks frozen. Closing the handle stops it reaching ffmpeg at all; -nostdin stops
+    ffmpeg trying to read it.
+    """
     cmd = [
-        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
         "-f", "avfoundation", "-i", f":{device}",
         "-ar", str(SAMPLE_RATE), "-ac", str(CHANNELS),
         "-f", "s16le", "-",
     ]
-    return subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
 def read_exact(pipe, nbytes: int):
@@ -189,7 +243,7 @@ MIC_HINT = ("could not open the microphone. If this is the first run, macOS may 
 
 
 def capture(backend: str, device: str, warmup_s: float, duration_s: float,
-            on_chunk=None, cue: str = ""):
+            on_chunk=None, cue: str = "", allow_partial: bool = False):
     """Record warm-up audio, then `duration_s` of speech. Returns both as int16.
 
     One entry point for both backends so the two are genuinely comparable: the
@@ -199,10 +253,19 @@ def capture(backend: str, device: str, warmup_s: float, duration_s: float,
 
     `on_chunk` is called with each block as it arrives, for the live level meter.
     Returning False from it stops the capture early.
+
+    With `allow_partial`, Ctrl-C returns the audio captured so far instead of
+    propagating. The chunks only exist inside this function, so an interrupt that
+    escapes it discards the recording no matter what the caller does - which is why
+    a long --continuous session has to be caught here rather than one frame up. An
+    interrupt before any speech arrives still propagates: there is nothing to keep,
+    and the warm-up is what the noise reference is measured from.
     """
     step = SAMPLE_RATE // 10 * SAMPLE_WIDTH                # 100 ms
     warmup_bytes = int(SAMPLE_RATE * warmup_s) * SAMPLE_WIDTH
     total_bytes = int(SAMPLE_RATE * duration_s) * SAMPLE_WIDTH
+    warmup = b""
+    chunks, got = [], 0
 
     if backend == "pyaudio":
         import pyaudio
@@ -223,13 +286,15 @@ def capture(backend: str, device: str, warmup_s: float, duration_s: float,
             warmup = read(warmup_bytes)
             if cue:
                 print(cue)
-            chunks, got = [], 0
             while got < total_bytes:
                 chunk = read(min(step, total_bytes - got))
                 chunks.append(chunk)
                 got += len(chunk)
                 if on_chunk and on_chunk(chunk, got) is False:
                     break
+        except KeyboardInterrupt:
+            if not (allow_partial and chunks):
+                raise
         finally:
             stream.stop_stream()
             stream.close()
@@ -245,7 +310,6 @@ def capture(backend: str, device: str, warmup_s: float, duration_s: float,
                 raise SystemExit(f"ffmpeg {MIC_HINT}\n{err}")
             if cue:
                 print(cue)
-            chunks, got = [], 0
             while got < total_bytes:
                 chunk = read_exact(proc.stdout, min(step, total_bytes - got))
                 if chunk is None:
@@ -254,6 +318,9 @@ def capture(backend: str, device: str, warmup_s: float, duration_s: float,
                 got += len(chunk)
                 if on_chunk and on_chunk(chunk, got) is False:
                     break
+        except KeyboardInterrupt:
+            if not (allow_partial and chunks):
+                raise
         finally:
             proc.kill()
             proc.wait()
@@ -361,12 +428,11 @@ def record_continuous(device: str, seconds: float, backend: str = "ffmpeg"):
         print(f"\r  {got / SAMPLE_WIDTH / SAMPLE_RATE:5.1f}s  "
               f"{level:>6.1f} dBFS  {bar:<20}", end="", flush=True)
 
-    try:
-        audio, noise = capture(backend, device, WARMUP, seconds, on_chunk=meter)
-    except KeyboardInterrupt:
-        print("\n  stopped early")
-        raise
+    audio, noise = capture(backend, device, WARMUP, seconds,
+                           on_chunk=meter, allow_partial=True)
     print()
+    if len(audio) < int(SAMPLE_RATE * seconds):
+        print(f"  stopped early - keeping {len(audio) / SAMPLE_RATE:.1f}s")
     return audio, noise
 
 
@@ -468,9 +534,9 @@ def main():
     parser.add_argument("--wake-word", default="hey seeree", help="Wake word you're recording")
     parser.add_argument("--raw-dir", default=None,
                         help="Where unsplit --continuous recordings go (default: "
-                             "my_real_samples_raw/, mirroring the speaker "
-                             "subdirectory). Kept out of my_real_samples/ so the "
-                             "trainer never picks a raw file up as a positive.")
+                             "data/recordings/raw/, mirroring the speaker "
+                             "subdirectory). Kept out of data/recordings/samples/ so "
+                             "the trainer never picks a raw file up as a positive.")
     parser.add_argument("--output-dir", default=str(SAMPLES_DIR),
                         help="Output directory (default: %(default)s). Use a "
                              "per-speaker subdirectory when several people record.")
@@ -525,7 +591,7 @@ def main():
     print("Vary your tone, speed, distance from mic, etc.")
     print()
     print("  - Press ENTER to start recording")
-    print("  - Capture goes through ffmpeg; --list-devices shows microphones")
+    print(f"  - Capture goes through {args.backend}; --list-devices shows microphones")
     print(f"  - Wait for \"SPEAK NOW!\", then say \"{args.wake_word}\" naturally")
     print("  - Recording lasts 2 seconds; silence is trimmed at training time")
     print("  - Levels are reported after each take; aim for a peak near -12 dBFS")
@@ -568,26 +634,34 @@ def main():
         return
 
     session = []
-    while True:
-        user_input = input(f"[Sample {existing + 1}] Press ENTER to record (q to quit): ")
+    term = Terminal()
+    try:
+        while True:
+            term.restore()                 # undo any mangling by the last take
+            user_input = input(f"[Sample {existing + 1}] Press ENTER to record "
+                               f"(q or Ctrl-C to quit): ")
 
-        if user_input.lower() == 'q':
-            break
+            if user_input.lower() == 'q':
+                break
 
-        print("Get ready...", end=" ", flush=True)
-        time.sleep(0.5)
+            print("Get ready...", end=" ", flush=True)
+            time.sleep(0.5)
 
-        path = output_dir / f"{safe_name}_{index:04d}.wav"
-        if path.exists():                      # never clobber an existing take
-            raise SystemExit(f"Refusing to overwrite {path}")
-        levels = record_sample(str(path), args.device)
+            path = output_dir / f"{safe_name}_{index:04d}.wav"
+            if path.exists():                  # never clobber an existing take
+                raise SystemExit(f"Refusing to overwrite {path}")
+            levels = record_sample(str(path), args.device, args.backend)
 
-        print(f"Saved: {path}")
-        level_report(*levels)
-        session.append(levels)
-        existing += 1
-        index += 1
-        print()
+            print(f"Saved: {path}")
+            level_report(*levels)
+            session.append(levels)
+            existing += 1
+            index += 1
+            print()
+    except (KeyboardInterrupt, EOFError):
+        print()                            # end the half-written prompt line
+    finally:
+        term.restore()                     # never hand back a broken terminal
 
     print(f"\nDone! {existing} total samples in {output_dir}/")
 
