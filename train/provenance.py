@@ -9,11 +9,11 @@
     code    the audio training actually consumed
 
 WHY THE COMMIT ALONE IS NOT ENOUGH. A git hash identifies the code and every file
-git tracks - including wordlists/, requirements.txt and the patches. It says nothing
-about the two inputs this repo deliberately does NOT track, and those are precisely
-the ones that move: the real recordings, and the synthetic corpus generated from a
-TTS server. Two runs at the same commit, one with a third speaker recorded and one
-without, produce different models and were until now indistinguishable by name.
+git tracks - including wordlists/, docker/requirements.txt and the patches. It says
+nothing about the two inputs this repo deliberately does NOT track, and those are
+precisely the ones that move: the real recordings, and the synthetic corpus generated
+from a TTS server. Two runs at the same commit, one with a third speaker recorded and
+one without, produce different models and were until now indistinguishable by name.
 
 So the split is exactly the .gitignore boundary. Everything git tracks is in the
 first half; everything under data/ that git ignores is in the second. Nothing is

@@ -1,15 +1,10 @@
 # microWakeWord trainer - the ESP32 target (ARCHITECTURE.md step 2).
 #
 # SEPARATE FROM THE openWakeWord IMAGE ON PURPOSE, and not by preference: mWW's
-# setup.py requires `numpy>=2.0` while requirements.txt here pins `numpy<2` for
+# setup.py requires `numpy>=2.0` while docker/requirements.txt pins `numpy<2` for
 # openWakeWord and torch. They cannot coexist in one environment. That turns out to be
 # the better arrangement anyway - it keeps a numpy-2 TensorFlow stack away from the
 # image whose behaviour seventeen tuning runs are calibrated against.
-#
-# Base is the TensorFlow GPU image rather than nvidia/cuda + pip tensorflow, because
-# the CUDA/cuDNN pairing is already solved in it, and because it is the stack proven
-# on this training server. Contrast Dockerfile.piper, which needs a cuDNN base only
-# because onnxruntime-gpu has nothing else to borrow from - see the note there.
 
 FROM tensorflow/tensorflow:2.21.0-gpu
 
@@ -33,28 +28,14 @@ RUN git clone https://github.com/OHF-Voice/micro-wake-word /opt/micro-wake-word 
     && pip install --no-cache-dir -e .
 
 # THE CUDA LIBRARIES, WHICH THE -gpu IMAGE DOES NOT ACTUALLY CONTAIN.
-#
-# tensorflow/tensorflow:*-gpu ships TensorFlow BUILT for GPU but not the CUDA/cuDNN
-# runtime, so a container started with --gpus reports:
-#
-#   Failed to determine cuDNN version ... CUDNN_STATUS_INTERNAL_ERROR
-#   Cannot dlopen some GPU libraries ... Skipping registering GPU devices
-#
-# and trains on CPU without failing. The libraries come from the `[and-cuda]` extra
-# as nvidia-* pip wheels. Same version, so this adds the CUDA stack rather than
-# changing TensorFlow.
-#
 # WHETHER IT IS FASTER IS UNMEASURED. The CPU baseline is ~46 s per 500 steps on a
 # 25,537-parameter model - about 15 minutes for a 10,000-step run. A model this small
-# may not fill a GPU, and the Piper investigation in docker-compose.yml is a standing
-# reminder that "the GPU initialised" and "the GPU helped" are different claims.
-# Measure against the baseline before assuming this earned its ~3 GB.
+# may not fill a GPU.
 RUN pip install --no-cache-dir "tensorflow[and-cuda]==2.21.0"
 
 # Register the pip-shipped CUDA libraries with the dynamic linker. They install under
 # site-packages/nvidia/*/lib, which is not on the default search path, so without this
-# the wheels are present and still cannot be dlopen'd. Discovered from the installed
-# package rather than hardcoded, since the path moves with the Python version.
+# the wheels are present and still cannot be dlopen'd.
 RUN python3 -c "\
 import os, nvidia; \
 p = os.path.dirname(nvidia.__file__); \
@@ -76,17 +57,6 @@ print('libcudnn loads:', os.path.basename(libs[-1]))"
 #
 # microWakeWord loads clips through `datasets.Audio()` (audio/clips.py:136-142), and
 # datasets 4.x moved audio decoding to torchcodec:
-#
-#   ImportError: To support decoding audio data, please install 'torchcodec'.
-#
-# mWW's setup.py requires `datasets` unpinned, so a fresh build gets 4.x and fails at
-# the first clip - after building the model and loading the config, which makes it
-# look like a training problem rather than a dependency one.
-#
-# Pinning is the cheap fix. torchcodec would pull torch and FFmpeg shared libraries
-# into an image that needs neither: this trainer is TensorFlow, and nothing here uses
-# torch for anything. 3.6 decodes with soundfile and resamples with librosa, both of
-# which resolve against the numpy 2 that mWW requires.
 #
 # tensorboard is needed even though nothing here looks at TensorBoard. mWW's
 # training loop calls `tf.summary.scalar` every eval_step_interval steps
@@ -131,14 +101,6 @@ print('ai-edge-litert OK')"
 # directory over the top, so editing a trainer does not mean rebuilding a CUDA image:
 # the copy is what the build verified, the mount is what actually runs.
 COPY train/ ./train/
-
-# scripts/ IS ONLY MOUNTED, never copied. Nothing in this build depends on it, and a
-# shell script needing an image rebuild to fix a typo is the liability
-# Dockerfile.eval already calls out. Run the downloader here with the `mww` target:
-# that one needs only curl and unzip, which this image has, while `oww` and `all`
-# resample audio through Python `datasets` and must run in the trainer image.
-#
-#     docker compose run --rm mww ./scripts/download-external-data.sh mww
 
 RUN python3 -c "import train.corpus.augment, train.corpus.negatives, \
                        train.corpus.real, train.corpus.piper"

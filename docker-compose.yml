@@ -248,7 +248,7 @@ services:
   trainer:
     build:
       context: .
-      dockerfile: docker/Dockerfile
+      dockerfile: docker/Dockerfile.oww
     deploy:
       resources:
         reservations:

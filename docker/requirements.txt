@@ -1,0 +1,88 @@
+# Dependencies for the openWakeWord TRAINER IMAGE (docker/Dockerfile.oww) only.
+#
+# Named requirements.txt for the editor support that name carries, not because it
+# is the repo's requirements - it sits in docker/ beside the one Dockerfile that
+# COPIes it, and this header is what says which. docker/Dockerfile.mww has no
+# counterpart on purpose: its three installs are order-dependent against the
+# microwakeword source install, so a requirements file could not express them.
+#
+# Not the mww image, which installs microwakeword's own deps and pins numpy>=2
+# against the numpy<2 below. Not record/ or preflight/ either - those are host uv
+# environments with their own pyproject.toml, deliberately free of this stack.
+#
+# NOTHING HERE IS FOR RECORDING OR PLAYBACK. This image has no microphone and never
+# opens one: `pyaudio` used to be listed, but the only things that import it are
+# openWakeWord's examples/ (detect_from_microphone.py and friends), which nothing in
+# this pipeline runs. Recording is record/record_samples.py, on the host.
+
+# Core training dependencies
+scipy
+numpy<2
+pyarrow>=8.0.0,<15.0.0
+tqdm
+pyyaml
+requests
+
+# Training pipeline (used by OpenWakeWord's train.py)
+mutagen==1.47.0
+torchinfo==1.8.0
+torchmetrics==1.2.0
+speechbrain==0.5.14
+audiomentations==0.33.0
+torch-audiomentations==0.11.0
+acoustics==0.2.6
+pronouncing==0.2.0
+datasets==2.14.6
+deep-phonemizer==0.0.19
+
+# Data download/processing.
+#
+# `datasets` above is what download-external-data.sh resamples MIT RIRs, AudioSet and
+# FMA through, so it is load-bearing outside training too.
+#
+# TWO THINGS USED TO LIVE HERE AND DO NOT BELONG:
+#   piper-phonemize - the only Piper import in openWakeWord's train.py is the one
+#                     patches/skip-piper-import.py deletes, and this repo's Piper
+#                     support (train/corpus/piper.py) talks Wyoming over a socket to
+#                     the piper SERVICE. Nothing in this image phonemises locally.
+#   webrtcvad       - microWakeWord's silence trimming, in the mww image, which does
+#                     not read this file. train/mww/config.py disables it anyway
+#                     (remove_silence: False) because corpus/augment.py has already
+#                     trimmed with a method calibrated on this corpus.
+
+# ONNX -> tflite conversion, for onnx2tflite.py.
+#
+# Replaces the tensorflow-cpu==2.8.1 / tensorflow_probability / onnx_tf trio
+# that openWakeWord's setup.py asks for in its extras. That stack never worked
+# here (2.8.1 against protobuf >= 3.20) - which is why onnx2tflite.py exists -
+# so it was ~500MB of dead weight in the image.
+#
+# `tensorflow`, NOT `tensorflow-cpu`, even though this step is CPU-only.
+# onnx2tf's own requirement is `tensorflow>=2.21,<2.22`, and pip satisfies that
+# with the `tensorflow` DISTRIBUTION specifically - asking for tensorflow-cpu
+# gets you both, two distributions writing the same `tensorflow/` package, with
+# whichever lands last winning. The plain wheel is safe here: CUDA libraries
+# arrive only via the `tensorflow[and-cuda]` extra, so no nvidia-* wheels are
+# pulled and nothing disturbs the ones the Dockerfile points onnxruntime-gpu's
+# loader at. Verified by dry-run resolve on python:3.10-slim: no nvidia-*, and
+# numpy holds at 1.26.4 under the `numpy<2` pin above.
+#
+# Only tensorflow is pinned, to the version proven on the training server.
+# onnx2tf tracks TensorFlow releases closely and is left floating; it is checked
+# by onnx2tflite.py, which scores every candidate conversion against the source
+# ONNX and refuses to write a model that disagrees, so a bad combination fails
+# loudly at conversion time rather than shipping.
+#
+# ONLY WHAT onnx2tf DOES NOT ALREADY PIN. Its own requires include exact pins for
+# onnx==1.20.1, sng4onnx==2.0.1 and psutil==5.9.5, so listing those unpinned here
+# added nothing except a resolver step that installs one version and then replaces
+# it. onnx-graphsurgeon and tf_keras are NOT in its requires and some conversion
+# paths need them, so they stay.
+tensorflow==2.21.0
+onnx2tf
+onnx-graphsurgeon
+tf_keras
+# Declared by openWakeWord and by onnx2tf, kept explicit because this repo imports it
+# directly: eval/check_model_alignment.py reads a .tflite through it, and the eval
+# image deliberately does not carry it - the trainer image is where that path runs.
+ai-edge-litert
