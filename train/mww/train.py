@@ -122,7 +122,8 @@ def main():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--wake-word", default="hey seeree")
     p.add_argument("--ambient", nargs="*", default=[],
-                   help="RaggedMmap dirs from setup-mww-data.sh, under data/external/")
+                   help="RaggedMmap dirs from `download-external-data.sh mww`, "
+                        "under data/external/mww_ambient/")
     p.add_argument("--corpus-root", default="data/corpus")
     p.add_argument("--data-dir", default="data/external")
     p.add_argument("--output-dir", default="output")

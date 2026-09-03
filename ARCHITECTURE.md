@@ -110,8 +110,7 @@ far.
 │   ├── Dockerfile.kokoro
 │   └── Dockerfile.eval
 ├── scripts/
-│   ├── download-external-data.sh  -> data/external/, ~17 GB, run once
-│   ├── setup-mww-data.sh          -> data/external/mww_ambient/, ~5.7 GB
+│   ├── download-external-data.sh  -> data/external/  [all|oww|mww]
 │   └── run-training.sh
 ├── docker-compose.yml            CPU by default, so eval runs anywhere
 └── docker-compose.gpu.yml        overlay: nvidia for the TTS servers, on the trainer

@@ -127,8 +127,13 @@ print('ai-edge-litert OK')"
 # different frontend downstream. mWW reads them through Clips(input_directory, ...),
 # so nothing needs converting.
 COPY train/ ./train/
-COPY scripts/setup-mww-data.sh .
-RUN chmod +x setup-mww-data.sh
+# The same script the trainer image carries. Run it here with the `mww` target:
+# that one needs only curl and unzip, which this image has, while `oww` and `all`
+# resample audio through Python `datasets` and must run in the trainer image.
+#
+#     docker compose run --rm mww ./download-external-data.sh mww
+COPY scripts/download-external-data.sh .
+RUN chmod +x download-external-data.sh
 
 RUN python3 -c "import train.corpus.augment, train.corpus.negatives, \
                        train.corpus.real, train.corpus.piper"
