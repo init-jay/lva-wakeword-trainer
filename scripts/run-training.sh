@@ -213,8 +213,26 @@ TAGGED="output/${SAFE_NAME}/oww/${SAFE_NAME}_${TAG}.onnx"
 mkdir -p "$(dirname "$TAGGED")"
 cp "$MODEL" "$TAGGED"
 
+# The .tflite gets THE SAME TAG, from the same run. train.py converts it straight
+# after export, so it is derived from exactly this .onnx - and a tagged .onnx beside
+# an untagged .tflite is how a model and its conversion drift apart, which is
+# precisely the mix-up eval/backends.py warns about when it says the two are not
+# guaranteed to agree. Absent if the conversion failed; that is not fatal here, the
+# .onnx is the artifact everything else works from.
+TFLITE="${MODEL%.onnx}.tflite"
+TAGGED_TFLITE="${TAGGED%.onnx}.tflite"
+if [[ -f "$TFLITE" ]]; then
+    cp "$TFLITE" "$TAGGED_TFLITE"
+else
+    echo "    NOTE: no $TFLITE - conversion did not run or failed. Produce it with"
+    echo "          docker compose run --rm oww-trainer \\"
+    echo "              python -m train.oww.onnx2tflite $TAGGED"
+fi
+
 echo "=== $(date '+%H:%M:%S')  DONE"
 echo "    $TAGGED  ($(du -h "$TAGGED" | cut -f1), md5 ${AFTER_SUM:0:8})"
+[[ -f "$TAGGED_TFLITE" ]] && \
+    echo "    $TAGGED_TFLITE  ($(du -h "$TAGGED_TFLITE" | cut -f1), verified against the .onnx)"
 [[ -n "$DIRTY" ]] && echo "    NOTE: working tree was dirty - the code half of $TAG is not reproducible"
 echo
 echo "    scp to the eval machine, then:"
