@@ -663,6 +663,85 @@ def generate_runon_samples(pool: "KokoroPool", voices: list, output_dir: Path,
 # corpus/real.py and corpus/augment.py, imported above.
 
 
+def convert_to_tflite(model_path: Path):
+    """Convert the exported .onnx with this repo's converter. Returns the path or None.
+
+    UPSTREAM'S CONVERSION CANNOT RUN HERE, AND IS NOT MEANT TO. openwakeword's
+    train.py finishes by calling convert_onnx_to_tflite, which imports onnx_tf -
+    part of the tensorflow-cpu 2.8.1 / tensorflow_probability / onnx_tf trio this
+    image deliberately does not install, because it never resolved against
+    protobuf >= 3.20. So it raises ModuleNotFoundError and openwakeword exits 1
+    AFTER the .onnx is safely written. That is the whole reason the freshness check
+    above exists rather than trusting the exit code.
+
+    Doing it here means the .tflite arrives in the same run, from the converter that
+    actually VERIFIES the result: onnx2tflite tries each axis adaptation, scores it
+    against the source ONNX on random inputs, and refuses to write a model that
+    disagrees. That check is not optional care - onnx2tf's output axis order varies
+    by version, and a wrong-axis tflite loads cleanly, reports a plausible input
+    shape and returns plausible 0-1 scores while detecting nothing at all.
+
+    A FAILURE HERE DOES NOT FAIL THE RUN. The .onnx is what eval/ and
+    run-training.sh work with; the .tflite is for preflight and the deployment
+    runtime, and it can be produced later from the same .onnx without retraining.
+    """
+    tflite_path = model_path.with_suffix(".tflite")
+    print(f"Converting to tflite: {tflite_path.name}")
+    try:
+        # Imported here, not at module scope: it pulls in tensorflow, which costs
+        # seconds and is needed by nothing else in this file.
+        from train.oww.onnx2tflite import convert
+        diff = convert(model_path, tflite_path)
+        print(f"  verified against the source ONNX, max diff {diff:.2e}")
+        return tflite_path
+    except Exception as exc:                                         # noqa: BLE001
+        print(f"  WARNING: tflite conversion failed - {type(exc).__name__}: {exc}")
+        print("  The .onnx is unaffected and is this run's model. Convert later with:")
+        print(f"    python -m train.oww.onnx2tflite {model_path}")
+        return None
+
+
+def hand_back_output_tree():
+    """Give output/ back to whoever owns the mount, so the host can use it.
+
+    THE CONTAINER RUNS AS ROOT AND THE HOST DOES NOT. Every file training writes
+    under output/ therefore lands root-owned on the host, and the first thing that
+    touches it fails:
+
+        cp: cannot create regular file
+            'output/hey_seeree/oww/hey_seeree_<tag>.onnx': Permission denied
+
+    That is run-training.sh copying the model to its commit-tagged name, on the
+    host, after a successful run - the most annoying possible moment. The same wall
+    is hit by scp'ing a model off the box, or deleting an old one, and it is the
+    same root-ownership problem that made `mv` refuse on the ambient data sets.
+
+    The desired owner is not guessed or passed in: output/ is a bind mount, so the
+    directory itself already carries the host user's uid/gid. Read it from there and
+    apply it downward. Best-effort - a failure here must not fail a run that has
+    already produced a model.
+    """
+    root = WORK_DIR / "output"
+    try:
+        info = root.stat()
+        uid, gid = info.st_uid, info.st_gid
+        if uid == os.geteuid():
+            return                      # already ours; nothing to do
+        changed = 0
+        for path in root.rglob("*"):
+            try:
+                if path.stat().st_uid != uid:
+                    os.chown(path, uid, gid)
+                    changed += 1
+            except OSError:
+                continue
+        if changed:
+            print(f"  handed {changed} file(s) under output/ back to uid {uid}")
+    except OSError as exc:                                           # noqa: BLE001
+        print(f"  NOTE: could not adjust ownership under {root}: {exc}")
+        print("        The host may need sudo to move or delete these files.")
+
+
 def setup_training_dirs(wake_word: str) -> Path:
     """Set up training directory structure.
 
@@ -1185,15 +1264,20 @@ def main():
 
     if returncode != 0:
         print(f"NOTE: openwakeword's train.py exited {returncode}, but the model was")
-        print("written. This is normally the tflite conversion failing after the .onnx")
-        print("is already saved - see 'TFLite conversion error at end' in the README.")
-        print("Convert with onnx2tflite.py instead, which verifies the result.")
+        print("written. Its own tflite conversion cannot run in this image - see")
+        print("convert_to_tflite() below, which does it properly straight after.")
         print("=" * 60)
 
     print("TRAINING COMPLETE!")
     print("=" * 60)
+
+    tflite_path = convert_to_tflite(model_path)
+    hand_back_output_tree()
+
     size_kb = model_path.stat().st_size / 1024
     print(f"Model: {model_path} ({size_kb:.0f}KB)")
+    if tflite_path:
+        print(f"       {tflite_path} ({tflite_path.stat().st_size / 1024:.0f}KB)")
     print(f"\nTest with: python test_model.py --model {model_path}")
 
 
