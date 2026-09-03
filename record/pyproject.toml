@@ -14,6 +14,7 @@ requires-python = ">=3.10"
 dependencies = [
     "numpy",
     "pyaudio",
+    "scipy",                # check_alignment.py, which runs on the host beside it
 ]
 
 [tool.uv]

@@ -53,6 +53,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 RECORDINGS_DIR = REPO_ROOT / "data" / "recordings"
 SAMPLES_DIR = RECORDINGS_DIR / "samples"
 
+# Holdout clips are evaluated against and NEVER trained on, which is the one thing
+# the pipeline's shape is built around: a model scored on clips it was trained on
+# reports a number that means nothing. That guarantee is positional - holdout/ is a
+# SIBLING of samples/, not a subdirectory - because the trainer globs the samples
+# tree recursively for positives and would swallow anything nested inside it.
+HOLDOUT_DIR = RECORDINGS_DIR / "holdout"
+
 # Unsplit recordings go OUTSIDE data/recordings/samples/. train.py globs that tree
 # recursively for positives, so a three-minute raw file left there becomes a
 # training positive - and after trimming, only its first 2 s survives, which is a
@@ -82,11 +89,18 @@ def raw_dir_for(output_dir: Path) -> Path:
     data/recordings/samples/speaker1 -> data/recordings/raw/speaker1. Outside the
     samples tree entirely, because train.py searches that tree recursively for
     positives.
+
+    Holdout raws mirror under raw/holdout/ rather than alongside the training raws.
+    Keeping the two apart is what makes a raw file re-segmentable later without
+    having to remember which side it came from - and a holdout raw re-cut into the
+    training set is exactly the leak the holdout exists to prevent.
     """
-    try:
-        return RAW_DIR / output_dir.resolve().relative_to(SAMPLES_DIR.resolve())
-    except ValueError:
-        return RAW_DIR
+    for base, prefix in ((SAMPLES_DIR, ""), (HOLDOUT_DIR, "holdout")):
+        try:
+            return RAW_DIR / prefix / output_dir.resolve().relative_to(base.resolve())
+        except ValueError:
+            continue
+    return RAW_DIR
 
 
 class Terminal:
@@ -529,6 +543,31 @@ def session_summary(session):
         print("  every sample in the set shares whatever level you record it at.")
 
 
+def resolve_output_dir(args) -> Path:
+    """Pick the directory to record into from --holdout / --speaker / --output-dir.
+
+    An explicit --output-dir wins, since a caller who spelled out a path meant it.
+    But combining it with --holdout is rejected rather than resolved: the two
+    disagree about where the clips go, and quietly honouring one of them is how a
+    holdout ends up inside the training set. The check is on the resolved path, not
+    on the flag, so `--holdout --output-dir <somewhere under holdout/>` is allowed -
+    that pair agrees.
+    """
+    base = HOLDOUT_DIR if args.holdout else SAMPLES_DIR
+
+    if args.output_dir is not None:
+        chosen = Path(args.output_dir)
+        if args.holdout and not chosen.resolve().is_relative_to(HOLDOUT_DIR.resolve()):
+            raise SystemExit(
+                f"--holdout wants {HOLDOUT_DIR}, but --output-dir says {chosen}.\n"
+                f"Drop one of them, or point --output-dir inside {HOLDOUT_DIR}.")
+        if args.speaker:
+            raise SystemExit("Pass either --speaker or --output-dir, not both.")
+        return chosen
+
+    return base / args.speaker if args.speaker else base
+
+
 def main():
     parser = argparse.ArgumentParser(description="Record voice samples for wake word training")
     parser.add_argument("--wake-word", default="hey seeree", help="Wake word you're recording")
@@ -537,9 +576,20 @@ def main():
                              "data/recordings/raw/, mirroring the speaker "
                              "subdirectory). Kept out of data/recordings/samples/ so "
                              "the trainer never picks a raw file up as a positive.")
-    parser.add_argument("--output-dir", default=str(SAMPLES_DIR),
-                        help="Output directory (default: %(default)s). Use a "
+    parser.add_argument("--output-dir", default=None,
+                        help=f"Output directory (default: {SAMPLES_DIR}, or the "
+                             "matching holdout directory with --holdout). Use a "
                              "per-speaker subdirectory when several people record.")
+    parser.add_argument("--holdout", action="store_true",
+                        help="Record into data/recordings/holdout/ instead. These "
+                             "clips are evaluated against and never trained on, so "
+                             "record them in the same session as the training clips "
+                             "- a holdout captured weeks later on a different mic "
+                             "measures the setup as much as the model.")
+    parser.add_argument("--speaker", default=None,
+                        help="Speaker subdirectory to record into, under whichever "
+                             "of samples/ or holdout/ applies. Shorthand for "
+                             "spelling out the full --output-dir.")
     parser.add_argument("--backend", choices=["pyaudio", "ffmpeg"], default="pyaudio",
                         help="Capture library (default: %(default)s). ffmpeg is kept "
                              "as a fallback for hosts without PortAudio, but its "
@@ -578,13 +628,16 @@ def main():
         list_devices(args.backend)
         return
 
-    output_dir = Path(args.output_dir)
+    output_dir = resolve_output_dir(args)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     safe_name = args.wake_word.replace(" ", "_").lower()
 
     print("=" * 50)
     print(f"Voice Sample Recorder - \"{args.wake_word}\"")
+    if args.holdout:
+        print("HOLDOUT - these clips are evaluated against, never trained on.")
+        print("Record them in the same session as the training clips.")
     print("=" * 50)
     print()
     print("Record at least 20-50 samples for best results.")
