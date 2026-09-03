@@ -1232,7 +1232,7 @@ def main():
     print("=" * 60)
 
     tflite_path = convert_to_tflite(model_path)
-    ownership.hand_back(WORK_DIR / "output")
+    ownership.hand_back(WORK_DIR / "output", work_dir=WORK_DIR)
 
     size_kb = model_path.stat().st_size / 1024
     print(f"Model: {model_path} ({size_kb:.0f}KB)")

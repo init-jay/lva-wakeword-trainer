@@ -265,7 +265,7 @@ def main():
     # Give the run directory back to the host user before anything on the host has
     # to touch it - the collection step in run-mww-training.sh copies these files
     # out, and would otherwise hit Permission denied. See train/ownership.py.
-    ownership.hand_back(Path(args.output_dir))
+    ownership.hand_back(Path(args.output_dir), work_dir=Path.cwd())
 
     size_kb = model_path.stat().st_size / 1024
     print(f"\nDONE  {model_path}  ({size_kb:.0f} KB, md5 {after[:8]})")
