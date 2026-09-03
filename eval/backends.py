@@ -62,7 +62,7 @@ were ever converted. `OpenWakeWordOnnxBackend` scores those through
 `openwakeword.model.Model`, the path all seventeen tuning runs were measured on.
 It is comparability with the notebook, NOT a deployment measurement, and `describe()`
 says so on every report. To measure a `.onnx` candidate as it would actually run,
-convert it first with `onnx2tflite.py` and score the `.tflite`.
+convert it first with `train/oww/onnx2tflite.py` and score the `.tflite`.
 """
 
 import argparse
@@ -106,6 +106,41 @@ class Backend:
         scores, offsets = self._stream(audio)
         return np.asarray(scores, dtype=np.float64), np.asarray(offsets, dtype=np.int64)
 
+    # --- incremental interface ---------------------------------------------------
+    #
+    # `start` + `feed` are how the runtime is actually driven; `_stream` below is
+    # just those two in a loop over a fixed clip. Split out so that LIVE detection
+    # (preflight/test_model.py, microphone, no end) and OFFLINE scoring (eval, whole
+    # clips) go through one implementation rather than two. Which matters here more
+    # than it usually would: an earlier version of this file reimplemented the
+    # runtime and got it subtly wrong, and a preflight that streams differently from
+    # the harness would be measuring a third thing again.
+
+    def start(self):
+        """Reset the model and rebuild the feature extractor. Call before feeding."""
+        raise NotImplementedError
+
+    def feed(self, pcm_bytes):
+        """Probabilities produced by one `chunk_samples` chunk of int16 PCM bytes.
+
+        Returns a list because a chunk yields zero, one or several probabilities
+        depending on how the frontend buffers - never assume one in, one out.
+        """
+        raise NotImplementedError
+
+    def _stream(self, audio):
+        """Offline scoring: start once, then feed the clip a chunk at a time."""
+        self.start()
+        scores, offsets, consumed = [], [], 0
+        raw = audio.tobytes()
+        step = self.chunk_samples * 2
+        for start in range(0, len(raw) - step + 1, step):
+            consumed += self.chunk_samples
+            for prob in self.feed(raw[start:start + step]):
+                scores.append(prob)
+                offsets.append(consumed)
+        return scores, offsets
+
     def describe(self):
         raise NotImplementedError
 
@@ -145,25 +180,21 @@ class MicroWakeWordBackend(Backend):
         self.label = self.path.stem
         self.sliding_window_size = self.model.sliding_window_size
 
-    def _stream(self, audio):
+    def start(self):
         # reset() reloads the model - see the module docstring. Without it a clip's
         # score depends on the clip before it, and nothing about the result looks wrong.
         self.model.reset()
-        features = self._Features()
+        self._features = self._Features()
 
-        scores, offsets, consumed = [], [], 0
-        raw = audio.tobytes()
-        step = self.chunk_samples * 2
-        for start in range(0, len(raw) - step + 1, step):
-            consumed += self.chunk_samples
-            for window in features.process_streaming(raw[start:start + step]):
-                # The probability the runtime compares against probability_cutoff:
-                # the model's own sliding-window mean, already dequantized.
-                prob = self.model.process_streaming_prob(window)
-                if prob is not None:
-                    scores.append(prob)
-                    offsets.append(consumed)
-        return scores, offsets
+    def feed(self, pcm_bytes):
+        out = []
+        for window in self._features.process_streaming(pcm_bytes):
+            # The probability the runtime compares against probability_cutoff:
+            # the model's own sliding-window mean, already dequantized.
+            prob = self.model.process_streaming_prob(window)
+            if prob is not None:
+                out.append(prob)
+        return out
 
     def describe(self):
         source = "manifest" if self.from_manifest else "bare tflite"
@@ -189,23 +220,18 @@ class OpenWakeWordBackend(Backend):
         self._Features = OpenWakeWordFeatures
         self.model = OpenWakeWord.from_model(self.path)
 
-    def _stream(self, audio):
+    def start(self):
         # Stateless model; reset() clears the embedding ring buffer, which is all the
         # state there is. The feature extractor is rebuilt per clip for the same
         # reason it is for mWW: it buffers audio across calls.
         self.model.reset()
-        features = self._Features.from_builtin()
+        self._features = self._Features.from_builtin()
 
-        scores, offsets, consumed = [], [], 0
-        raw = audio.tobytes()
-        step = self.chunk_samples * 2
-        for start in range(0, len(raw) - step + 1, step):
-            consumed += self.chunk_samples
-            for embedding in features.process_streaming(raw[start:start + step]):
-                for prob in self.model.process_streaming(embedding):
-                    scores.append(prob)
-                    offsets.append(consumed)
-        return scores, offsets
+    def feed(self, pcm_bytes):
+        out = []
+        for embedding in self._features.process_streaming(pcm_bytes):
+            out.extend(self.model.process_streaming(embedding))
+        return out
 
     def describe(self):
         return "openWakeWord via pyopen-wakeword (LVA deployment runtime), tflite"
@@ -240,6 +266,19 @@ class OpenWakeWordOnnxBackend(Backend):
         scores = [f[self.name] for f in frames]
         offsets = (np.arange(len(scores)) + 1) * self.chunk_samples
         return scores, offsets
+
+    # predict_clip() wants a whole clip, so this backend has no incremental form.
+    # No loss for preflight: a live check exists to exercise what the device runs,
+    # and this path deliberately is not that. Convert with train/oww/onnx2tflite.py
+    # and preflight the .tflite instead.
+    def start(self):
+        raise NotImplementedError(
+            "the .onnx path scores whole clips and cannot stream live. It is also "
+            "not the deployment runtime - convert with train/oww/onnx2tflite.py "
+            ".tflite, which is what the device would run.")
+
+    def feed(self, pcm_bytes):
+        raise NotImplementedError(self.start.__doc__)
 
     def describe(self):
         return (f"openWakeWord via openwakeword.model.Model ({self.framework}) - "

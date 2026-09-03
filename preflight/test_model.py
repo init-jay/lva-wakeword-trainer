@@ -1,37 +1,71 @@
 #!/usr/bin/env python3
 """
-Test a trained OpenWakeWord model with microphone input.
+Step 4 - listen to a trained wake word live, through the microphone.
 
-Capture goes through ffmpeg's avfoundation input, so no PortAudio/PyAudio or other
-system packages are required. Only numpy and openwakeword are needed.
+RUNS ON THE HOST, IN ITS OWN uv ENVIRONMENT, for the same reason recording does: it
+needs the mic. Nothing here is containerised.
 
-Usage:
-    python test_model.py --list-devices
-    python test_model.py --model ../output/hey_seeree/oww/hey_seeree_705c23b.onnx
-    python test_model.py --model ../output/hey_seeree/oww/hey_seeree_705c23b.onnx \\
-        --threshold 0.3
+    cd preflight
+    uv run test_model.py --list-devices
+    uv run test_model.py --model ../output/hey_seeree/oww/hey_seeree_705c23b.tflite
+    uv run test_model.py --model ../output/hey_seeree/mww/hey_seeree_705c23b.json
 
-Runs on the HOST, not in the eval image - it needs the microphone - so the paths
-above are relative to preflight/, the directory you run it from.
+WHY THIS IS NOT JUST ANOTHER EVAL RUN. The harness in eval/ scores recordings: fixed
+clips, padded with room tone, one model at a time. This scores YOUR ROOM - its noise
+floor, its reverb, your mic's gain and placement, and you actually speaking rather
+than a clip of you speaking. Every one of those is a variable the corpus does not
+contain, and the gates cannot see. A model that passes eval/ and fails here has not
+regressed; it has met a condition nothing upstream measured.
+
+IT RUNS THE DEPLOYMENT RUNTIME, and shares that code with the eval harness rather than
+reimplementing it - `eval/backends.py` holds the one implementation, and this drives
+it incrementally via start()/feed() instead of over whole clips. Reimplementing the
+streaming here is how you end up preflighting a third pipeline that nothing ships;
+that mistake is already recorded at the top of backends.py.
+
+    .tflite / .json    the deployment runtime, what the device runs      <- preflight this
+    .onnx              the tuning-run path, whole clips only             <- refused
+
+THE THRESHOLD IS THE POINT OF THE EXERCISE. Say the phrase ten or twenty times, at the
+distance and volume you would really use, and watch `peak`. A model whose peaks sit
+just under your threshold is not broken - it is telling you the operating point is
+wrong for this room. For a microWakeWord .json the cutoff comes from the manifest, so
+running it here also puts that manifest under test.
 """
 
 import argparse
-import os
 import re
 import subprocess
+import sys
 import time
+from pathlib import Path
 
 import numpy as np
-from openwakeword.model import Model
+
+# The repo root, so `eval.backends` imports: preflight/ is one level down.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from eval import backends  # noqa: E402
 
 RATE = 16000
-CHUNK = 1280                   # 80ms at 16kHz - the frame size OpenWakeWord expects
-CHUNK_BYTES = CHUNK * 2        # 16-bit mono
-WARMUP = 0.6                   # seconds avfoundation needs to open the mic
+WARMUP = 0.6            # seconds avfoundation needs to open the mic
+STATUS_EVERY = 2.0      # seconds between level/peak lines while nothing fires
 
 
-def list_devices():
-    """Print avfoundation audio input devices and their numbers."""
+def list_devices(backend: str):
+    """Print input devices. Numbering is PER BACKEND - list with the one you record with."""
+    if backend == "pyaudio":
+        import pyaudio
+
+        pa = pyaudio.PyAudio()
+        print("Audio input devices (use the number with --device):")
+        for i in range(pa.get_device_count()):
+            info = pa.get_device_info_by_index(i)
+            if int(info.get("maxInputChannels", 0)) > 0:
+                print(f"  {i}: {info['name']}")
+        pa.terminate()
+        return
+
     out = subprocess.run(
         ["ffmpeg", "-hide_banner", "-f", "avfoundation", "-list_devices", "true", "-i", ""],
         capture_output=True, text=True,
@@ -42,116 +76,191 @@ def list_devices():
         return
     print("Audio input devices (use the number with --device):")
     for line in audio[1].splitlines():
-        m = re.search(r"\[(\d+)\]\s+(.*)", line)
-        if m:
-            print(f"  {m.group(1)}: {m.group(2).strip()}")
+        match = re.search(r"\[(\d+)\]\s+(.*)", line)
+        if match:
+            print(f"  {match.group(1)}: {match.group(2).strip()}")
 
 
-def open_stream(device: str) -> subprocess.Popen:
-    """Spawn ffmpeg streaming raw 16kHz mono 16-bit PCM to stdout."""
-    cmd = [
-        "ffmpeg", "-hide_banner", "-loglevel", "error",
-        "-f", "avfoundation", "-i", f":{device}",
-        "-ar", str(RATE), "-ac", "1",
-        "-f", "s16le", "-",
-    ]
-    return subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+class PyAudioSource:
+    """PortAudio capture. Default because ffmpeg's produced audible clicks in record/."""
+
+    def __init__(self, device, chunk_samples):
+        import pyaudio
+
+        self.chunk_samples = chunk_samples
+        self._pa = pyaudio.PyAudio()
+        self._stream = self._pa.open(
+            format=pyaudio.paInt16, channels=1, rate=RATE, input=True,
+            input_device_index=int(device) if device is not None else None,
+            frames_per_buffer=chunk_samples)
+
+    def read(self):
+        # exception_on_overflow=False: an overflow costs a chunk, and raising would
+        # end a session that is otherwise fine. The status line shows the level, so a
+        # dead stream is still visible.
+        return self._stream.read(self.chunk_samples, exception_on_overflow=False)
+
+    def close(self):
+        self._stream.stop_stream()
+        self._stream.close()
+        self._pa.terminate()
 
 
-def read_exact(pipe, nbytes: int):
-    """Read exactly nbytes from a pipe. Returns None if the stream ends.
+class FfmpegSource:
+    """avfoundation fallback, for a host without PortAudio."""
 
-    A pipe read can come back short, so this loops - handing OpenWakeWord a
-    partial frame would silently corrupt its rolling feature buffer.
-    """
-    buf = b""
-    while len(buf) < nbytes:
-        chunk = pipe.read(nbytes - len(buf))
-        if not chunk:
-            return None
-        buf += chunk
-    return buf
+    def __init__(self, device, chunk_samples):
+        self.chunk_samples = chunk_samples
+        self.nbytes = chunk_samples * 2
+        self._proc = subprocess.Popen(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+             "-f", "avfoundation", "-i", f":{device}",
+             "-ar", str(RATE), "-ac", "1", "-f", "s16le", "-"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        time.sleep(WARMUP)
+        if self._proc.poll() is not None:
+            stderr = (self._proc.stderr.read().decode(errors="replace")
+                      if self._proc.stderr else "")
+            raise SystemExit(
+                "ffmpeg could not open the microphone. On a first run macOS may need "
+                "microphone permission for your terminal (System Settings > Privacy & "
+                "Security > Microphone).\n\n" + stderr)
+
+    def read(self):
+        """Exactly one chunk. A short read would desync the frontend's buffer."""
+        buf = b""
+        while len(buf) < self.nbytes:
+            piece = self._proc.stdout.read(self.nbytes - len(buf)) if self._proc.stdout else b""
+            if not piece:
+                return None
+            buf += piece
+        return buf
+
+    def close(self):
+        self._proc.terminate()
+        try:
+            self._proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            self._proc.kill()
+
+
+def dbfs(pcm: np.ndarray) -> float:
+    peak = float(np.abs(pcm).max()) / 32768.0
+    return 20.0 * np.log10(peak) if peak > 0 else -99.0
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Test a wake word model with microphone")
-    parser.add_argument("--model", help="Path to .onnx model file")
-    parser.add_argument("--threshold", type=float, default=0.5, help="Detection threshold (0.0-1.0)")
-    parser.add_argument("--device", default="0", help="avfoundation audio device number")
-    parser.add_argument("--list-devices", action="store_true", help="List microphones and exit")
+    parser = argparse.ArgumentParser(
+        description="Listen to a trained wake word model through the microphone",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--model", help=".tflite or microWakeWord .json")
+    parser.add_argument("--threshold", type=float, default=None,
+                        help="Detection threshold. Default: the manifest's cutoff for "
+                             "a microWakeWord .json, else 0.5")
+    parser.add_argument("--backend", choices=["pyaudio", "ffmpeg"], default="pyaudio",
+                        help="Capture library (default: %(default)s)")
+    parser.add_argument("--device", default=None,
+                        help="Input device number; numbering is per --backend")
+    parser.add_argument("--sliding-window-size", type=int, default=None,
+                        help="microWakeWord only: override the manifest's window")
+    parser.add_argument("--list-devices", action="store_true")
     args = parser.parse_args()
 
     if args.list_devices:
-        list_devices()
+        list_devices(args.backend)
         return
     if not args.model:
         parser.error("--model is required (or pass --list-devices)")
-
-    if not os.path.exists(args.model):
+    if not Path(args.model).exists():
         raise SystemExit(f"model not found: {args.model}")
-
-    print("Loading model...")
-    start = time.time()
-    # The argument is `wakeword_models`, NOT `wakeword_model_paths`. Model.__init__
-    # takes **kwargs, so a wrong name is swallowed silently, leaving the list empty -
-    # which openWakeWord treats as "load all pre-trained models" and then fails deep
-    # inside prediction with a confusing tensor-shape error. The check below turns
-    # that whole class of mistake into an immediate, obvious failure.
-    oww_model = Model(wakeword_models=[args.model])
-    print(f"Model loaded in {time.time() - start:.2f}s")
-
-    loaded = list(oww_model.models.keys())
-    if len(loaded) != 1:
+    if Path(args.model).suffix == ".onnx":
         raise SystemExit(
-            f"expected exactly 1 model, got {len(loaded)}: {loaded}\n"
-            "openWakeWord fell back to its pre-trained models, which means the model "
-            "argument did not reach it."
-        )
-    print(f"Loaded: {loaded[0]}")
+            "preflight runs the DEPLOYMENT runtime, which has no ONNX path, and a "
+            "live check of a pipeline the device does not run would not mean much.\n"
+            "Convert it first with train/oww/onnx2tflite.py, which verifies the "
+            "result, then preflight the .tflite.")
 
-    proc = open_stream(args.device)
-    # open_stream always sets both pipes; bind them so they read as non-optional.
-    stdout, stderr_pipe = proc.stdout, proc.stderr
-    if stdout is None or stderr_pipe is None:
-        raise SystemExit("failed to open ffmpeg pipes")
+    backend = backends.load(args.model, sliding_window_size=args.sliding_window_size)
+    print(f"{Path(args.model).name}")
+    print(f"  {backend.describe()}")
 
-    # Give the device time to come up before claiming to listen, and surface a
-    # clear error if ffmpeg died instead of opening the mic.
-    time.sleep(WARMUP)
-    if proc.poll() is not None:
-        stderr = stderr_pipe.read().decode(errors="replace")
+    # For a manifest the cutoff is part of the model, so preflighting it tests the
+    # manifest too. Falling back to 0.5 for a bare .tflite is a placeholder, not a
+    # recommendation - see the eval skill on why 0.5 is the wrong default to compare on.
+    threshold = args.threshold
+    if threshold is None:
+        threshold = float(getattr(backend, "model", None) and
+                          getattr(backend.model, "probability_cutoff", 0.5) or 0.5)
+        source = "manifest" if getattr(backend, "from_manifest", False) else "default"
+    else:
+        source = "--threshold"
+
+    chunk = backend.chunk_samples
+    Source = PyAudioSource if args.backend == "pyaudio" else FfmpegSource
+    try:
+        source_stream = Source(args.device, chunk)
+    except SystemExit:
+        raise
+    except Exception as exc:                                          # noqa: BLE001
         raise SystemExit(
-            "ffmpeg could not open the microphone. If this is the first run, macOS "
-            "may need microphone permission for your terminal "
-            "(System Settings > Privacy & Security > Microphone).\n\n" + stderr
-        )
+            f"could not open the microphone with --backend {args.backend}: "
+            f"{type(exc).__name__}: {exc}\n"
+            f"On a first run macOS may need microphone permission for your terminal "
+            f"(System Settings > Privacy & Security > Microphone).")
 
-    print(f"\nListening (threshold: {args.threshold}) - Ctrl+C to stop")
-    print("=" * 50)
+    backend.start()
+    print(f"\nListening at threshold {threshold} ({source}), "
+          f"{chunk / RATE * 1000:.0f}ms chunks - Ctrl-C to stop")
+    print("Say the wake word the way you actually would. Watch `peak`: if it sits")
+    print("just under the threshold, the operating point is wrong for this room.")
+    print("=" * 68)
 
+    detections, window_peak, session_peak, level = 0, 0.0, 0.0, -99.0
+    last_status = time.time()
+    firing = False
     try:
         while True:
-            raw = read_exact(stdout, CHUNK_BYTES)
+            raw = source_stream.read()
             if raw is None:
                 print("\nAudio stream ended.")
                 break
-            audio_array = np.frombuffer(raw, dtype=np.int16)
+            level = dbfs(np.frombuffer(raw, dtype=np.int16))
 
-            start = time.time()
-            prediction = oww_model.predict(audio_array)
-            inference_ms = (time.time() - start) * 1000
+            for prob in backend.feed(raw):
+                window_peak = max(window_peak, prob)
+                session_peak = max(session_peak, prob)
+                # Edge-triggered: one utterance crosses the threshold for several
+                # consecutive frames, and printing each one buries the signal.
+                if prob >= threshold and not firing:
+                    detections += 1
+                    firing = True
+                    print(f"  DETECTED  score {prob:.3f}   level {level:+6.1f} dBFS   "
+                          f"(#{detections})")
+                elif prob < threshold:
+                    firing = False
 
-            for model_name, score in prediction.items():
-                if score > args.threshold:
-                    print(f"DETECTED: {model_name} (score: {score:.3f}, inference: {inference_ms:.1f}ms)")
+            now = time.time()
+            if now - last_status >= STATUS_EVERY:
+                # Printed even when nothing fires - a preflight that stays silent on
+                # failure tells you nothing about whether the mic is even live.
+                quiet = "  (silent - check the mic)" if level < -60 else ""
+                print(f"  ... level {level:+6.1f} dBFS   peak score {window_peak:.3f}"
+                      f"{quiet}")
+                window_peak, last_status = 0.0, now
     except KeyboardInterrupt:
-        print("\nStopping...")
+        print("\nStopping.")
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        source_stream.close()
+
+    print("=" * 68)
+    print(f"{detections} detection(s); highest score seen {session_peak:.3f} "
+          f"against threshold {threshold}")
+    if detections == 0 and session_peak >= threshold * 0.6:
+        print("Nothing fired, but scores got close. That is a threshold/room problem")
+        print("rather than a dead model - try --threshold just under the peak above.")
+    elif detections == 0:
+        print("Nothing came close. Check the level line above was moving while you")
+        print("spoke, then confirm the model scores your holdout in eval/.")
 
 
 if __name__ == "__main__":

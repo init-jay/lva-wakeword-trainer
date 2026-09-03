@@ -94,7 +94,9 @@ far.
 │   ├── compare_models.py
 │   └── check_model_alignment.py
 ├── preflight/                    4 · preflight
-│   └── test_model.py
+│   ├── test_model.py             live mic, the deployment runtime
+│   ├── pyproject.toml            its own uv env - host, like record/
+│   └── uv.lock
 ├── tools/                        not in the diagram - one-off measurement
 │   ├── audit_voices.py
 │   ├── bench_tts.py

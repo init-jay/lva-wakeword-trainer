@@ -161,7 +161,7 @@ class WakeWordModel:
     Scoring the tflite matters because it is what actually ships. The ONNX and the
     tflite are not guaranteed to agree - a wrong-axis conversion loads cleanly,
     reports a plausible input shape and returns plausible 0-1 scores while detecting
-    nothing (see onnx2tflite.py). Measuring the artifact you deploy removes that
+    nothing (see train/oww/onnx2tflite.py). Measuring what you deploy removes that
     whole class of surprise, and skips a conversion step when iterating.
     """
 
