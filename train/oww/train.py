@@ -717,8 +717,24 @@ def create_config(wake_word: str, n_samples: int, training_steps: int,
     # being empty is the visible sign that corpus_dir took over. Everything else
     # that used to derive from output_dir is re-pointed by
     # patches/configurable-corpus-dir.py, which is what makes corpus_dir exist.
-    config["output_dir"] = f"./output/{safe_name}/oww"
-    config["corpus_dir"] = f"./data/corpus/{safe_name}/oww"
+    # BOTH ABSOLUTE, AND corpus_dir MUST BE. Upstream runs os.path.abspath() on
+    # output_dir (train.py:649) but knows nothing about corpus_dir, so a relative
+    # value survives into trim_mmap, which builds its temp file like this:
+    #
+    #     output_file2 = mmap_path.strip(".npy") + "2.npy"      # data.py:876
+    #
+    # str.strip takes a CHARACTER SET and strips BOTH ends, so a leading "./" loses
+    # its dot and a relative path silently becomes an absolute one at the filesystem
+    # root:
+    #
+    #     ./data/corpus/hey_seeree/oww/positive_features_train.npy
+    #     ->  /data/corpus/hey_seeree/oww/positive_features_trai2.npy
+    #
+    # which fails with FileNotFoundError during feature computation - after corpus
+    # generation and augmentation have already run. (The mangled "trai" is the same
+    # bug eating the "n"; harmless once the directory is right.)
+    config["output_dir"] = str(WORK_DIR / "output" / safe_name / "oww")
+    config["corpus_dir"] = str(WORK_DIR / "data" / "corpus" / safe_name / "oww")
 
     # CREATE output_dir OURSELVES, ALL OF IT. Upstream makes it with os.mkdir
     # (train.py:650-651), which creates ONE level - fine when output_dir was a single
