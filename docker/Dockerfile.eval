@@ -1,0 +1,89 @@
+# Evaluation harness - plan.md phase 3. CPU only, and built to run ON THE MAC.
+#
+# WHY A THIRD IMAGE. The two trainers cannot host this. `trainer` pins numpy<2 for
+# torch and openWakeWord's training path; `mww` needs numpy>=2 and a CUDA TensorFlow
+# stack. Both are also linux/amd64 GPU images that exist to run on the training
+# server. Evaluation is the one step that wants to run where the person deciding what
+# to ship is sitting, so this image carries the INFERENCE stacks and neither trainer.
+#
+# WHAT IT CARRIES, AND WHY IT IS SMALL. The deployment target is Linux Voice
+# Assistant (OHF-Voice/linux-voice-assistant), which implements no inference of its
+# own - it depends on pymicro-wakeword and pyopen-wakeword. Both are pure Python over
+# a bundled libtensorflowlite_c, so scoring a model the way the device will costs two
+# small wheels and no TensorFlow at all.
+#
+# ARCHITECTURE: BUILDS NATIVE ON APPLE SILICON. Both wheels publish
+# manylinux_2_35_aarch64, so nothing here is emulated. THE BASE MUST HAVE glibc >=
+# 2.35 for that: bookworm has 2.36, bullseye has 2.31 and would silently fall back to
+# the sdist and then fail to find a shared library. Pin the base's Debian release
+# rather than floating, for that reason alone.
+
+FROM python:3.11-slim-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# The deployment runtime, at the versions linux-voice-assistant pins in its
+# pyproject.toml. Matching those is the point of the image: a different major version
+# is a different inference pipeline, which is what this harness exists not to measure.
+RUN pip install --no-cache-dir \
+    "pymicro-wakeword>=2,<3" \
+    "pyopen-wakeword>=1,<2" \
+    "numpy>=2,<3" \
+    scipy \
+    # PyYAML is not for evaluation. `mww/manifest.py` imports mww/config.py to read
+    # WINDOW_STEP_MS - so feature_step_size cannot drift from what training used -
+    # and that module parses YAML. Without it, cutting a manifest from a measured
+    # cutoff needs the trainer image, which defeats the point of this one.
+    PyYAML
+
+# The openWakeWord .onnx path, which is NOT the deployment runtime.
+#
+# It is here because every ship candidate in tuning.md is a .onnx and pyopen-wakeword
+# is TFLite-only, so without this there is nothing to compare a microWakeWord model
+# against. Numbers from it are comparable with the notebook's seventeen runs and are
+# not a deployment measurement; eval/backends.py labels them that way in every report.
+#
+# --no-deps: openWakeWord's setup.py requires tflite-runtime on Linux, which has no
+# aarch64 wheel and which nothing here needs - the ONNX path uses onnxruntime, and
+# every .tflite goes through the deployment runtime above.
+RUN pip install --no-cache-dir onnxruntime tqdm requests scikit-learn \
+    && apt-get update && apt-get install -y --no-install-recommends git curl \
+    && git clone --depth 1 https://github.com/dscripka/openWakeWord /opt/openwakeword \
+    && pip install --no-cache-dir --no-deps -e /opt/openwakeword \
+    && rm -rf /var/lib/apt/lists/*
+
+# openWakeWord's melspectrogram and embedding models, baked in rather than fetched at
+# first use: download_models() reaches the network from inside whatever command runs
+# first, and an evaluation should not depend on GitHub being up. Same URLs and release
+# as the trainer image, so the ONNX path here matches the one the models trained
+# against. (pyopen-wakeword ships its own copies for the deployment path.)
+RUN mkdir -p /opt/openwakeword/openwakeword/resources/models \
+    && curl -L -o /opt/openwakeword/openwakeword/resources/models/embedding_model.onnx \
+        'https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/embedding_model.onnx' \
+    && curl -L -o /opt/openwakeword/openwakeword/resources/models/melspectrogram.onnx \
+        'https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/melspectrogram.onnx'
+
+# Fail the BUILD rather than an evaluation if a stack is unusable. The failure this
+# catches is the quiet one: a missing shared library or feature model surfaces deep
+# inside a run, after the corpus has loaded, as something that reads like a model
+# problem rather than an environment problem. Loading a builtin model exercises the
+# bundled libtensorflowlite_c, which merely importing does not.
+RUN python3 -c "\
+import numpy, scipy, onnxruntime; \
+from openwakeword.model import Model; \
+import pymicro_wakeword, pyopen_wakeword; \
+from pymicro_wakeword import MicroWakeWord, MicroWakeWordFeatures, Model as MModel; \
+from pyopen_wakeword import OpenWakeWordFeatures; \
+MicroWakeWordFeatures(); \
+MicroWakeWord.from_builtin(MModel.OKAY_NABU).reset(); \
+OpenWakeWordFeatures.from_builtin(); \
+print('eval image OK: numpy', numpy.__version__, \
+      '| pymicro-wakeword', pymicro_wakeword.__version__ if hasattr(pymicro_wakeword,'__version__') else '?', \
+      '| onnxruntime', onnxruntime.__version__)"
+
+# Source is mounted, not copied: the harness is edited far more often than the
+# dependencies are, and a rebuild per edit would make the image a liability.
+CMD ["python3", "-c", "print('mount the repo and run a tool; see plan.md phase 3')"]

@@ -1,0 +1,134 @@
+# microWakeWord trainer - the ESP32 target (plan.md phase 2).
+#
+# SEPARATE FROM THE openWakeWord IMAGE ON PURPOSE, and not by preference: mWW's
+# setup.py requires `numpy>=2.0` while requirements.txt here pins `numpy<2` for
+# openWakeWord and torch. They cannot coexist in one environment. That turns out to be
+# the better arrangement anyway - it keeps a numpy-2 TensorFlow stack away from the
+# image whose behaviour seventeen runs of tuning.md are calibrated against.
+#
+# Base is the TensorFlow GPU image rather than nvidia/cuda + pip tensorflow, because
+# the CUDA/cuDNN pairing is already solved in it, and because it is the stack proven
+# on this training server. Contrast Dockerfile.piper, which needs a cuDNN base only
+# because onnxruntime-gpu has nothing else to borrow from - see the note there.
+
+FROM tensorflow/tensorflow:2.21.0-gpu
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# microWakeWord is not on PyPI - installed from the repo. Pinned to a commit rather
+# than main so a rebuild does not silently change the trainer underneath a run, the
+# way an unpinned openwakeword clone would have.
+ARG MWW_REF=main
+RUN git clone https://github.com/OHF-Voice/micro-wake-word /opt/micro-wake-word \
+    && cd /opt/micro-wake-word \
+    && git checkout "$MWW_REF" \
+    && git rev-parse HEAD > /opt/mww-commit.txt \
+    && pip install --no-cache-dir -e .
+
+# THE CUDA LIBRARIES, WHICH THE -gpu IMAGE DOES NOT ACTUALLY CONTAIN.
+#
+# tensorflow/tensorflow:*-gpu ships TensorFlow BUILT for GPU but not the CUDA/cuDNN
+# runtime, so a container started with --gpus reports:
+#
+#   Failed to determine cuDNN version ... CUDNN_STATUS_INTERNAL_ERROR
+#   Cannot dlopen some GPU libraries ... Skipping registering GPU devices
+#
+# and trains on CPU without failing. The libraries come from the `[and-cuda]` extra
+# as nvidia-* pip wheels. Same version, so this adds the CUDA stack rather than
+# changing TensorFlow.
+#
+# WHETHER IT IS FASTER IS UNMEASURED. The CPU baseline is ~46 s per 500 steps on a
+# 25,537-parameter model - about 15 minutes for a 10,000-step run. A model this small
+# may not fill a GPU, and the Piper investigation in docker-compose.yml is a standing
+# reminder that "the GPU initialised" and "the GPU helped" are different claims.
+# Measure against the baseline before assuming this earned its ~3 GB.
+RUN pip install --no-cache-dir "tensorflow[and-cuda]==2.21.0"
+
+# Register the pip-shipped CUDA libraries with the dynamic linker. They install under
+# site-packages/nvidia/*/lib, which is not on the default search path, so without this
+# the wheels are present and still cannot be dlopen'd. Discovered from the installed
+# package rather than hardcoded, since the path moves with the Python version.
+RUN python3 -c "\
+import os, nvidia; \
+p = os.path.dirname(nvidia.__file__); \
+dirs = [os.path.join(p, d, 'lib') for d in sorted(os.listdir(p)) \
+        if os.path.isdir(os.path.join(p, d, 'lib'))]; \
+assert dirs, 'no nvidia/*/lib dirs - the [and-cuda] extra did not install'; \
+open('/etc/ld.so.conf.d/nvidia-pip.conf', 'w').write(chr(10).join(dirs) + chr(10)); \
+print('nvidia library paths:', len(dirs))" \
+    && ldconfig \
+    && python3 -c "\
+import ctypes, glob, os, nvidia; \
+p = os.path.dirname(nvidia.__file__); \
+libs = sorted(glob.glob(os.path.join(p, 'cudnn', 'lib', 'libcudnn.so*'))); \
+assert libs, 'libcudnn not found among the installed wheels'; \
+ctypes.CDLL(libs[-1]); \
+print('libcudnn loads:', os.path.basename(libs[-1]))"
+
+# PIN datasets BELOW 4.0, WITH ITS AUDIO EXTRAS.
+#
+# microWakeWord loads clips through `datasets.Audio()` (audio/clips.py:136-142), and
+# datasets 4.x moved audio decoding to torchcodec:
+#
+#   ImportError: To support decoding audio data, please install 'torchcodec'.
+#
+# mWW's setup.py requires `datasets` unpinned, so a fresh build gets 4.x and fails at
+# the first clip - after building the model and loading the config, which makes it
+# look like a training problem rather than a dependency one.
+#
+# Pinning is the cheap fix. torchcodec would pull torch and FFmpeg shared libraries
+# into an image that needs neither: this trainer is TensorFlow, and nothing here uses
+# torch for anything. 3.6 decodes with soundfile and resamples with librosa, both of
+# which resolve against the numpy 2 that mWW requires.
+#
+# tensorboard is needed even though nothing here looks at TensorBoard. mWW's
+# training loop calls `tf.summary.scalar` every eval_step_interval steps
+# (train.py:329), and TensorFlow raises TBNotInstalledError rather than skipping the
+# write. The tensorflow/tensorflow image does not ship it and mWW's setup.py does not
+# ask for it, so training runs for exactly one eval interval - 500 steps - and then
+# dies, which reads like a training failure rather than a missing package.
+RUN pip install --no-cache-dir "datasets[audio]<4.0" tensorboard
+
+# Fail the build rather than a training run if the stack does not import. pymicro-
+# features is the one most likely to be missing a wheel: it is a compiled extension,
+# and upstream's own notebook installs a fork of it for macOS.
+RUN python3 -c "\
+import numpy, tensorflow as tf; \
+print('tensorflow', tf.__version__, 'numpy', numpy.__version__); \
+assert numpy.__version__.split('.')[0] == '2', 'mWW needs numpy 2.x'" \
+    && python3 -c "import pymicro_features; print('pymicro-features OK')" \
+    && python3 -c "from mmap_ninja.ragged import RaggedMmap; print('mmap_ninja OK')" \
+    && python3 -c "\
+from microwakeword.audio.clips import Clips; \
+from microwakeword.audio.spectrograms import SpectrogramGeneration; \
+from microwakeword.audio.augmentation import Augmentation; \
+print('microwakeword OK, pinned at', open('/opt/mww-commit.txt').read().strip())" \
+    && python3 -c "\
+import datasets, soundfile; \
+major = int(datasets.__version__.split('.')[0]); \
+print('datasets', datasets.__version__, 'soundfile', soundfile.__version__); \
+assert major < 4, 'datasets 4.x needs torchcodec to decode audio - see the pin above'" \
+    && python3 -c "\
+import tensorflow as tf; \
+tf.summary.scalar; \
+import tensorboard; print('tensorboard', tensorboard.__version__)" \
+    && python3 -c "\
+from ai_edge_litert.interpreter import Interpreter; \
+print('ai-edge-litert OK')"
+
+# The corpus layer is shared with the openWakeWord trainer - same 16 kHz mono WAVs,
+# different frontend downstream. mWW reads them through Clips(input_directory, ...),
+# so nothing needs converting.
+COPY train/ ./train/
+COPY scripts/setup-mww-data.sh .
+RUN chmod +x setup-mww-data.sh
+
+RUN python3 -c "import train.corpus.augment, train.corpus.negatives, \
+                       train.corpus.real, train.corpus.piper"

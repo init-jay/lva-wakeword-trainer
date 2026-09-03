@@ -1,0 +1,29 @@
+# Everything the pipeline downloads, records or generates lives under data/, and
+# everything a run produces lands in output/, so the repo root stays clean.
+# Neither is tracked:
+#
+#   data/external/      audioset, fma, mit_rirs, oww feature .npy, cloned repos
+#   data/piper_voices/  piper voices, pulled on demand into the container volume
+#   data/recordings/    real samples, raw takes, holdout   (1 · record)
+#   data/corpus/        generated positives / negatives    (2 · train)
+#   data/audit/         tools/ one-off measurement output
+#
+#   output/             trained oww + mww models, training_config.yaml, scorecards
+data/
+output/
+
+# Virtual environments
+venv/
+.venv/
+.venv-*/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+
+# OS / IDE / archives
+.DS_Store
+.vscode/
+.idea/
+*.zip

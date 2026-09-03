@@ -1,0 +1,20 @@
+[project]
+name = "record-real-sample"
+version = "0.1.0"
+description = "Record real voice samples for wake word training"
+requires-python = ">=3.10"
+
+# Deliberately separate from the training environment: this runs on the host for
+# microphone access and must not drag in the pinned torch/tensorflow stack that
+# requirements.txt carries for the trainer.
+#
+# PyAudio is the default capture backend. It needs PortAudio headers to build
+# (macOS: brew install portaudio), which the ffmpeg backend avoids - but ffmpeg
+# recordings came out with audible clicks and pops, so the build step is worth it.
+dependencies = [
+    "numpy",
+    "pyaudio",
+]
+
+[tool.uv]
+package = false
