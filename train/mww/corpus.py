@@ -9,7 +9,7 @@ WHAT IS SHARED IS THE CODE, NOT THE OUTPUT. Everything here comes from corpus/ -
 same trimming, the same child-range copies, the same audited Piper voices, the same
 tuned phrase texts and speed grid. Two corpora built by one set of rules.
 
-    python -m mww.corpus --wake-word "hey seeree" --piper-url piper:10200
+    python -m train.mww.corpus --wake-word "hey seeree" --piper-url piper:10200
 
 THREE DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
 
@@ -161,10 +161,11 @@ def main():
     n_pos = len(list(positives.glob("*.wav")))
     n_neg = len(list(negatives.glob("*.wav")))
     print(f"\nDONE  {n_pos} positives, {n_neg} negatives under {root}")
-    print("\nNext:")
-    print(f'  python -m mww.config --wake-word "{args.wake_word}" \\')
-    print("      --ambient data/external/mww_ambient/speech data/external/mww_ambient/no_speech \\")
-    print("      --data-dir data --out training_parameters.yaml")
+    print("\nNext - FEATURES, not config: the config points at "
+          "features/positives, which the next step creates.")
+    print(f'  python -m train.mww.features --wake-word "{args.wake_word}"')
+    print("\nOr let the wrapper chain all four stages:")
+    print(f'  ./scripts/run-mww-training.sh "{args.wake_word}"')
 
 
 if __name__ == "__main__":

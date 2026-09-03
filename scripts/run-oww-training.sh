@@ -17,8 +17,8 @@
 #     it away.
 #
 # Usage:
-#   ./scripts/run-training.sh "hey seeree"
-#   ./scripts/run-training.sh "hey seeree" --samples-per-voice 400 --training-steps 100000
+#   ./scripts/run-oww-training.sh "hey seeree"
+#   ./scripts/run-oww-training.sh "hey seeree" --samples-per-voice 400 --training-steps 100000
 #
 # Any extra arguments are passed through to train.py.
 

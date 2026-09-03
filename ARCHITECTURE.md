@@ -111,7 +111,8 @@ far.
 │   └── Dockerfile.eval
 ├── scripts/
 │   ├── download-external-data.sh  -> data/external/  [all|oww|mww]
-│   └── run-training.sh
+│   ├── run-oww-training.sh        2 · one command, corpus built by the run
+│   └── run-mww-training.sh        2 · four stages, corpus built separately
 ├── docker-compose.yml            CPU by default, so eval runs anywhere
 └── docker-compose.gpu.yml        overlay: nvidia for the TTS servers, on the trainer
 ```

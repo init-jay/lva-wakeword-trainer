@@ -52,7 +52,7 @@ HOLDOUT_DIR = RECORDINGS_DIR / "holdout"
 # Both trainers write here now: train/oww/train.py exports to output/<w>/oww/, and
 # train/mww/ trains into output/<w>/mww/<run-tag>/, one directory per run because
 # microWakeWord refuses to train into an existing one. The commit-tagged files listed
-# above are the collected form - run-training.sh produces them for the .onnx.
+# above are the collected form - run-oww-training.sh produces them for the .onnx.
 #
 # The generated corpora went the other way, to data/corpus/. That split is what keeps
 # train.py's per-run rmtree away from anything in this tree.

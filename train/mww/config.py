@@ -26,7 +26,7 @@ model_train_eval.py:60-93 from `clip_duration_ms`, `window_step_ms` and the mode
 flags. Writing them here would be duplicating a calculation that the trainer will
 redo, and a stale copy is worse than none.
 
-    python -m mww.config --wake-word "hey seeree" --out training_parameters.yaml
+    python -m train.mww.config --wake-word "hey seeree" --out training_parameters.yaml
 """
 
 import argparse
@@ -236,8 +236,8 @@ def main():
         print(f"  {label:<10} {d}  ({n} mmap sets)")
         if n == 0:
             print("           EMPTY OR MISSING. Build it first:")
-            print(f'             python -m mww.corpus   --wake-word "{args.wake_word}"')
-            print(f'             python -m mww.features --wake-word "{args.wake_word}"')
+            print(f'             python -m train.mww.corpus   --wake-word "{args.wake_word}"')
+            print(f'             python -m train.mww.features --wake-word "{args.wake_word}"')
 
     cfg = build(args.wake_word, positives, negatives, args.ambient,
                 args.output_dir, data_dir=args.data_dir,

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Run a microWakeWord training pass and report where the model landed.
 
-The openWakeWord equivalent is run-training.sh, and this carries over the two
+Wrapped by scripts/run-mww-training.sh, which chains the four stages; the
+openWakeWord equivalent is run-oww-training.sh. This carries over the two
 lessons from it that cost the most:
 
   * WHETHER THE MODEL WAS WRITTEN IS THE REAL SIGNAL, not the exit code. A stale
@@ -12,7 +13,7 @@ lessons from it that cost the most:
     build trains a model on nothing and only shows up as a bewildering evaluation.
     The config is checked before training starts.
 
-    python -m mww.train --wake-word "hey seeree" \\
+    python -m train.mww.train --wake-word "hey seeree" \\
         --ambient data/external/mww_ambient/speech \\
                   data/external/mww_ambient/no_speech
 
@@ -33,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import yaml  # noqa: E402
 
-from train import provenance  # noqa: E402
+from train import ownership, provenance  # noqa: E402
 from train.mww import config as mww_config  # noqa: E402
 
 # The quantized streaming model is the one that ships. model_train_eval writes up to
@@ -102,7 +103,7 @@ def check_mmap_set(d: Path):
 
 
 def run_tag(wake_word):
-    """Name this run after the code AND the audio, as run-training.sh does.
+    """Name this run after the code AND the audio, as run-oww-training.sh does.
 
     Safe to compute before training here, unlike on the openWakeWord side: the mWW
     corpus is built by separate commands (mww.corpus then mww.features), so it is
@@ -260,6 +261,11 @@ def main():
     if before is not None and before == after:
         sys.exit(f"\nTRAINING FAILED: {model_path} is unchanged from before this run - "
                  "it is the PREVIOUS model. Do not evaluate or deploy it.")
+
+    # Give the run directory back to the host user before anything on the host has
+    # to touch it - the collection step in run-mww-training.sh copies these files
+    # out, and would otherwise hit Permission denied. See train/ownership.py.
+    ownership.hand_back(Path(args.output_dir))
 
     size_kb = model_path.stat().st_size / 1024
     print(f"\nDONE  {model_path}  ({size_kb:.0f} KB, md5 {after[:8]})")

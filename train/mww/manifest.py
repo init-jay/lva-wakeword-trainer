@@ -5,7 +5,7 @@ microWakeWord produces only the .tflite. ESPHome needs a JSON manifest beside it
 and the values in it are not cosmetic - two of them change detection behaviour and
 one has to match how the model was trained.
 
-    python -m mww.manifest --wake-word "hey seeree" --run 20260902-063606
+    python -m train.mww.manifest --wake-word "hey seeree" --run 20260902-063606
 
 THE CUTOFF COMES FROM THE MEASUREMENT, NOT FROM A DEFAULT. Training writes
 tflite_streaming_roc.txt: false rejection rate and false accepts per hour at every

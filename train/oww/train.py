@@ -56,6 +56,7 @@ from train.corpus.piper import (generate_piper_samples,  # noqa: E402
 from train.corpus.positives import (PLAIN_SPEED_GRID, PLAIN_SPEEDS,  # noqa: E402
                                     plain_positive_texts)
 from train.corpus.real import copy_real_samples  # noqa: E402
+from train import ownership  # noqa: E402
 
 warnings.filterwarnings("ignore", message="Reached EOF prematurely")
 
@@ -682,7 +683,7 @@ def convert_to_tflite(model_path: Path):
     shape and returns plausible 0-1 scores while detecting nothing at all.
 
     A FAILURE HERE DOES NOT FAIL THE RUN. The .onnx is what eval/ and
-    run-training.sh work with; the .tflite is for preflight and the deployment
+    run-oww-training.sh work with; the .tflite is for preflight and the deployment
     runtime, and it can be produced later from the same .onnx without retraining.
     """
     tflite_path = model_path.with_suffix(".tflite")
@@ -701,47 +702,6 @@ def convert_to_tflite(model_path: Path):
         return None
 
 
-def hand_back_output_tree():
-    """Give output/ back to whoever owns the mount, so the host can use it.
-
-    THE CONTAINER RUNS AS ROOT AND THE HOST DOES NOT. Every file training writes
-    under output/ therefore lands root-owned on the host, and the first thing that
-    touches it fails:
-
-        cp: cannot create regular file
-            'output/hey_seeree/oww/hey_seeree_<tag>.onnx': Permission denied
-
-    That is run-training.sh copying the model to its commit-tagged name, on the
-    host, after a successful run - the most annoying possible moment. The same wall
-    is hit by scp'ing a model off the box, or deleting an old one, and it is the
-    same root-ownership problem that made `mv` refuse on the ambient data sets.
-
-    The desired owner is not guessed or passed in: output/ is a bind mount, so the
-    directory itself already carries the host user's uid/gid. Read it from there and
-    apply it downward. Best-effort - a failure here must not fail a run that has
-    already produced a model.
-    """
-    root = WORK_DIR / "output"
-    try:
-        info = root.stat()
-        uid, gid = info.st_uid, info.st_gid
-        if uid == os.geteuid():
-            return                      # already ours; nothing to do
-        changed = 0
-        for path in root.rglob("*"):
-            try:
-                if path.stat().st_uid != uid:
-                    os.chown(path, uid, gid)
-                    changed += 1
-            except OSError:
-                continue
-        if changed:
-            print(f"  handed {changed} file(s) under output/ back to uid {uid}")
-    except OSError as exc:                                           # noqa: BLE001
-        print(f"  NOTE: could not adjust ownership under {root}: {exc}")
-        print("        The host may need sudo to move or delete these files.")
-
-
 def setup_training_dirs(wake_word: str) -> Path:
     """Set up training directory structure.
 
@@ -750,7 +710,7 @@ def setup_training_dirs(wake_word: str) -> Path:
 
     THE CORPUS AND THE MODELS ARE NOW SEPARATE TREES, and this function is why. It
     rmtree's its base directory on every run. That base used to sit under
-    one tree, the same tree run-training.sh copies the commit-tagged models
+    one tree, the same tree run-oww-training.sh copies the commit-tagged models
     into, so a run could delete the archive of previous runs - it did exactly that
     until the corpus was nested a level deeper. With the corpus under data/ and the
     models under output/, the destructive path cannot reach a model at all: this
@@ -1272,7 +1232,7 @@ def main():
     print("=" * 60)
 
     tflite_path = convert_to_tflite(model_path)
-    hand_back_output_tree()
+    ownership.hand_back(WORK_DIR / "output")
 
     size_kb = model_path.stat().st_size / 1024
     print(f"Model: {model_path} ({size_kb:.0f}KB)")

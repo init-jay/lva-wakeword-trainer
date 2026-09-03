@@ -35,7 +35,7 @@ THE SPLIT COMES FROM Clips, NOT FROM US. Clips(random_split_seed, split_count)
 partitions the directory, so the same seed gives the same partition every run and
 training never sees its own validation clips.
 
-    python -m mww.features --wake-word "hey seeree"
+    python -m train.mww.features --wake-word "hey seeree"
 """
 
 import argparse
@@ -136,7 +136,7 @@ def main():
                              ("negatives", corpus / "negatives")):
         n = len(list(clips_dir.glob("*.wav"))) if clips_dir.is_dir() else 0
         if n == 0:
-            sys.exit(f"no clips in {clips_dir} - run `python -m mww.corpus` first")
+            sys.exit(f"no clips in {clips_dir} - run `python -m train.mww.corpus` first")
         print(f"\n[{label}] {n} clips -> {corpus / 'features' / label}")
         build_split(clips_dir, corpus / "features" / label, label,
                     impulse, background, split_seed=args.split_seed,
@@ -144,7 +144,7 @@ def main():
 
     print(f"\nDONE  features under {corpus / 'features'}")
     print("\nNext:")
-    print(f'  python -m mww.train --wake-word "{args.wake_word}" \\')
+    print(f'  python -m train.mww.train --wake-word "{args.wake_word}" \\')
     print("      --ambient data/external/mww_ambient/speech data/external/mww_ambient/no_speech")
 
 
