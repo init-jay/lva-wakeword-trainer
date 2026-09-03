@@ -720,6 +720,21 @@ def create_config(wake_word: str, n_samples: int, training_steps: int,
     config["output_dir"] = f"./output/{safe_name}/oww"
     config["corpus_dir"] = f"./data/corpus/{safe_name}/oww"
 
+    # CREATE output_dir OURSELVES, ALL OF IT. Upstream makes it with os.mkdir
+    # (train.py:650-651), which creates ONE level - fine when output_dir was a single
+    # directory at the repo root, fatal now that it is three deep:
+    #
+    #     FileNotFoundError: [Errno 2] No such file or directory:
+    #         '/app/output/hey_seeree/oww'
+    #
+    # /app/output exists because compose mounts it; the two levels under it do not.
+    # It fails inside the augmentation subprocess, after corpus generation has
+    # already run, so the cost is the whole generation stage.
+    #
+    # corpus_dir needs no equivalent: patches/configurable-corpus-dir.py creates it
+    # with os.makedirs, which is recursive.
+    (WORK_DIR / config["output_dir"]).mkdir(parents=True, exist_ok=True)
+
     # End of a linear ramp: the negative-class loss weight grows from 1 to this
     # over training (openwakeword/train.py:274), so higher penalises false
     # positives harder.
