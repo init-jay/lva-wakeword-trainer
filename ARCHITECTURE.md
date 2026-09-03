@@ -57,6 +57,8 @@ far.
 
 ```
 .
+├── docs/
+│   └── MANUAL_RUN.md            the four steps by hand, if not using an agent
 ├── .claude/skills/               agent instructions, one per pipeline step
 │   ├── record-samples/SKILL.md   1 · how to get usable recordings, and verify them
 │   ├── write-wordlists/SKILL.md  2+3 · the phrases, the one part that does not transfer
