@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the microWakeWord corpus at my_custom_model/<wake_word>/mww/.
+"""Build the microWakeWord corpus at data/corpus/<wake_word>/mww/.
 
 Sibling to the openWakeWord corpus at .../oww/, and deliberately not the same
 directory: train.py rmtree's its own at the start of every run, so a shared corpus
@@ -70,8 +70,8 @@ def main():
                    help="copies of each real recording (default: %(default)s). See "
                         "the module docstring for why this is not 10.")
     p.add_argument("--child-fraction", type=float, default=CHILD_STRETCH_FRACTION)
-    p.add_argument("--corpus-root", default="my_custom_model")
-    p.add_argument("--real-samples", default="my_real_samples")
+    p.add_argument("--corpus-root", default="data/corpus")
+    p.add_argument("--real-samples", default="data/recordings/samples")
     p.add_argument("--negatives-file", default=None)
     p.add_argument("--clean", action="store_true",
                    help="delete an existing corpus first. Required to regenerate - "

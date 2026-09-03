@@ -49,10 +49,13 @@ HOLDOUT_DIR = RECORDINGS_DIR / "holdout"
 # .tflite it names have to be moved as a pair - `"model"` in the JSON is a bare
 # sibling filename, so a manifest separated from its model is a broken model.
 #
-# The TRAINERS DO NOT WRITE HERE YET: train/oww/train.py and train/mww/ still emit
-# my_custom_model/ at the repo root, and the files here were placed by hand. Nothing
-# in eval depends on that migration landing, since every tool takes an explicit
-# --model; these constants exist so the eval side already agrees on the target.
+# Both trainers write here now: train/oww/train.py exports to output/<w>/oww/, and
+# train/mww/ trains into output/<w>/mww/<run-tag>/, one directory per run because
+# microWakeWord refuses to train into an existing one. The commit-tagged files listed
+# above are the collected form - run-training.sh produces them for the .onnx.
+#
+# The generated corpora went the other way, to data/corpus/. That split is what keeps
+# train.py's per-run rmtree away from anything in this tree.
 OUTPUT_DIR = REPO_ROOT / "output"
 
 # The TTS evaluation corpora, which are generated rather than recorded - hence

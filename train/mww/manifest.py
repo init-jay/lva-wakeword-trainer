@@ -134,7 +134,7 @@ def main():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--wake-word", default="hey seeree")
     p.add_argument("--run", required=True, help="run directory name under the model dir")
-    p.add_argument("--models-dir", default="mww_models")
+    p.add_argument("--models-dir", default="output")
     p.add_argument("--max-faph", type=float, default=0.0,
                    help="false accepts per hour budget (default: %(default)s)")
     p.add_argument("--tensor-arena-size", type=int, default=DEFAULT_TENSOR_ARENA_SIZE)
@@ -145,7 +145,7 @@ def main():
     args = p.parse_args()
 
     safe = args.wake_word.replace(" ", "_").lower()
-    run_dir = Path(args.models_dir) / safe / args.run / QUANT_DIR
+    run_dir = Path(args.models_dir) / safe / "mww" / args.run / QUANT_DIR
     model = run_dir / MODEL_FILE
     roc = run_dir / ROC_FILE
 

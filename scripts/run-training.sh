@@ -37,7 +37,7 @@ cd "$(dirname "$0")/.."
 
 # tr rather than ${x,,} so this does not need bash 4 (macOS ships 3.2).
 SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
-MODEL="my_custom_model/${SAFE_NAME}.onnx"
+MODEL="output/${SAFE_NAME}/oww/${SAFE_NAME}.onnx"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 LOG="training-${SAFE_NAME}-${STAMP}.log"
 
@@ -180,17 +180,20 @@ if [[ $STATUS -ne 0 ]]; then
     echo "    Convert with train/oww/onnx2tflite.py, which verifies the result."
 fi
 
-# Name the output by commit so a model can be traced back to the code that made it.
-COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo "$STAMP")"
+# Name the output by the code AND the audio that produced it - see
+# train/provenance.py. Computed HERE, after training, on purpose: the synthetic
+# corpus is built by the run itself, so hashing it beforehand would name the model
+# after the previous run's audio.
+TAG="$(python3 -m train.provenance --wake-word "$WAKE_WORD" --tag --fallback "$STAMP")"
 DIRTY=""
 git diff --quiet 2>/dev/null || DIRTY="-dirty"
-TAGGED="my_custom_model/${SAFE_NAME}/${SAFE_NAME}_${COMMIT}${DIRTY}.onnx"
+TAGGED="output/${SAFE_NAME}/oww/${SAFE_NAME}_${TAG}.onnx"
 mkdir -p "$(dirname "$TAGGED")"
 cp "$MODEL" "$TAGGED"
 
 echo "=== $(date '+%H:%M:%S')  DONE"
 echo "    $TAGGED  ($(du -h "$TAGGED" | cut -f1), md5 ${AFTER_SUM:0:8})"
-[[ -n "$DIRTY" ]] && echo "    NOTE: working tree was dirty - this model is not reproducible from $COMMIT"
+[[ -n "$DIRTY" ]] && echo "    NOTE: working tree was dirty - the code half of $TAG is not reproducible"
 echo
 echo "    scp to the eval machine, then:"
 echo "      docker compose run --rm eval python -m eval.compare_models \\"

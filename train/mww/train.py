@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import yaml  # noqa: E402
 
+from train import provenance  # noqa: E402
 from train.mww import config as mww_config  # noqa: E402
 
 # The quantized streaming model is the one that ships. model_train_eval writes up to
@@ -99,16 +100,16 @@ def check_mmap_set(d: Path):
             f"cannot see)"]
 
 
-def run_tag():
-    """Name this run after the commit that produced it, as run-training.sh does."""
-    try:
-        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
-                             capture_output=True, text=True, check=True)
-        tag = out.stdout.strip()
-        dirty = subprocess.run(["git", "diff", "--quiet"]).returncode != 0
-        return tag + ("-dirty" if dirty else "")
-    except Exception:
-        return datetime.now().strftime("%Y%m%d-%H%M%S")
+def run_tag(wake_word):
+    """Name this run after the code AND the audio, as run-training.sh does.
+
+    Safe to compute before training here, unlike on the openWakeWord side: the mWW
+    corpus is built by separate commands (mww.corpus then mww.features), so it is
+    already on disk by the time this runs and the tag names the audio that will
+    actually be trained on.
+    """
+    return provenance.run_tag(
+        wake_word, fallback=datetime.now().strftime("%Y%m%d-%H%M%S"))
 
 
 def checksum(path: Path):
@@ -121,14 +122,14 @@ def main():
     p.add_argument("--wake-word", default="hey seeree")
     p.add_argument("--ambient", nargs="*", default=[],
                    help="RaggedMmap dirs from setup-mww-data.sh")
-    p.add_argument("--corpus-root", default="my_custom_model")
+    p.add_argument("--corpus-root", default="data/corpus")
     p.add_argument("--data-dir", default="data")
-    p.add_argument("--output-dir", default="mww_models")
+    p.add_argument("--output-dir", default="output")
     p.add_argument("--training-steps", type=int, nargs="+")
     p.add_argument("--batch-size", type=int, default=mww_config.DEFAULT_BATCH_SIZE)
     p.add_argument("--tag", default=None,
-                   help="name for this run's output directory (default: the git "
-                        "short commit, or a timestamp outside a repo). Each run "
+                   help="name for this run's output directory (default: "
+                        "<commit>-d<audio hash>, see train/provenance.py). Each run "
                         "gets its own - model_train_eval refuses to train into an "
                         "existing directory.")
     p.add_argument("--force", action="store_true",
@@ -157,7 +158,7 @@ def main():
             args.wake_word, corpus / "positives", corpus / "negatives",
             args.ambient, args.output_dir, data_dir=args.data_dir,
             training_steps=args.training_steps, batch_size=args.batch_size,
-            run_tag=args.tag or run_tag())
+            run_tag=args.tag or run_tag(args.wake_word))
         # SIBLING OF train_dir, NOT INSIDE IT. model_train_eval calls
         # os.makedirs(train_dir) and fails if anything is there - a config file
         # written into it is enough to stop the run.

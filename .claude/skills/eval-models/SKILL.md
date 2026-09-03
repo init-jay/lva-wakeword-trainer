@@ -206,10 +206,12 @@ five points has told you nothing. Say which single variable moved, and re-run.
 
 ## Known gaps — check before promising output
 
-- `train/mww/manifest.py` still expects the pre-migration
-  `mww_models/<wake_word>/<run>/tflite_stream_state_internal_quant/` layout, not
-  `output/<wake_word>/mww/`. It will not find a model in the new layout; read the ROC
-  by hand until that migration lands.
+- `train/mww/manifest.py` reads
+  `output/<wake_word>/mww/<run-tag>/tflite_stream_state_internal_quant/`, one
+  directory per run — microWakeWord refuses to train into an existing directory, so
+  runs cannot be flattened. The commit-tagged files sitting directly in
+  `output/<wake_word>/mww/` are a hand-made collection step; there is no script for
+  it yet (`run-training.sh` does the equivalent for the openWakeWord `.onnx` only).
 - `check_model_alignment.py` on a `.tflite` needs `ai-edge-litert`, which the eval
   image does not carry. Use the `.onnx`, or the trainer image.
 - The comments refer to "the tuning log" and "tuning run N" — seventeen runs of this

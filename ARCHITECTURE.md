@@ -70,6 +70,7 @@ far.
 │   ├── pyproject.toml            its own uv env - kept together
 │   └── uv.lock
 ├── train/                        2 · training run
+│   ├── provenance.py             run tag: the commit AND the audio it trained on
 │   ├── corpus/                   shared by both trainers
 │   │   ├── augment.py
 │   │   ├── negatives.py

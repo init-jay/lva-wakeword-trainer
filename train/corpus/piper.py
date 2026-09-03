@@ -76,7 +76,7 @@ SR = 16000
 # speakers land here. That is not automatically a reason to exclude - accented
 # renderings of the CORRECT phrase are good training data, since real users have
 # accents. It is a reason here because the benefit cannot be measured: there is no
-# accented speaker in my_real_samples_holdout/, so the contamination is measurable
+# accented speaker in data/recordings/holdout/, so the contamination is measurable
 # and the upside is not. Revisit if an accented speaker is ever recorded.
 #
 # WHAT THIS METHOD CANNOT SEE: the score is agreement with the consensus ACROSS

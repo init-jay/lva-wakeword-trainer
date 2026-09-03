@@ -31,10 +31,10 @@ import yaml
 from tqdm import tqdm
 
 # THE REPO ROOT, NOT THIS FILE'S DIRECTORY. Every path in this module is relative -
-# data/, my_real_samples/, my_custom_model/ - and the chdir below is what anchors
-# them. While this file lived at the repo root the two were the same thing; since it
-# moved to train/oww/ they are three levels apart, and getting this wrong does not
-# raise. It builds a corpus under train/oww/ and trains on nothing.
+# data/ and output/ - and the chdir below is what anchors them. While this file lived
+# at the repo root the two were the same thing; since it moved to train/oww/ they are
+# three levels apart, and getting this wrong does not raise. It builds a corpus under
+# train/oww/ and trains on nothing.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Importable when run as `python train/oww/train.py` as well as `python -m
@@ -665,18 +665,19 @@ def generate_runon_samples(pool: "KokoroPool", voices: list, output_dir: Path,
 def setup_training_dirs(wake_word: str) -> Path:
     """Set up training directory structure.
 
-    my_custom_model/<wake_word>/oww/ - one level deeper than it used to be, so the
-    microWakeWord corpus can live beside it under .../mww/ without either pipeline
-    reaching into the other's directory.
+    data/corpus/<wake_word>/oww/ - beside the microWakeWord corpus at .../mww/,
+    without either pipeline reaching into the other's directory.
 
-    THE NESTING ALSO FIXES A REAL BUG. This function rmtree's its base directory, and
-    that used to be my_custom_model/<wake_word> - the same directory run-training.sh
-    copies the commit-tagged models into. Every run therefore deleted the archive of
-    every previous run, which is survivable only because the models were being
-    copied off the box by hand. Scoped to .../oww/, the archives outlive the run.
+    THE CORPUS AND THE MODELS ARE NOW SEPARATE TREES, and this function is why. It
+    rmtree's its base directory on every run. That base used to sit under
+    one tree, the same tree run-training.sh copies the commit-tagged models
+    into, so a run could delete the archive of previous runs - it did exactly that
+    until the corpus was nested a level deeper. With the corpus under data/ and the
+    models under output/, the destructive path cannot reach a model at all: this
+    rmtree is confined to generated audio that the next run would rebuild anyway.
     """
     safe_name = wake_word.replace(" ", "_").lower()
-    base_dir = WORK_DIR / "my_custom_model" / safe_name / "oww"
+    base_dir = WORK_DIR / "data" / "corpus" / safe_name / "oww"
 
     if base_dir.exists():
         print("Clearing previous training outputs...")
@@ -708,11 +709,15 @@ def create_config(wake_word: str, n_samples: int, training_steps: int,
     config["target_accuracy"] = 0.7
     config["target_recall"] = 0.5
     config["target_false_positives_per_hour"] = 0.1
-    config["output_dir"] = "./my_custom_model"
-    # The corpus lives one level deeper than upstream assumes, so the
-    # microWakeWord corpus can sit beside it - see
-    # patches/configurable-corpus-dir.py, which makes this key exist at all.
-    config["corpus_dir"] = f"./my_custom_model/{safe_name}/oww"
+    # MODELS OUT, CORPUS ELSEWHERE. Upstream uses output_dir for exactly three
+    # things (openwakeword/train.py:652, 905, 909): the .onnx export, the .tflite
+    # conversion beside it, and an empty <output_dir>/<model_name>/ it creates
+    # unconditionally - that last one is where the corpus WOULD have gone, and its
+    # being empty is the visible sign that corpus_dir took over. Everything else
+    # that used to derive from output_dir is re-pointed by
+    # patches/configurable-corpus-dir.py, which is what makes corpus_dir exist.
+    config["output_dir"] = f"./output/{safe_name}/oww"
+    config["corpus_dir"] = f"./data/corpus/{safe_name}/oww"
 
     # End of a linear ramp: the negative-class loss weight grows from 1 to this
     # over training (openwakeword/train.py:274), so higher penalises false
@@ -1054,7 +1059,11 @@ def main():
         add_child_range_copies(pos_test, "VTLP positive test", args.child_fraction)
 
     print("\n[Real Voice]")
-    real_samples_dir = WORK_DIR / "my_real_samples"
+    # The training half of the recordings. data/recordings/holdout/ is a SIBLING and
+    # is never read here - copy_real_samples globs this tree recursively, so a
+    # holdout nested inside it would be trained on and every eval number after that
+    # would be measuring memorisation. See eval/paths.py, which enforces the pair.
+    real_samples_dir = WORK_DIR / "data" / "recordings" / "samples"
     real_count = copy_real_samples(real_samples_dir, pos_train, args.real_copies)
     if real_count > 5:
         copy_real_samples(real_samples_dir, pos_test, args.real_copies)
@@ -1103,14 +1112,15 @@ def main():
                   args.data_dir, args.augmentation_rounds, args.max_negative_weight)
     run_augmentation()
 
-    # Note the existing model before training. setup_training_dirs clears the
-    # working directory but NOT my_custom_model/<name>.onnx, so a previous run's
-    # model survives here - and if training fails, an unchanged file would be
-    # reported as this run's output. That happened: a CUDA OOM during validation
-    # killed training at 75%, the script still printed "TRAINING COMPLETE!", and
-    # the stale model was copied off the box and evaluated twice before the
-    # identical checksums gave it away.
-    model_path = WORK_DIR / "my_custom_model" / f"{safe_name}.onnx"
+    # Note the existing model before training. setup_training_dirs clears the corpus
+    # but NOT the exported model, so a previous run's model survives here - and if
+    # training fails, an unchanged file would be reported as this run's output. That
+    # happened: a CUDA OOM during validation killed training at 75%, the script still
+    # printed "TRAINING COMPLETE!", and the stale model was copied off the box and
+    # evaluated twice before the identical checksums gave it away. Now that the two
+    # trees are separate the model ALWAYS survives a run, so this check matters more
+    # than it did, not less.
+    model_path = WORK_DIR / "output" / safe_name / "oww" / f"{safe_name}.onnx"
     before = model_path.stat().st_mtime if model_path.exists() else None
 
     returncode = run_training()

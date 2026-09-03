@@ -2,7 +2,7 @@
 
 Moved from train.py. Two changes, both behaviour-preserving:
 
-- `real_samples_dir` is now a parameter instead of `WORK_DIR / "my_real_samples"`
+- `real_samples_dir` is now a parameter instead of a constant path
   read from train.py's module globals, so a second trainer can point at the same
   recordings without importing train.py.
 - The `wake_word` parameter is gone. It was never referenced in the body.
@@ -35,8 +35,8 @@ def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10
     Batch class balance is unaffected (batch_n_per_class fixes that), so this only
     changes how often a real clip is drawn WITHIN the positive class.
 
-    Recordings may sit loose in my_real_samples/ or be grouped one directory per
-    speaker (my_real_samples/speaker1/, my_real_samples/speaker2/, ...). Both layouts are
+    Recordings may sit loose in the samples directory or be grouped one directory
+    per speaker (samples/speaker1/, samples/speaker2/, ...). Both layouts are
     picked up, so speakers can be added, re-recorded, or dropped independently.
 
     NOTE FOR THE microWakeWord PORT: the repetition trick is specific to a pipeline

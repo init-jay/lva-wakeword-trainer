@@ -106,7 +106,7 @@ x-piper: &piper
   volumes:
     # Voices are downloaded on demand and get large - libritts_r alone carries 904
     # speakers - so they persist here rather than in the container.
-    - ./piper_voices:/data
+    - ./data/piper_voices:/data
   deploy:
     resources:
       reservations:
@@ -224,14 +224,17 @@ services:
               count: all
               capabilities: [gpu]
     volumes:
-      - ./data:/app/data                    # mit_rirs, audioset_16k, fma, ambient sets
-      - ./my_real_samples:/app/my_real_samples
-      # Both corpora live under my_custom_model/<wake_word>/, one directory per
-      # trainer: .../oww/ written by train.py, .../mww/ written by mww/corpus.py.
-      # Neither reaches into the other's, which matters because train.py rmtree's
-      # its own directory at the start of every run.
-      - ./my_custom_model:/app/my_custom_model
-      - ./mww_models:/app/mww_models        # trained tflite + manifest
+      # ONE MOUNT COVERS THE INPUTS. data/ now holds the external datasets
+      # (mit_rirs, audioset_16k, fma, ambient sets), the recordings under
+      # data/recordings/, and the generated corpora under data/corpus/<wake_word>/,
+      # one directory per trainer: .../oww/ from train.py, .../mww/ from
+      # mww/corpus.py. Neither reaches into the other's, which matters because
+      # train.py rmtree's its own at the start of every run.
+      - ./data:/app/data
+      # Trained models and their manifests. A SEPARATE TREE from the corpus, so the
+      # rmtree above cannot reach a model even in principle.
+      - ./output:/app/output
+      - ./wordlists:/app/wordlists:ro       # the phrases, per wake word
     shm_size: "8gb"
 
   trainer:
@@ -246,9 +249,11 @@ services:
               count: all
               capabilities: [gpu]
     volumes:
+      # Same split as the mww service above: data/ is inputs and generated corpus,
+      # output/ is models. train.py rmtree's data/corpus/<wake_word>/oww/ every run.
       - ./data:/app/data
-      - ./my_real_samples:/app/my_real_samples
-      - ./my_custom_model:/app/my_custom_model
+      - ./output:/app/output
+      - ./wordlists:/app/wordlists:ro
     environment:
       # Both instances; each is a separate single-threaded process.
       - KOKORO_URL=http://kokoro:8880,http://kokoro2:8880

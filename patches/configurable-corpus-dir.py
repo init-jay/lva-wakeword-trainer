@@ -15,8 +15,8 @@ model with it.
 
 That matters here because this repo now keeps two corpora side by side:
 
-    my_custom_model/<wake_word>/oww/   built by train.py, for openWakeWord
-    my_custom_model/<wake_word>/mww/   built by mww/corpus.py, for microWakeWord
+    data/corpus/<wake_word>/oww/   built by train.py, for openWakeWord
+    data/corpus/<wake_word>/mww/   built by mww/corpus.py, for microWakeWord
 
 Without this patch, train.py writes the corpus into .../oww/ and upstream then looks
 for it one level up, finds nothing, creates an empty positive_train, and augments

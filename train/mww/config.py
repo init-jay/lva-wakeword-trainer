@@ -196,8 +196,9 @@ def build(wake_word, positives_dir, negatives_dir, ambient_dirs, output_dir,
         # Tagging per run also keeps history, which the openWakeWord side did not:
         # its rmtree deleted every archived model on each run until the corpus was
         # nested under oww/.
-        "train_dir": str(Path(output_dir) / safe / (run_tag or "run")),
-        "summaries_dir": str(Path(output_dir) / safe / (run_tag or "run") / "summaries"),
+        "train_dir": str(Path(output_dir) / safe / "mww" / (run_tag or "run")),
+        "summaries_dir": str(
+            Path(output_dir) / safe / "mww" / (run_tag or "run") / "summaries"),
         "features": features,
     }
 
@@ -212,14 +213,14 @@ def main():
                    help="default: <corpus-root>/<wake_word>/mww/positives")
     p.add_argument("--negatives", default=None,
                    help="default: <corpus-root>/<wake_word>/mww/negatives")
-    p.add_argument("--corpus-root", default="my_custom_model",
+    p.add_argument("--corpus-root", default="data/corpus",
                    help="corpora live at <root>/<wake_word>/{oww,mww}/ "
                         "(default: %(default)s)")
     p.add_argument("--ambient", nargs="*", default=[],
                    help="RaggedMmap feature dirs for the ambient negatives")
     p.add_argument("--data-dir", default=".",
                    help="where mit_rirs/audioset_16k/fma live (default: %(default)s)")
-    p.add_argument("--output-dir", default="mww_models")
+    p.add_argument("--output-dir", default="output")
     p.add_argument("--training-steps", type=int, nargs="+")
     p.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p.add_argument("--out", default="training_parameters.yaml")

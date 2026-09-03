@@ -114,7 +114,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--wake-word", default="hey seeree")
-    p.add_argument("--corpus-root", default="my_custom_model")
+    p.add_argument("--corpus-root", default="data/corpus")
     p.add_argument("--data-dir", default="data")
     p.add_argument("--split-seed", type=int, default=10)
     p.add_argument("--split-count", type=float, default=0.1)
