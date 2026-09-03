@@ -13,8 +13,13 @@ Gates (from tuning.md):
 
     extend + hey_other false accepts at 0.5    < 2/32
     clean positive detection at 0.5            >= 55/56
+    the same, for the WEAKEST speaker          >= 55/56
     detection with a command immediately after >= 27/30
     median latency from end of speech          < 120 ms
+
+The weakest-speaker gate is not in tuning.md; it is here because everything else on
+that list is an average over speakers, and an average is what let a 4-year-old sit at
+24% detection behind a 97% adult for long enough to need train/corpus/augment.py.
 
 Two details of the method matter enough to state:
 
@@ -40,16 +45,23 @@ is arithmetic over scores. Two consequences worth stating rather than discoverin
 * Latency is measured the same way for both and is the one number that transfers
   directly: it is the deployed quantity either way.
 
-Usage:
-    python eval_model.py --model my_custom_model/hey_seeree/hey_seeree.onnx
-    python eval_model.py --model M --positives my_real_samples/speaker1
-    python eval_model.py --model M --threshold 0.7 --verbose
+POSITIVES DEFAULT TO THE HELD-OUT RECORDINGS, not to everything recorded. The trainer
+globs data/recordings/samples/ recursively, so scoring these gates against that tree
+measures memorisation; `eval/paths.py` carries the split and warns if a run is pointed
+back inside it. The `_runon` directories are excluded here on purpose - this file
+builds its own command-following case by concatenating a command onto a plain clip,
+so a real run-on recording among the positives would be scored as the phrase alone.
+
+Usage, from the repo root:
+    python -m eval.eval_model --model output/hey_seeree/oww/hey_seeree_705c23b.onnx
+    python -m eval.eval_model --model M --positives data/recordings/holdout/speaker1
+    python -m eval.eval_model --model M --threshold 0.7 --verbose
 
 Needs onnxruntime and an importable openwakeword for .onnx models, plus a TFLite
 runtime and pymicro-features for microWakeWord ones. The `eval` compose service has
 all of it and runs on the Mac:
 
-    docker compose run --rm eval python eval_model.py --model M
+    docker compose run --rm eval python -m eval.eval_model --model M
 """
 
 import argparse
@@ -62,7 +74,7 @@ from pathlib import Path
 import numpy as np
 import scipy.io.wavfile
 
-from eval import backends
+from eval import backends, paths
 
 SR = 16000
 NOISE_FLOOR = 30.0          # std dev in 16-bit counts; stands in for room tone
@@ -150,6 +162,84 @@ def load_dir(directory, recursive=True):
     return out, skipped
 
 
+def load_by_speaker(directories, limit=None):
+    """{speaker: clips}, one entry per directory, in the order given.
+
+    THE SPEAKER TRAVELS BESIDE THE CLIPS, NOT INSIDE THEM. Folding it into the clip
+    name instead - `jay/hey_seeree_0001.wav` - would be tidier and would silently
+    invalidate every number this harness has ever produced: `clip_rng` derives each
+    clip's padding noise from its name, so renaming the clips reseeds the noise and
+    moves the scores. Hence a mapping alongside, and `wav.name` left alone.
+
+    `limit` applies PER SPEAKER, which is what --limit has always claimed ("the first
+    N clips of each set") and what keeps a limited run comparable across speakers.
+    """
+    by_speaker, skipped_total = {}, 0
+    for directory in directories:
+        clips, skipped = load_dir(directory)
+        skipped_total += skipped
+        if limit:
+            clips = clips[:limit]
+        if not clips:
+            continue
+        label = paths.speaker_label(directory)
+        # Two directories can share a basename when they come from different trees.
+        by_speaker[str(directory) if label in by_speaker else label] = clips
+    return by_speaker, skipped_total
+
+
+def spans_for(by_speaker):
+    """[(speaker, start, end)] into the flat clip list `by_speaker` concatenates to.
+
+    Scoring stays a single pass over one list - the per-speaker view is slicing done
+    afterwards, so nothing is scored twice and the pooled and per-speaker numbers
+    cannot disagree.
+    """
+    spans, offset = [], 0
+    for speaker, clips in by_speaker.items():
+        spans.append((speaker, offset, offset + len(clips)))
+        offset += len(clips)
+    return spans
+
+
+def report_by_speaker(rows, spans):
+    """Detection, score and latency per speaker.
+
+    NOT behind a flag, and printed whenever there is more than one speaker. The
+    pooled number above it is an average over speakers, and an average over speakers
+    is precisely what hides the one who fails: the run that motivated the child-range
+    shifting in train/corpus/augment.py measured a 4-year-old at 24% while the adult
+    read 97%, and the pooled figure looked healthy throughout.
+    """
+    print(f"\n  {'speaker':<20}{'n':>4}{'detected':>12}{'median score':>14}"
+          f"{'median latency':>16}")
+    rates = []
+    for speaker, start, end in spans:
+        entries = rows[start:end]
+        ok = sum(1 for e in entries if e[1])
+        lats = [e[2] for e in entries if e[2] is not None]
+        peaks = np.array([e[3] for e in entries])
+        lat = f"{np.median(lats):.0f}ms" if lats else "-"
+        print(f"  {speaker[:19]:<20}{len(entries):>4}{f'{ok}/{len(entries)}':>12}"
+              f"{np.median(peaks):>14.3f}{lat:>16}")
+        rates.append((ok / len(entries), speaker, ok, len(entries)))
+
+    if len(rates) > 1:
+        worst, best = min(rates), max(rates)
+        spread = best[0] - worst[0]
+        print(f"\n  Weakest speaker: {worst[1]} at {worst[0]:.0%} "
+              f"({worst[2]}/{worst[3]}), {spread * 100:.0f} points below "
+              f"{best[1]} at {best[0]:.0%}.")
+        # The threshold is a judgement, not a gate: what matters is that a large
+        # spread is READ rather than averaged away. Real clips from the speaker who
+        # fails beat any amount of augmentation - see the skill and augment.py.
+        if spread >= 0.25:
+            print("  That spread is the failure augmentation does not fix. The model "
+                  "generalises\n  to some voices and not others; record more of "
+                  f"{worst[1]} rather than retuning.")
+    return rates
+
+
 def evaluate_positives(backend, clips, threshold, rng, verbose):
     """Per-clip (name, detected, latency_ms or None, peak score)."""
     rows = []
@@ -220,10 +310,12 @@ def main():
         description="Score a wake-word model against the tuning.md gates",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model", required=True, help="Trained .onnx or .tflite model")
-    parser.add_argument("--positives", default="my_real_samples",
-                        help="Directory of positive clips, searched recursively")
-    parser.add_argument("--negatives", default="negatives_tts",
-                        help="Directory from generate_negatives.py")
+    parser.add_argument("--positives", nargs="+", default=None,
+                        help="Directories of positive clips, searched recursively "
+                             "(default: the held-out speaker directories under "
+                             "data/recordings/holdout/, excluding the _runon ones)")
+    parser.add_argument("--negatives", default=str(paths.NEGATIVES_DIR),
+                        help="Directory from generate_negatives.py (default: %(default)s)")
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--command-gap-ms", type=float, default=300,
                         help="Pause to test alongside the no-pause case (default: %(default)s)")
@@ -246,12 +338,19 @@ def main():
     backend = backends.load(args.model, sliding_window_size=args.sliding_window_size)
     rng = np.random.default_rng(0)
 
-    positives, skipped_p = load_dir(args.positives)
+    positive_dirs = args.positives or [str(d) for d in paths.holdout_dirs(runon=False)]
+    paths.warn_if_trained_on(positive_dirs)
+
+    by_speaker, skipped_p = load_by_speaker(positive_dirs, limit=args.limit)
+    positives = [clip for clips in by_speaker.values() for clip in clips]
+    speaker_spans = spans_for(by_speaker)
+
     negatives, skipped_n = load_dir(args.negatives)
     if args.limit:
-        positives, negatives = positives[:args.limit], negatives[:args.limit]
+        negatives = negatives[:args.limit]
     if not positives:
-        print(f"No usable WAV files in {args.positives}")
+        print(f"No usable WAV files in {paths.describe(positive_dirs)}. Held-out "
+              f"clips are recorded with `record_samples.py --holdout --speaker NAME`.")
         sys.exit(1)
     for label, skipped in (("positives", skipped_p), ("negatives", skipped_n)):
         if skipped:
@@ -260,8 +359,9 @@ def main():
     print("=" * 70)
     print(f"{Path(args.model).name}   threshold {args.threshold}")
     print(backend.describe())
-    print(f"{len(positives)} positives from {args.positives}, "
-          f"{len(negatives)} negatives from {args.negatives}")
+    print(f"{len(positives)} positives from {len(by_speaker)} speaker(s) "
+          f"({', '.join(f'{s} {len(c)}' for s, c in by_speaker.items())}), "
+          f"{len(negatives)} negatives from {paths.describe([args.negatives])}")
     print("=" * 70)
 
     # --- negatives, per category -------------------------------------------------
@@ -311,6 +411,10 @@ def main():
         print(f"  missed {len(misses)}:")
         for clip_name, peak in sorted(misses, key=lambda r: -r[1])[:8]:
             print(f"    {clip_name[:44]:<46}{peak:.3f}")
+
+    # The measurement the pipeline is built around: does the model work for EVERY
+    # speaker, or only on average across them.
+    speaker_rates = report_by_speaker(rows, speaker_spans) if len(speaker_spans) > 1 else []
 
     # A swept corpus pooled into one number says nothing - the whole point of a sweep
     # is where along it the model stops working.
@@ -364,6 +468,14 @@ def main():
     checks.append((f"clean positive detection        {detected}/{len(positives)} "
                    f"({detected / len(positives):.0%})", f">= {GATE_POSITIVE:.0%}",
                    detected / len(positives) >= GATE_POSITIVE))
+    # The same gate applied to the WEAKEST speaker rather than to the average. A model
+    # that reads PASS pooled while failing one voice is not shippable to that person,
+    # and the pooled row cannot show it - which is the whole reason this gate exists.
+    if speaker_rates:
+        rate, speaker, ok_n, total = min(speaker_rates)
+        checks.append((f"weakest speaker ({speaker[:14]})".ljust(32)
+                       + f"{ok_n}/{total} ({rate:.0%})",
+                       f">= {GATE_POSITIVE:.0%}", rate >= GATE_POSITIVE))
     if detected_cmd is not None:
         checks.append((f"detection with command after    {detected_cmd}/{len(positives)} "
                        f"({detected_cmd / len(positives):.0%})", f">= {GATE_COMMAND:.0%}",

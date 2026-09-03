@@ -79,6 +79,7 @@ far.
 │       ├── train.py
 │       └── manifest.py
 ├── eval/                         3 · eval model
+│   ├── paths.py                  holdout vs samples - a safety property, not a convention
 │   ├── generate_negatives.py     builds the eval corpus
 │   ├── generate_positives.py     builds the eval corpus
 │   ├── backends.py

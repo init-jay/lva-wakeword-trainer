@@ -22,19 +22,20 @@ Categories:
     general     ordinary conversation, for a baseline false-accept rate
 
 A copy of this script lives in both the openWakeWord repo (`scripts/`) and the
-training repo, since it is useful either side of the fence. Keep them identical.
+training repo, since it is useful either side of the fence. Keep them identical
+APART FROM `--out`, which defaults to this repo's data/corpus/eval/ layout.
 
 Examples
 --------
     # against a Kokoro-FastAPI server on the LAN
-    python generate_negatives.py \\
-        --url http://192.168.2.14:8880/v1/audio/speech --out negatives_tts
+    python -m eval.generate_negatives \\
+        --url http://192.168.2.14:8880/v1/audio/speech
 
     # see what would be produced without calling the server
-    python generate_negatives.py --dry-run
+    python -m eval.generate_negatives --dry-run
 
     # top up one category after editing its wordlist
-    python generate_negatives.py --categories extend --out negatives_tts
+    python -m eval.generate_negatives --categories extend
 
 Then score a model against the result with `eval_model.py --negatives ...`, reading
 the output per category rather than pooled — the corpus is adversarial by
@@ -48,6 +49,7 @@ the signal.
 import argparse
 import concurrent.futures as cf
 import json
+import sys
 import urllib.request
 import warnings
 from pathlib import Path
@@ -55,6 +57,18 @@ from pathlib import Path
 import numpy as np
 from scipy.io import wavfile
 from scipy.signal import resample_poly
+
+# Runnable as `python eval/generate_negatives.py` as well as `python -m
+# eval.generate_negatives`: the plain-path form puts eval/ on sys.path, not the root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+try:
+    from eval import paths
+    DEFAULT_OUT = str(paths.NEGATIVES_DIR)
+except ImportError:
+    # The copy of this script that lives in the openWakeWord repo, where there is no
+    # eval package and no data/ layout to write into.
+    DEFAULT_OUT = "negatives_tts"
 
 SR = 16000  # openWakeWord operates on 16 kHz mono audio
 
@@ -206,7 +220,9 @@ def main():
     p.add_argument("--api-key", default="not-needed",
                    help="bearer token; Kokoro-FastAPI ignores it (default: %(default)s)")
     p.add_argument("--model", default="kokoro", help="TTS model name")
-    p.add_argument("--out", default="negatives_tts", help="output directory for the WAVs")
+    p.add_argument("--out", default=DEFAULT_OUT,
+                   help="output directory for the WAVs (default: %(default)s, where "
+                        "the eval tools look for them)")
     p.add_argument("--categories", nargs="+", default=list(CATEGORIES),
                    choices=list(CATEGORIES), help="which categories to generate")
     p.add_argument("--workers", type=int, default=4,

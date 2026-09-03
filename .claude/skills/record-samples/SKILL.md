@@ -112,3 +112,11 @@ so the same name means the same person on both sides. Combining `--holdout` with
 
 **Record the holdout in the same session as the training clips.** A holdout captured
 weeks later on a different mic measures the setup as much as it measures the model.
+
+For run-on clips — the phrase spoken straight into a command — use a `_runon` suffix
+on the speaker name (`--holdout --speaker speaker1_runon`). The eval tools key on that
+suffix to keep the two sets apart, since a run-on clip scored as if it were the phrase
+alone measures the wrong thing. Anything without the suffix is treated as plain.
+
+The eval step then finds all of this on its own: with no `--positives`/`--runon`, it
+picks up every held-out speaker directory. Nothing to wire up per speaker.

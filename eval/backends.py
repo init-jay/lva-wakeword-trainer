@@ -17,7 +17,7 @@ pipeline nothing ships, and every detail it got right had to be rediscovered by
 experiment. What is left here is clip handling and the arithmetic that turns a stream
 of probabilities into an offset in the audio.
 
-    backend = load("my_custom_model/hey_seeree/mww/.../hey_seeree.json")
+    backend = load("output/hey_seeree/mww/hey_seeree_705c23b.json")
     scores, offsets = backend.score(pcm_int16)
 
 `offsets[k]` is how many samples of the clip had been fed when `scores[k]` came out -
@@ -348,13 +348,26 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model", required=True,
                    help="manifest .json (preferred for microWakeWord), .tflite or .onnx")
-    p.add_argument("--clips", default="my_real_samples_holdout/speaker1",
-                   help="Directory used for the self-check (default: %(default)s)")
+    p.add_argument("--clips", default=None,
+                   help="Directory used for the self-check (default: the first "
+                        "held-out speaker directory under data/recordings/holdout/)")
     p.add_argument("--limit", type=int, default=8)
     p.add_argument("--sliding-window-size", type=int, default=None)
     args = p.parse_args()
 
     import scipy.io.wavfile
+
+    from eval import paths
+
+    # One speaker is enough: this is a self-check on the backend, not a measurement
+    # of the model, so it wants a handful of real clips rather than the whole holdout.
+    if args.clips is None:
+        held_out = paths.holdout_dirs(runon=False)
+        if not held_out:
+            sys.exit(f"no held-out recordings under {paths.HOLDOUT_DIR}; record some "
+                     f"with `record_samples.py --holdout --speaker NAME`, or pass "
+                     f"--clips")
+        args.clips = str(held_out[0])
 
     backend = load(args.model, sliding_window_size=args.sliding_window_size)
     print(f"{Path(args.model).name}")

@@ -6,6 +6,7 @@
 #   data/piper_voices/  piper voices, pulled on demand into the container volume
 #   data/recordings/    real samples, raw takes, holdout   (1 · record)
 #   data/corpus/        generated positives / negatives    (2 · train)
+#   data/corpus/eval/   the TTS evaluation corpora         (3 · eval)
 #   data/audit/         tools/ one-off measurement output
 #
 #   output/             trained oww + mww models, training_config.yaml, scorecards
@@ -27,3 +28,4 @@ __pycache__/
 .vscode/
 .idea/
 *.zip
+.claude/settings.json

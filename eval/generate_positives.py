@@ -6,8 +6,9 @@ Read the output carefully, because this corpus is not a generalisation test.
 `train.py` generates its positives from every English Kokoro voice at speeds
 0.7-1.3, so a plain rendering of the wake phrase is inside the training
 distribution and the model has effectively seen it. Detection near 100% on those
-clips means the training run worked; it says nothing about a new speaker. The real
-recordings in `my_real_samples/` remain the only speaker-generalisation measure.
+clips means the training run worked; it says nothing about a new speaker. The
+held-out recordings in `data/recordings/holdout/` remain the only
+speaker-generalisation measure.
 
 What this *is* good for is the axes where the corpus can be pushed outside what
 training saw, which is why generation is organised as sweeps:
@@ -41,22 +42,24 @@ grouped by it afterwards.
 Examples
 --------
     # everything, against a Kokoro-FastAPI server on the LAN
-    python generate_positives.py --wake-word "hey seeree" \\
-        --url http://192.168.2.14:8880/v1/audio/speech --out positives_tts
+    python -m eval.generate_positives --wake-word "hey seeree" \\
+        --url http://192.168.2.14:8880/v1/audio/speech
 
     # just the axis you care about
-    python generate_positives.py --wake-word "hey seeree" --sweeps speed
+    python -m eval.generate_positives --wake-word "hey seeree" --sweeps speed
 
     # see what would be produced without calling the server
-    python generate_positives.py --wake-word "hey seeree" --dry-run
+    python -m eval.generate_positives --wake-word "hey seeree" --dry-run
 
-Then score with:
-    python eval_model.py --model MODEL --positives positives_tts --negatives negatives_tts
+Then score with, noting that --positives here OVERRIDES the held-out recordings the
+gates normally run on - this measures the sweeps, not speaker generalisation:
+    python -m eval.eval_model --model MODEL --positives data/corpus/eval/positives_tts
 """
 
 import argparse
 import concurrent.futures as cf
 import json
+import sys
 import urllib.request
 import warnings
 from pathlib import Path
@@ -64,6 +67,12 @@ from pathlib import Path
 import numpy as np
 from scipy.io import wavfile
 from scipy.signal import resample_poly
+
+# Runnable as `python eval/generate_positives.py` as well as `python -m
+# eval.generate_positives`: the plain-path form puts eval/ on sys.path, not the root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from eval import paths  # noqa: E402
 
 SR = 16000
 FULL_SCALE = 32768.0
@@ -208,7 +217,8 @@ def main():
     p.add_argument("--api-key", default="not-needed",
                    help="bearer token; Kokoro-FastAPI ignores it")
     p.add_argument("--model", default="kokoro", help="TTS model name")
-    p.add_argument("--out", default="positives_tts", help="output directory")
+    p.add_argument("--out", default=str(paths.POSITIVES_DIR),
+                   help="output directory (default: %(default)s)")
     p.add_argument("--sweeps", nargs="+",
                    default=["voices", "speed", "level", "noise", "command"],
                    choices=["voices", "speed", "level", "noise", "command"],

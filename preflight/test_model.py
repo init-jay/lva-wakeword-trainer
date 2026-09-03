@@ -7,8 +7,12 @@ system packages are required. Only numpy and openwakeword are needed.
 
 Usage:
     python test_model.py --list-devices
-    python test_model.py --model my_custom_model/hey_seeree.onnx
-    python test_model.py --model my_custom_model/hey_seeree.onnx --threshold 0.3
+    python test_model.py --model ../output/hey_seeree/oww/hey_seeree_705c23b.onnx
+    python test_model.py --model ../output/hey_seeree/oww/hey_seeree_705c23b.onnx \\
+        --threshold 0.3
+
+Runs on the HOST, not in the eval image - it needs the microphone - so the paths
+above are relative to preflight/, the directory you run it from.
 """
 
 import argparse

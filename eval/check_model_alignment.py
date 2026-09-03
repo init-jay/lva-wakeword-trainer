@@ -44,14 +44,16 @@ unlike `check_alignment.py` this does not run on a bare host. The eval image has
 everything the .onnx path needs and runs on the Mac:
 
     docker compose run --rm eval python -m eval.check_model_alignment \\
-        --model my_custom_model/hey_seeree/hey_seeree_d1bb9f4.onnx
+        --model output/hey_seeree/oww/hey_seeree_705c23b.onnx
 
 A .tflite needs ai-edge-litert, which the eval image does not carry - it uses the
 deployment runtime's bundled interpreter instead - so use the trainer image for that.
 
 Usage:
-    python -m eval.check_model_alignment --model my_custom_model/hey_seeree.onnx
-    python -m eval.check_model_alignment --model M --positives my_real_samples/speaker1
+    python -m eval.check_model_alignment \\
+        --model output/hey_seeree/oww/hey_seeree_705c23b.onnx
+    python -m eval.check_model_alignment --model M \\
+        --positives data/recordings/holdout/speaker1
     python -m eval.check_model_alignment --model M --step 20 --max-gap 600
 
 Run it as a MODULE, from the repo root. As a path (`python eval/check_model_alignment
@@ -67,6 +69,8 @@ from pathlib import Path
 import numpy as np
 import onnxruntime as ort
 import scipy.io.wavfile
+
+from eval import paths
 
 SR = 16000
 
@@ -219,8 +223,12 @@ def main():
                         help="Trained .onnx or .tflite model. Prefer the .tflite "
                              "if that is what you deploy - the two are not "
                              "guaranteed to agree.")
-    parser.add_argument("--positives", nargs="+", default=["my_real_samples"],
-                        help="Directories of positive clips (searched recursively)")
+    parser.add_argument("--positives", nargs="+", default=None,
+                        help="Directories of positive clips, searched recursively "
+                             "(default: the held-out speaker directories under "
+                             "data/recordings/holdout/). Point it at "
+                             "data/recordings/samples/ to ask the same question of "
+                             "the clips the model trained on.")
     parser.add_argument("--total-length", type=int, default=32000,
                         help="Window size in samples (default: %(default)s, what "
                              "OpenWakeWord derives for a short wake phrase)")
@@ -249,15 +257,18 @@ def main():
         print("       Pass --total-length to match the value training used.")
         sys.exit(1)
 
-    clips = load_clips(args.positives, trim=not args.no_trim, limit=args.limit)
+    positive_dirs = args.positives or [str(d) for d in paths.holdout_dirs(runon=False)]
+    paths.warn_if_trained_on(positive_dirs)
+
+    clips = load_clips(positive_dirs, trim=not args.no_trim, limit=args.limit)
     if not clips:
-        print(f"No WAV files found in {', '.join(args.positives)}")
+        print(f"No WAV files found in {paths.describe(positive_dirs)}")
         sys.exit(1)
     lengths = np.array([len(c) / SR * 1000 for _, c in clips])
 
     print("=" * 66)
     print(f"{Path(args.model).name}   {model.kind}, input {model_input}")
-    print(f"{len(clips)} clips from {', '.join(args.positives)}"
+    print(f"{len(clips)} clips from {paths.describe(positive_dirs)}"
           f"{'' if args.no_trim else ' (trimmed as train.py does)'}")
     print(f"Window: {args.total_length} samples ({args.total_length / SR:.2f}s), "
           f"clip length median {np.median(lengths):.0f}ms")

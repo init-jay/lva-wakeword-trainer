@@ -31,23 +31,31 @@ Two things travel with a microWakeWord number and are printed with it: the slidi
 window size, without which a cutoff means nothing, and the score resolution, because
 an int8 output has 256 levels and the sweep goes to 0.01.
 
-Usage:
-    python compare_models.py --models my_custom_model/hey_seeree/*.onnx \\
-        --positives my_real_samples_holdout/speaker1 \\
-        --runon my_real_samples_holdout/speaker1_runon \\
-        --negatives negatives_tts
+Usage, from the repo root:
+    # every held-out speaker, plain and run-on found automatically
+    python -m eval.compare_models --models output/hey_seeree/oww/*.onnx
+
+    # or name the directories explicitly
+    python -m eval.compare_models --models M \\
+        --positives data/recordings/holdout/speaker1 \\
+        --runon data/recordings/holdout/speaker1_runon
 
     # one model, with a threshold sweep for choosing a deployment operating point
-    python compare_models.py --models my_custom_model/hey_seeree.tflite --sweep
+    python -m eval.compare_models \\
+        --models output/hey_seeree/oww/hey_seeree_705c23b.tflite --sweep
 
-    # openWakeWord ship candidate against the microWakeWord model, on the Mac
-    docker compose run --rm eval python compare_models.py --models \\
-        my_custom_model/hey_seeree/hey_seeree_d1bb9f4.onnx \\
-        my_custom_model/hey_seeree/mww/tflite_stream_state_internal_quant/stream_state_internal_quant.tflite
+    # openWakeWord ship candidate against the microWakeWord model, on the Mac.
+    # Pass the mWW .json, not its .tflite: the manifest carries the cutoff and the
+    # sliding window, so scoring it puts those under test too.
+    docker compose run --rm eval python -m eval.compare_models --models \\
+        output/hey_seeree/oww/hey_seeree_705c23b.onnx \\
+        output/hey_seeree/mww/hey_seeree_705c23b.json
 
-Positives MUST be recordings the model has not trained on. train.py trains on
-everything under my_real_samples/, so scoring against that directory reports training
-accuracy - it overstated detection by ~10 points during this work.
+POSITIVES MUST BE RECORDINGS THE MODEL HAS NOT TRAINED ON, which is why the defaults
+come from `eval/paths.py` rather than being spelled out here: the trainer globs
+data/recordings/samples/ recursively, so scoring against that tree reports training
+accuracy - it overstated detection by ~10 points during this work. Passing a directory
+inside samples/ anyway is warned about, not blocked.
 
 Needs onnxruntime and an importable openwakeword for .onnx, plus a TFLite runtime and
 pymicro-features for microWakeWord. The `eval` compose service carries all of it and
@@ -63,7 +71,7 @@ import numpy as np
 
 # Reuse the scoring path from eval_model.py so both tools agree exactly: same
 # streaming, same noise-floor padding, same per-clip RNG seed.
-from eval import backends, eval_model as ev
+from eval import backends, eval_model as ev, paths
 
 ADVERSARIAL_PREFIXES = ("extend_", "hey_other_")
 FA_POINTS = (2, 4, 6, 8, 10, 12)
@@ -97,15 +105,24 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--models", nargs="+", required=True,
                         help=".onnx or .tflite models to compare")
-    parser.add_argument("--positives", default="my_real_samples_holdout/speaker1",
-                        help="Held-out clips of the phrase alone (default: %(default)s)")
-    parser.add_argument("--runon", default="my_real_samples_holdout/speaker1_runon",
-                        help="Held-out clips of the phrase running into a command")
-    parser.add_argument("--negatives", default="negatives_tts",
-                        help="Corpus from generate_negatives.py")
+    parser.add_argument("--positives", nargs="+", default=None,
+                        help="Held-out clips of the phrase alone (default: every "
+                             "speaker directory under data/recordings/holdout/ "
+                             "that is not a _runon one)")
+    parser.add_argument("--runon", nargs="+", default=None,
+                        help="Held-out clips of the phrase running into a command "
+                             "(default: the _runon directories under "
+                             "data/recordings/holdout/)")
+    parser.add_argument("--negatives", default=str(paths.NEGATIVES_DIR),
+                        help="Corpus from generate_negatives.py (default: %(default)s)")
     parser.add_argument("--sweep", action="store_true",
                         help="Also print a threshold sweep per model, for choosing a "
                              "deployment operating point")
+    parser.add_argument("--per-speaker-fa", type=int, default=4,
+                        help="Adversarial false-accept count the per-speaker table is "
+                             "read at (default: %(default)s). One point, not a sweep: "
+                             "it answers whether a speaker falls off, not where to "
+                             "set the threshold")
     parser.add_argument("--label-width", type=int, default=22)
     parser.add_argument("--sliding-window-size", type=int, default=None,
                         help="microWakeWord only: probabilities averaged before "
@@ -121,20 +138,47 @@ def main():
     adversarial = [(n, d) for n, d in negatives if n.startswith(ADVERSARIAL_PREFIXES)]
     ordinary = [(n, d) for n, d in negatives if not n.startswith(ADVERSARIAL_PREFIXES)]
 
-    sets = {}
-    for key, path in (("plain", args.positives), ("run-on", args.runon)):
-        clips, _ = ev.load_dir(path) if Path(path).is_dir() else ([], 0)
+    # Resolved separately so the two sets stay disjoint. Both loaders recurse, so a
+    # single --positives pointed at the holdout root would swallow the _runon
+    # directories too and report them as clean detections.
+    plain_dirs = args.positives or [str(d) for d in paths.holdout_dirs(runon=False)]
+    runon_dirs = args.runon or [str(d) for d in paths.holdout_dirs(runon=True)]
+    paths.warn_if_trained_on(plain_dirs + runon_dirs)
+
+    # `spans` records where each speaker's clips sit in the flat list, so the
+    # per-speaker view below is slicing done after one scoring pass - never a second
+    # pass, and so never able to disagree with the pooled row.
+    sets, sources, spans = {}, {}, {}
+    for key, dirs in (("plain", plain_dirs), ("run-on", runon_dirs)):
+        clips, used, key_spans = [], [], []
+        for path in dirs:
+            if not Path(path).is_dir():
+                continue
+            found, _ = ev.load_dir(path)
+            if found:
+                key_spans.append(
+                    (paths.speaker_label(path), len(clips), len(clips) + len(found)))
+                clips.extend(found)
+                used.append(path)
         if clips:
             sets[key] = clips
+            sources[key] = used
+            spans[key] = key_spans
     if not sets:
-        print("No held-out positives found. These must be recordings made AFTER the "
-              "model trained - see the module docstring.")
+        print(f"No held-out positives found in {paths.describe(plain_dirs + runon_dirs)}. "
+              f"These must be recordings the model did NOT train on - record them with "
+              f"`record_samples.py --holdout --speaker NAME`, and see the module "
+              f"docstring.")
         sys.exit(1)
 
     print("=" * 78)
     print(f"{len(args.models)} model(s) | "
           + " ".join(f"{k} {len(v)}" for k, v in sets.items())
           + f" | adversarial negatives {len(adversarial)}, ordinary {len(ordinary)}")
+    # Which recordings produced the numbers. Worth a line: the defaults now span
+    # every held-out speaker on disk, so the set changes as speakers are added.
+    for key, used in sources.items():
+        print(f"  {key:<7} {paths.describe(used)}")
     print("=" * 78)
 
     # Models are usually named <wake_word>_<commit>, so strip the shared prefix and
@@ -194,6 +238,41 @@ def main():
             cells = "/".join(f"{(s[k] >= thr).mean() * 100:.0f}" for k in sets)
             row += f"{cells:>{args.label_width + 4}}"
         print(row)
+
+    # PER SPEAKER, at one matched point. Every row above is an average over speakers,
+    # so a model that fails one voice and carries the rest reads as merely slightly
+    # worse - the failure mode that produced the 24%/97% split in train/corpus/
+    # augment.py. One FA count rather than all of them, because the question here is
+    # "does any speaker fall off", not "where is the operating point".
+    fa = args.per_speaker_fa
+    if fa < len(adversarial) and any(len(v) > 1 for v in spans.values()):
+        print(f"\nPER SPEAKER, at {fa}/{len(adversarial)} adversarial false accepts:")
+        for key in sets:
+            if len(spans[key]) < 2:
+                continue
+            print(f"  {key}")
+            print(f"    {'speaker':<18}{'n':>4}"
+                  + "".join(f"{lbl:>{args.label_width + 2}}" for lbl in scores))
+            for speaker, start, end in spans[key]:
+                row = f"    {speaker[:17]:<18}{end - start:>4}"
+                for label, s in scores.items():
+                    thr = threshold_for_fa(s["adv"], fa)
+                    rate = (s[key][start:end] >= thr).mean()
+                    row += f"{rate:>{args.label_width + 2}.0%}"
+                print(row)
+
+        # Name the spread rather than leaving it to be spotted in the table.
+        for label, s in scores.items():
+            for key in sets:
+                if len(spans[key]) < 2:
+                    continue
+                thr = threshold_for_fa(s["adv"], fa)
+                rates = [((s[key][a:b] >= thr).mean(), name) for name, a, b in spans[key]]
+                low, high = min(rates), max(rates)
+                if high[0] - low[0] >= 0.25:
+                    print(f"\n  {label} on {key}: {low[1]} at {low[0]:.0%} vs "
+                          f"{high[1]} at {high[0]:.0%} - a {(high[0] - low[0]) * 100:.0f}"
+                          f" point spread across speakers, not a threshold problem.")
 
     if len(scores) > 1:
         best = {}
