@@ -10,18 +10,22 @@
 #   docker compose run --rm trainer ./download-external-data.sh
 #   docker compose run --rm mww     ./download-external-data.sh mww
 #
-# WHY A TARGET AND NOT JUST "DOWNLOAD EVERYTHING". The two trainers share most of
-# this but not all of it, and the surplus is lopsided:
+# WHY A TARGET AND NOT JUST "DOWNLOAD EVERYTHING". Almost none of this is actually
+# shared, and each trainer's private half is large. Sizes measured on disk after a
+# full run, not taken from the download sizes - which for the ambient sets are off by
+# more than 4x:
 #
-#   shared    mit_rirs, audioset_16k, fma          ~19 GB   BOTH trainers augment
-#                                                           with these
-#   oww       ACAV100M + validation features       ~17.5 GB openWakeWord only
-#   mww       mww_ambient RaggedMmap sets          ~5.7 GB  microWakeWord only
+#   shared    mit_rirs, audioset_16k, fma       ~730 MB  BOTH trainers augment with
+#                                                        these. The small part.
+#   oww       ACAV100M + validation features    ~17.2 GB openWakeWord only
+#   mww       mww_ambient RaggedMmap sets       ~25 GB   microWakeWord only
+#                                                        (~5.7 GB of zips, unpacked)
 #
-# Fetching everything to train for the ESP32 means downloading the 17.5 GB ACAV100M
-# array that nothing in the microWakeWord path ever opens. On a box with 29 GB free
-# that is most of the remaining headroom, spent on a file that is only ever mmapped
-# by the other trainer.
+# So `all` costs ~43 GB to get ~730 MB of genuinely common data. Training only for
+# the ESP32 with `all` means fetching a 17.2 GB array that nothing in the mWW path
+# opens; training only for the server means unpacking 25 GB of ambient spectrograms
+# in microWakeWord's own feature format, which the openWakeWord path cannot read.
+# Either way the surplus is larger than everything the two actually share.
 #
 # THE TARGETS ALSO HAVE DIFFERENT TOOL REQUIREMENTS, which is the other reason they
 # are separable. `shared` and `oww` resample audio through Python `datasets`, `scipy`
