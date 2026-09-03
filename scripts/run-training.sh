@@ -52,12 +52,29 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Rebuild first. train.py and the openwakeword patches are baked into the image, so
-# a code change that is not rebuilt runs the previous version - which is how a
-# validation-batching fix appeared to have no effect and the OOM recurred. Cached
-# layers make this a few seconds when nothing has changed.
-echo "=== $(date '+%H:%M:%S')  building trainer image"
-docker compose build oww-trainer
+# Rebuild first, unless told not to.
+#
+# WHAT STILL NEEDS A REBUILD, now that docker-compose bind-mounts train/ and
+# scripts/ over the copies in the image: the openwakeword PATCHES, requirements.txt,
+# and the Dockerfiles. Those are applied or installed at build time and cannot be
+# mounted over. Editing train.py no longer needs one - the mount shadows the copy -
+# which is a change from when this line was written.
+#
+# The reason it is still here by default is the patches. A patch edit that is not
+# rebuilt runs the previous version silently, which is how a validation-batching fix
+# appeared to have no effect and the OOM recurred.
+#
+# SKIP_BUILD=1 bypasses it. Worth using when the build cache has been pruned - the
+# rebuild is then cold, costs a re-download of the CUDA base and torch, and
+# repopulates tens of GB of cache. On a tight disk that is the opposite of what you
+# want before a run that needs room for the corpus.
+if [[ "${SKIP_BUILD:-}" == "1" ]]; then
+    echo "=== $(date '+%H:%M:%S')  SKIP_BUILD=1 - using the existing image"
+    echo "    Patches, requirements.txt and Dockerfile changes will NOT be picked up."
+else
+    echo "=== $(date '+%H:%M:%S')  building trainer image"
+    docker compose build oww-trainer
+fi
 
 # Piper, only when the run actually asks for it. Unlike Kokoro it is NOT stopped
 # before training: it runs CPU-only (--use-cuda measured 2.5x slower, see
