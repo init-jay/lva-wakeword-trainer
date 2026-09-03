@@ -130,7 +130,12 @@ WATCH_PID=$!
 # Build the command with each argument quoted, so it survives being passed to
 # `script` as a single string.
 CMD="docker compose run --rm oww-trainer python -m train.oww.train"
-CMD="$CMD --wake-word $(printf '%q' "$WAKE_WORD") --data-dir /app/data"
+# /app/data/external, NOT /app/data. The third-party corpora moved into
+# data/external/ and train.py builds rir_paths/background_paths/feature_data_files
+# by joining this prefix - so the old value points at directories that no longer
+# exist, and openWakeWord augments with no impulse responses and no background audio
+# rather than erroring.
+CMD="$CMD --wake-word $(printf '%q' "$WAKE_WORD") --data-dir /app/data/external"
 for arg in "$@"; do CMD="$CMD $(printf '%q' "$arg")"; done
 
 # Run under `script` so the container gets a pty. Piping to tee otherwise denies
