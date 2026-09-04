@@ -83,24 +83,39 @@ commands for each of the three scripts in `scripts/`.
 
 ## How long it takes
 
-Measured on the training VM: **RTX 3090, 20 GB RAM, 4 cores**.
+Two machines, both measured end to end with `time`:
 
-| Step | Hardware | Time |
+- **CUDA box** — RTX 3090, 20 GB RAM, 4 cores, `docker-compose.cuda.yml`
+- **Mac** — M1 Max, 64 GB, 10 cores, `docker-compose.cpu.yml`, no GPU at all
+
+| Step | CUDA box | Mac, CPU only |
 |---|---|---|
-| Fetch external corpora | any, once per machine | download-bound, ~43 GB for both targets |
-| Record | host + mic | human time, 20–50 clips per speaker |
-| Train — microWakeWord | RTX 3090 | **28 min** end to end, all four stages |
-| Train — openWakeWord | RTX 3090 | **29 min** end to end, TTS corpus included |
-| Eval | Mac or Linux, CPU | minutes |
-| Preflight | host + mic | human time |
+| Fetch external corpora | download-bound, ~43 GB for both targets | same |
+| Record | human time, 20–50 clips per speaker | same |
+| Train — microWakeWord | **28m03s** | **26m06s** |
+| Train — openWakeWord | **28m59s** | not yet measured |
+| Eval | minutes | minutes |
+| Preflight | needs a mic | needs a mic |
 
-Both are full script runs at defaults, not the training stage alone —
+**The Mac is not slower, and for microWakeWord it was faster.** That is not a quirk:
+the mWW model is 25,537 parameters, too small to fill a 3090, and most of a run is
+not training at all. Piper corpus generation is CPU-only on both machines by
+choice — `--use-cuda` measured 2.5x *slower* — so the majority of the work ran on
+4 cores on the VM and 10 on the Mac. The GPU's advantage applied to a small slice
+while its weaker CPU applied to the rest.
+
+Do not read that as "the GPU is pointless". It is a claim about one small model.
+openWakeWord is a different shape — it mmaps a 17.28 GB feature array and trains a
+much larger network — and has not been measured on CPU yet.
+
+Both figures are full script runs at defaults, not the training stage alone:
 `run-mww-training.sh` covers corpus, features, training and manifest;
 `run-oww-training.sh` covers TTS generation, augmentation, training and the tflite
-conversion. Training both targets is therefore about an hour, and they are
-independent, so there is no need to run one before the other.
+conversion. The two targets are independent, so neither needs the other first.
 
-Two things move these numbers more than the GPU does. `SKIP_CORPUS=1` skips corpus
-generation on a re-run, which is most of the openWakeWord figure. And a run that
-holds the card alone is the difference between finishing and not: a Kokoro server
-left up cost a run a 16.09 GiB allocation with 15.34 GiB free.
+Three things move these numbers more than the hardware does. `SKIP_CORPUS=1` skips
+corpus generation on a re-run, which is most of the openWakeWord figure. Docker
+Desktop's memory limit decides whether that 17.28 GB array is mmap'd or thrashed,
+and falling short page-faults rather than erroring. And on the CUDA box, holding the
+card alone is the difference between finishing and not: a Kokoro server left up cost
+a run a 16.09 GiB allocation with 15.34 GiB free.
