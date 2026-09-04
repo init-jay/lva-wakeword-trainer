@@ -27,6 +27,7 @@ happens inside each step.
 - Suggestions for improving the next training run (requires an AI agent pointed at this repo)
 
 
+
 ## Quick start
 
 Open the repo in a coding agent and say what you want:
@@ -77,3 +78,21 @@ commands for each of the three scripts in `scripts/`.
 - **macOS is first class**, Linux is second class, and Windows is not supported.
 - **GPU acceleration is optional**, and only applies to the training step.
 - **Agent first.** This repo is meant to be handed to an agent or coding harness. The in-repo skills are written so an agent can drive the whole pipeline and explain the performance of the deployment candidate to you. If you have deep knowledge of how oww and mww models work, you can also refer to the [manual run docs](docs/MANUAL_RUN.md) to execute the pipeline by hand and interpret the results yourself.
+
+
+
+## How long it takes
+
+Measured on the training VM: **RTX 3090, 20 GB RAM, 4 cores**.
+
+| Step | Hardware | Time |
+|---|---|---|
+| Fetch external corpora | any, once per machine | download-bound, ~43 GB for both targets |
+| Record | host + mic | human time, 20–50 clips per speaker |
+| Train — microWakeWord | RTX 3090 | **28 min** end to end, all four stages |
+| Train — openWakeWord | RTX 3090 | hours; corpus generation dominates |
+| Eval | Mac or Linux, CPU | minutes |
+| Preflight | host + mic | human time |
+
+The 28 minutes is a full `run-mww-training.sh` pass at defaults — corpus, features,
+training and manifest — not the training stage alone.
