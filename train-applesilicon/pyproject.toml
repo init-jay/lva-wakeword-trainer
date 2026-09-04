@@ -26,18 +26,29 @@ requires-python = ">=3.11,<3.13"
 dependencies = [
     # Core, matching docker/requirements.txt. numpy<2 is openWakeWord's constraint,
     # not a macOS one - speechbrain 0.5.14 and datasets 2.14.6 predate the numpy 2 ABI.
-    "scipy",
+    # scipy IS BOUNDED BECAUSE acoustics IS PINNED, exactly as in
+    # docker/requirements.txt: acoustics 0.2.6 imports scipy.special.sph_harm, which
+    # scipy removed in 1.17, and openwakeword/data.py fails at import without it.
+    "scipy<1.17",
     "numpy<2",
     "pyarrow>=8.0.0,<15.0.0",
     "tqdm",
     "pyyaml",
     "requests",
 
-    # PLAIN torch, NOT the cu121 index the Dockerfile uses. The macOS arm64 wheels
-    # carry the MPS backend already; there is no separate "torch-metal" to install
-    # and no index-url to set. Phase 1 still runs this on CPU - see the runner.
-    "torch",
-    "torchaudio",
+    # PLAIN torch from PyPI, NOT the cu121 index the Dockerfile uses. The macOS arm64
+    # wheels carry the MPS backend already; there is no separate "torch-metal" to
+    # install and no index-url to set.
+    #
+    # PINNED TO 2.5.1 TO MATCH docker/Dockerfile.oww.cpu AND THE CUDA IMAGE. That is
+    # the entire point of this environment: it exists to answer whether the macOS
+    # wheel is faster than the linux/arm64 one at the SAME version. Let these float
+    # and the answer is contaminated by whatever else changed between releases - and
+    # the newer wheels are actively broken here anyway (torchaudio dropped
+    # set_audio_backend and routed load() through torchcodec after 2.5, which cost
+    # two failed runs before the pin).
+    "torch==2.5.1",
+    "torchaudio==2.5.1",
 
     # openWakeWord's training pipeline, pinned exactly as the image pins them.
     "mutagen==1.47.0",

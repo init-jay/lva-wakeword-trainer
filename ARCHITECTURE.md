@@ -117,7 +117,10 @@ far.
 ├── scripts/
 │   ├── download-external-data.sh  -> data/external/  [all|oww|mww]
 │   ├── run-oww-training.sh        2 · one command, corpus built by the run
-│   └── run-mww-training.sh        2 · four stages, corpus built separately
+│   ├── run-mww-training.sh        2 · four stages, corpus built separately
+│   ├── start-kokoro-host.sh       TTS outside Docker - 3.7x the container on arm64
+│   ├── setup-applesilicon-trainer.sh   what Dockerfile.oww.cpu does, on the host
+│   └── run-oww-training-applesilicon.sh  2 · same trainer, no container
 ├── .dockerignore                 keeps data/ (~43 GB) out of every build context
 ├── docker-compose.yml            no GPU required, so eval and record run anywhere
 ├── docker-compose.cuda.yml       overlay: NVIDIA devices - kokoro, trainers, piper

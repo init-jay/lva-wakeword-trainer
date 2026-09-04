@@ -18,6 +18,14 @@ venv/
 .venv/
 .venv-*/
 
+# The openWakeWord clone that scripts/setup-applesilicon-trainer.sh makes at the repo
+# root. It is upstream's code plus our patches applied in place - reproducible from
+# that script, and never ours to commit. train/oww/train.py resolves it as
+# WORK_DIR/"openwakeword/...", which is why it sits here rather than out of the way.
+# .dockerignore excludes it too: inside a build context it would shadow the clone each
+# image makes for itself, with one patched for a different device.
+openwakeword/
+
 # Python
 __pycache__/
 *.pyc
