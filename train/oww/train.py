@@ -702,11 +702,18 @@ def convert_to_tflite(model_path: Path):
         return None
 
 
-def setup_training_dirs(wake_word: str) -> Path:
+def setup_training_dirs(wake_word: str, skip_corpus: bool = False) -> Path:
     """Set up training directory structure.
 
     data/corpus/<wake_word>/oww/ - beside the microWakeWord corpus at .../mww/,
     without either pipeline reaching into the other's directory.
+
+    skip_corpus keeps what is already there instead of clearing it, for a re-run
+    after a failure downstream of generation - the OOM at the feature array is the
+    motivating case, since it strikes with the whole corpus already built. It
+    VERIFIES rather than trusts: an empty or partial corpus trains a model on
+    nothing and reports excellent accuracy for it, so a missing class is a hard
+    error here rather than a puzzling scorecard an hour later.
 
     THE CORPUS AND THE MODELS ARE NOW SEPARATE TREES, and this function is why. It
     rmtree's its base directory on every run. That base used to sit under
@@ -718,12 +725,26 @@ def setup_training_dirs(wake_word: str) -> Path:
     """
     safe_name = wake_word.replace(" ", "_").lower()
     base_dir = WORK_DIR / "data" / "corpus" / safe_name / "oww"
+    subdirs = ["positive_train", "positive_test", "negative_train", "negative_test"]
+
+    if skip_corpus:
+        counts = {d: len(list((base_dir / d).glob("*.wav"))) for d in subdirs}
+        empty = [d for d, n in counts.items() if n == 0]
+        if empty:
+            print(f"ERROR: --skip-corpus, but {base_dir} has no clips in: "
+                  f"{', '.join(empty)}")
+            print("       Re-run without --skip-corpus to build it.")
+            sys.exit(1)
+        print("Reusing existing corpus (--skip-corpus):")
+        for d in subdirs:
+            print(f"  {d}: {counts[d]} clips")
+        return base_dir
 
     if base_dir.exists():
         print("Clearing previous training outputs...")
         shutil.rmtree(base_dir)
 
-    for subdir in ["positive_train", "positive_test", "negative_train", "negative_test"]:
+    for subdir in subdirs:
         (base_dir / subdir).mkdir(parents=True, exist_ok=True)
 
     return base_dir
@@ -942,6 +963,16 @@ def main():
                         "mit_rirs (default: %(default)s)")
     parser.add_argument("--no-trim", action="store_true",
                         help="Skip silence trimming before augmentation (not recommended)")
+    parser.add_argument("--skip-corpus", action="store_true",
+                        help="Reuse data/corpus/<wake>/oww/ instead of regenerating it. "
+                             "For resuming a run that failed AFTER generation - the "
+                             "CUDA OOM at the feature array is the usual reason. Skips "
+                             "TTS, real-clip copying and trimming; still re-runs "
+                             "augmentation and training, so --training-steps and the "
+                             "model geometry are still yours to change. Sample-shaping "
+                             "flags (--samples-per-voice, --piper-fraction, "
+                             "--child-fraction, --runon-fraction) are IGNORED: the clips "
+                             "already exist and this does not rebuild them.")
     parser.add_argument("--negatives-file",
                         help="Text file of confusable negative phrases, one per line "
                              "(# comments allowed). Overrides the built-in list for "
@@ -1026,193 +1057,201 @@ def main():
     print("[Compute]")
     report_onnx_providers()
 
-    # Get Kokoro voices
-    print("\n[Kokoro servers]")
-    pool = KokoroPool(args.kokoro_url.split(","))
-    kokoro_voices = probe_kokoro_servers(pool)
-    if not kokoro_voices:
-        print("ERROR: No Kokoro voices available!")
-        sys.exit(1)
-    print(f"  {len(pool)} server(s), {len(kokoro_voices)} shared English voices")
-
-    excluded = set(MISPRONOUNCING_VOICES.get(safe_name, []))
-    excluded.update(v.strip() for v in args.exclude_voices.split(",") if v.strip())
-    if excluded:
-        present = sorted(v for v in kokoro_voices if v in excluded)
-        kokoro_voices = [v for v in kokoro_voices if v not in excluded]
-        print(f"  Excluding {len(present)} voice(s) that mispronounce the wake word: "
-              f"{', '.join(present)}")
-        print(f"  {len(kokoro_voices)} voices remain")
-        missing = sorted(excluded - set(present))
-        if missing:
-            print(f"  NOTE: {', '.join(missing)} not offered by these servers anyway")
+    # ONLY WHEN GENERATING. --skip-corpus needs no TTS, and probing here would
+    # fail a resumed run for want of a server it is never going to call - while
+    # also holding ~8 GiB of VRAM that training is about to want. See
+    # wait_for_kokoro_shutdown.
+    if not args.skip_corpus:
+        # Get Kokoro voices
+        print("\n[Kokoro servers]")
+        pool = KokoroPool(args.kokoro_url.split(","))
+        kokoro_voices = probe_kokoro_servers(pool)
         if not kokoro_voices:
-            print("ERROR: every available voice is excluded!")
+            print("ERROR: No Kokoro voices available!")
             sys.exit(1)
+        print(f"  {len(pool)} server(s), {len(kokoro_voices)} shared English voices")
+
+        excluded = set(MISPRONOUNCING_VOICES.get(safe_name, []))
+        excluded.update(v.strip() for v in args.exclude_voices.split(",") if v.strip())
+        if excluded:
+            present = sorted(v for v in kokoro_voices if v in excluded)
+            kokoro_voices = [v for v in kokoro_voices if v not in excluded]
+            print(f"  Excluding {len(present)} voice(s) that mispronounce the wake word: "
+                  f"{', '.join(present)}")
+            print(f"  {len(kokoro_voices)} voices remain")
+            missing = sorted(excluded - set(present))
+            if missing:
+                print(f"  NOTE: {', '.join(missing)} not offered by these servers anyway")
+            if not kokoro_voices:
+                print("ERROR: every available voice is excluded!")
+                sys.exit(1)
 
     # Setup directories
-    base_dir = setup_training_dirs(wake_word)
+    base_dir = setup_training_dirs(wake_word, args.skip_corpus)
     pos_train = base_dir / "positive_train"
     pos_test = base_dir / "positive_test"
     neg_train = base_dir / "negative_train"
     neg_test = base_dir / "negative_test"
 
-    # Text variations for positive samples.
-    #
-    # NO UPPERCASE. `wake_word.upper()` was in this list for the first twelve runs
-    # and it renders the invented word as SPELLED-OUT LETTERS - "hey S-E-E-R-E-E" -
-    # which was then labelled as the wake word. A sixth of the plain positives were
-    # mislabelled that whole time. Caught by ear; the measurements that were
-    # supposed to catch it both failed, and how they failed is the point:
-    #
-    #   * duration: 1083 ms against 965 ms, only +12%. Spelling six letters should
-    #     have doubled it. Too weak a signal to conclude anything from, and it was
-    #     read as "emphatic delivery" instead.
-    #   * embedding distance: 0.535 from plain, about the same as a DIFFERENT VOICE
-    #     (0.70). That was read as "lots of diversity" when it was really "this is
-    #     not the same phrase".
-    #
-    # A large distance from the plain rendering cannot distinguish useful variety
-    # from a different utterance. Anything added here must be LISTENED to.
-    #
-    # It is uppercase on the invented word specifically: "HEY seeree" measures 0.031
-    # from plain (nothing happens), while "hey SEEREE" measures 0.030 from
-    # "HEY SEEREE" (both spell it). A real word in caps is fine; the wake word is
-    # not a real word, which is the whole reason it makes a good wake word.
-    #
-    # What is left is punctuation, which changes prosody without touching
-    # pronunciation. Distances from plain (af_bella / am_adam):
-    #
-    #   hey seeree,    0.437 / 0.344
-    #   hey seeree!    0.291 / 0.201
-    #   hey seeree...  0.264 / 0.523
-    #   hey seeree!!   0.158 / 0.232
-    #   hey seeree?    0.105 / 0.304
-    #   hey seeree.    0.086 / 0.294
-    #   Hey Seeree     0.027 / 0.053   <- dropped, indistinguishable from plain
-    #
-    # `.lower()` is also gone: it is the same STRING as `wake_word` for a lowercase
-    # wake word, so it was a literal duplicate slot.
-    #
-    # The phrase-alone texts, and the tuned speed grid, live in
-    # corpus/positives.py so the microWakeWord corpus renders the same thing.
-    positive_texts = plain_positive_texts(wake_word)
+    # THE WHOLE CORPUS STAGE. Skipped wholesale rather than per-call, so a
+    # --skip-corpus run cannot half-generate into a corpus it did not build.
+    if not args.skip_corpus:
+        # Text variations for positive samples.
+        #
+        # NO UPPERCASE. `wake_word.upper()` was in this list for the first twelve runs
+        # and it renders the invented word as SPELLED-OUT LETTERS - "hey S-E-E-R-E-E" -
+        # which was then labelled as the wake word. A sixth of the plain positives were
+        # mislabelled that whole time. Caught by ear; the measurements that were
+        # supposed to catch it both failed, and how they failed is the point:
+        #
+        #   * duration: 1083 ms against 965 ms, only +12%. Spelling six letters should
+        #     have doubled it. Too weak a signal to conclude anything from, and it was
+        #     read as "emphatic delivery" instead.
+        #   * embedding distance: 0.535 from plain, about the same as a DIFFERENT VOICE
+        #     (0.70). That was read as "lots of diversity" when it was really "this is
+        #     not the same phrase".
+        #
+        # A large distance from the plain rendering cannot distinguish useful variety
+        # from a different utterance. Anything added here must be LISTENED to.
+        #
+        # It is uppercase on the invented word specifically: "HEY seeree" measures 0.031
+        # from plain (nothing happens), while "hey SEEREE" measures 0.030 from
+        # "HEY SEEREE" (both spell it). A real word in caps is fine; the wake word is
+        # not a real word, which is the whole reason it makes a good wake word.
+        #
+        # What is left is punctuation, which changes prosody without touching
+        # pronunciation. Distances from plain (af_bella / am_adam):
+        #
+        #   hey seeree,    0.437 / 0.344
+        #   hey seeree!    0.291 / 0.201
+        #   hey seeree...  0.264 / 0.523
+        #   hey seeree!!   0.158 / 0.232
+        #   hey seeree?    0.105 / 0.304
+        #   hey seeree.    0.086 / 0.294
+        #   Hey Seeree     0.027 / 0.053   <- dropped, indistinguishable from plain
+        #
+        # `.lower()` is also gone: it is the same STRING as `wake_word` for a lowercase
+        # wake word, so it was a literal duplicate slot.
+        #
+        # The phrase-alone texts, and the tuned speed grid, live in
+        # corpus/positives.py so the microWakeWord corpus renders the same thing.
+        positive_texts = plain_positive_texts(wake_word)
 
-    # Negative phrases - see build_negative_phrases for why the confusable ones
-    # (near-misses of the wake word) are the important half of this list.
-    print("\n[Negative wordlist]")
-    negative_phrases = build_negative_phrases(wake_word, args.negatives_file,
-                                             with_commands=args.runon_fraction > 0)
-    print(f"  Total negative phrases: {len(negative_phrases)}")
+        # Negative phrases - see build_negative_phrases for why the confusable ones
+        # (near-misses of the wake word) are the important half of this list.
+        print("\n[Negative wordlist]")
+        negative_phrases = build_negative_phrases(wake_word, args.negatives_file,
+                                                 with_commands=args.runon_fraction > 0)
+        print(f"  Total negative phrases: {len(negative_phrases)}")
 
-    # === POSITIVE SAMPLES ===
-    print("\n" + "=" * 60)
-    print("Generating POSITIVE samples...")
-    print("=" * 60)
+        # === POSITIVE SAMPLES ===
+        print("\n" + "=" * 60)
+        print("Generating POSITIVE samples...")
+        print("=" * 60)
 
-    # Split the positive budget between the phrase alone and the phrase running into
-    # a command. The total is unchanged, so the balance against the negatives is too.
-    runon_train = int(args.samples_per_voice * args.runon_fraction)
-    plain_train = args.samples_per_voice - runon_train
-    runon_test = int(args.samples_per_voice // 10 * args.runon_fraction)
-    plain_test = args.samples_per_voice // 10 - runon_test
+        # Split the positive budget between the phrase alone and the phrase running into
+        # a command. The total is unchanged, so the balance against the negatives is too.
+        runon_train = int(args.samples_per_voice * args.runon_fraction)
+        plain_train = args.samples_per_voice - runon_train
+        runon_test = int(args.samples_per_voice // 10 * args.runon_fraction)
+        plain_test = args.samples_per_voice // 10 - runon_test
 
-    # Piper SUBSTITUTES for part of the phrase-alone budget rather than adding to it.
-    #
-    # Adding would move three things at once: engine diversity, total corpus size,
-    # and - because real clips are a FRACTION of the positive set - real-clip
-    # density, which run 10 measured as the largest single lever here (run-on
-    # 53% -> 77%). A naive "also generate Piper" over all 84 voices would have taken
-    # real clips from ~17% of positives to ~6%, and the result would have measured
-    # dilution rather than diversity.
-    #
-    # Substituting holds the total, the plain/run-on split, and real-clip density
-    # fixed, leaving one variable: where a share of the phrase-alone clips came from.
-    # Run-ons stay entirely Kokoro - see the --piper-fraction help for why.
-    piper_voices = []
-    kokoro_plain_train, kokoro_plain_test = plain_train, plain_test
-    if args.piper_fraction > 0:
-        host, _, port = args.piper_url.rpartition(":")
-        piper_voices = select_piper_voices(
-            host, port, wake_word,
-            languages=tuple(args.piper_languages.split(",")),
-            max_speakers=args.piper_speakers)
+        # Piper SUBSTITUTES for part of the phrase-alone budget rather than adding to it.
+        #
+        # Adding would move three things at once: engine diversity, total corpus size,
+        # and - because real clips are a FRACTION of the positive set - real-clip
+        # density, which run 10 measured as the largest single lever here (run-on
+        # 53% -> 77%). A naive "also generate Piper" over all 84 voices would have taken
+        # real clips from ~17% of positives to ~6%, and the result would have measured
+        # dilution rather than diversity.
+        #
+        # Substituting holds the total, the plain/run-on split, and real-clip density
+        # fixed, leaving one variable: where a share of the phrase-alone clips came from.
+        # Run-ons stay entirely Kokoro - see the --piper-fraction help for why.
+        piper_voices = []
+        kokoro_plain_train, kokoro_plain_test = plain_train, plain_test
+        if args.piper_fraction > 0:
+            host, _, port = args.piper_url.rpartition(":")
+            piper_voices = select_piper_voices(
+                host, port, wake_word,
+                languages=tuple(args.piper_languages.split(",")),
+                max_speakers=args.piper_speakers)
+            if piper_voices:
+                kokoro_plain_train = int(round(plain_train * (1 - args.piper_fraction)))
+                kokoro_plain_test = int(round(plain_test * (1 - args.piper_fraction)))
+                # Budget in TOTAL clips, then spread over however many Piper voices
+                # there are - the two engines do not have the same voice count, so a
+                # per-voice figure would not substitute one-for-one.
+                piper_total_train = (plain_train - kokoro_plain_train) * len(kokoro_voices)
+                piper_total_test = (plain_test - kokoro_plain_test) * len(kokoro_voices)
+                piper_per_voice_train = max(1, piper_total_train // len(piper_voices))
+                piper_per_voice_test = max(1, piper_total_test // len(piper_voices))
+
+        print("\n[Kokoro TTS]")
+        print(f"  Per voice: {kokoro_plain_train} phrase-alone, {runon_train} run-on "
+              f"({args.runon_fraction:.0%})")
+        generate_kokoro_samples(pool, kokoro_voices, pos_train,
+                                kokoro_plain_train, positive_texts, "Kokoro positive train",
+                                args.tts_workers, args.tts_batch)
+        generate_kokoro_samples(pool, kokoro_voices, pos_test,
+                                kokoro_plain_test, positive_texts, "Kokoro positive test",
+                                args.tts_workers, args.tts_batch)
+
         if piper_voices:
-            kokoro_plain_train = int(round(plain_train * (1 - args.piper_fraction)))
-            kokoro_plain_test = int(round(plain_test * (1 - args.piper_fraction)))
-            # Budget in TOTAL clips, then spread over however many Piper voices
-            # there are - the two engines do not have the same voice count, so a
-            # per-voice figure would not substitute one-for-one.
-            piper_total_train = (plain_train - kokoro_plain_train) * len(kokoro_voices)
-            piper_total_test = (plain_test - kokoro_plain_test) * len(kokoro_voices)
-            piper_per_voice_train = max(1, piper_total_train // len(piper_voices))
-            piper_per_voice_test = max(1, piper_total_test // len(piper_voices))
+            host, _, port = args.piper_url.rpartition(":")
+            print(f"\n[Piper TTS]  {len(piper_voices)} voices, "
+                  f"{piper_per_voice_train} phrase-alone each "
+                  f"(~{args.piper_fraction:.0%} of the phrase-alone budget)")
+            generate_piper_samples(host, int(port), piper_voices, pos_train,
+                                   piper_per_voice_train, positive_texts,
+                                   PLAIN_SPEED_GRID, "Piper positive train")
+            generate_piper_samples(host, int(port), piper_voices, pos_test,
+                                   piper_per_voice_test, positive_texts,
+                                   PLAIN_SPEED_GRID, "Piper positive test")
 
-    print("\n[Kokoro TTS]")
-    print(f"  Per voice: {kokoro_plain_train} phrase-alone, {runon_train} run-on "
-          f"({args.runon_fraction:.0%})")
-    generate_kokoro_samples(pool, kokoro_voices, pos_train,
-                            kokoro_plain_train, positive_texts, "Kokoro positive train",
-                            args.tts_workers, args.tts_batch)
-    generate_kokoro_samples(pool, kokoro_voices, pos_test,
-                            kokoro_plain_test, positive_texts, "Kokoro positive test",
-                            args.tts_workers, args.tts_batch)
+        if runon_train:
+            # One reference cache across both sets: the phrase-alone lengths are the
+            # same, and rebuilding it would cost a few hundred needless TTS calls.
+            reference = {}
+            generate_runon_samples(pool, kokoro_voices, pos_train,
+                                   runon_train, wake_word, "Kokoro run-on train",
+                                   reference, args.tts_workers, args.tts_batch)
+            generate_runon_samples(pool, kokoro_voices, pos_test,
+                                   runon_test, wake_word, "Kokoro run-on test",
+                                   reference, args.tts_workers, args.tts_batch)
 
-    if piper_voices:
-        host, _, port = args.piper_url.rpartition(":")
-        print(f"\n[Piper TTS]  {len(piper_voices)} voices, "
-              f"{piper_per_voice_train} phrase-alone each "
-              f"(~{args.piper_fraction:.0%} of the phrase-alone budget)")
-        generate_piper_samples(host, int(port), piper_voices, pos_train,
-                               piper_per_voice_train, positive_texts,
-                               PLAIN_SPEED_GRID, "Piper positive train")
-        generate_piper_samples(host, int(port), piper_voices, pos_test,
-                               piper_per_voice_test, positive_texts,
-                               PLAIN_SPEED_GRID, "Piper positive test")
+        # Before the real clips are copied in, so the shift only ever sees Kokoro
+        # output - and before trimming, so the shifted copies are trimmed like the rest.
+        if args.child_fraction > 0:
+            print("\n[Child-range copies]")
+            print(f"  Shifting {args.child_fraction:.0%} of Kokoro clips: "
+                  f"female {CHILD_STRETCH['f'][0]}-{CHILD_STRETCH['f'][1]}x, "
+                  f"male {CHILD_STRETCH['m'][0]}-{CHILD_STRETCH['m'][1]}x")
+            add_child_range_copies(pos_train, "VTLP positive train", args.child_fraction)
+            add_child_range_copies(pos_test, "VTLP positive test", args.child_fraction)
 
-    if runon_train:
-        # One reference cache across both sets: the phrase-alone lengths are the
-        # same, and rebuilding it would cost a few hundred needless TTS calls.
-        reference = {}
-        generate_runon_samples(pool, kokoro_voices, pos_train,
-                               runon_train, wake_word, "Kokoro run-on train",
-                               reference, args.tts_workers, args.tts_batch)
-        generate_runon_samples(pool, kokoro_voices, pos_test,
-                               runon_test, wake_word, "Kokoro run-on test",
-                               reference, args.tts_workers, args.tts_batch)
+        print("\n[Real Voice]")
+        # The training half of the recordings. data/recordings/holdout/ is a SIBLING and
+        # is never read here - copy_real_samples globs this tree recursively, so a
+        # holdout nested inside it would be trained on and every eval number after that
+        # would be measuring memorisation. See eval/paths.py, which enforces the pair.
+        real_samples_dir = WORK_DIR / "data" / "recordings" / "samples"
+        real_count = copy_real_samples(real_samples_dir, pos_train, args.real_copies)
+        if real_count > 5:
+            copy_real_samples(real_samples_dir, pos_test, args.real_copies)
 
-    # Before the real clips are copied in, so the shift only ever sees Kokoro
-    # output - and before trimming, so the shifted copies are trimmed like the rest.
-    if args.child_fraction > 0:
-        print("\n[Child-range copies]")
-        print(f"  Shifting {args.child_fraction:.0%} of Kokoro clips: "
-              f"female {CHILD_STRETCH['f'][0]}-{CHILD_STRETCH['f'][1]}x, "
-              f"male {CHILD_STRETCH['m'][0]}-{CHILD_STRETCH['m'][1]}x")
-        add_child_range_copies(pos_train, "VTLP positive train", args.child_fraction)
-        add_child_range_copies(pos_test, "VTLP positive test", args.child_fraction)
+        # === NEGATIVE SAMPLES ===
+        print("\n" + "=" * 60)
+        print("Generating NEGATIVE samples...")
+        print("=" * 60)
 
-    print("\n[Real Voice]")
-    # The training half of the recordings. data/recordings/holdout/ is a SIBLING and
-    # is never read here - copy_real_samples globs this tree recursively, so a
-    # holdout nested inside it would be trained on and every eval number after that
-    # would be measuring memorisation. See eval/paths.py, which enforces the pair.
-    real_samples_dir = WORK_DIR / "data" / "recordings" / "samples"
-    real_count = copy_real_samples(real_samples_dir, pos_train, args.real_copies)
-    if real_count > 5:
-        copy_real_samples(real_samples_dir, pos_test, args.real_copies)
-
-    # === NEGATIVE SAMPLES ===
-    print("\n" + "=" * 60)
-    print("Generating NEGATIVE samples...")
-    print("=" * 60)
-
-    print("\n[Kokoro TTS]")
-    generate_kokoro_samples(pool, kokoro_voices, neg_train,
-                            args.samples_per_voice, negative_phrases,
-                            "Kokoro negative train", args.tts_workers, args.tts_batch)
-    generate_kokoro_samples(pool, kokoro_voices, neg_test,
-                            args.samples_per_voice // 10, negative_phrases,
-                            "Kokoro negative test", args.tts_workers, args.tts_batch)
+        print("\n[Kokoro TTS]")
+        generate_kokoro_samples(pool, kokoro_voices, neg_train,
+                                args.samples_per_voice, negative_phrases,
+                                "Kokoro negative train", args.tts_workers, args.tts_batch)
+        generate_kokoro_samples(pool, kokoro_voices, neg_test,
+                                args.samples_per_voice // 10, negative_phrases,
+                                "Kokoro negative test", args.tts_workers, args.tts_batch)
 
     # === COUNT SAMPLES ===
     n_pos_train = len(list(pos_train.glob("*.wav")))
@@ -1231,7 +1270,10 @@ def main():
     # end of the detection window, so silence on the clip displaces the speech.
     # Negatives are trimmed too - treating both classes identically keeps clip length
     # from becoming a cue the model can learn instead of the phrase itself.
-    if not args.no_trim:
+    # `and not args.skip_corpus` because trimming EDITS THE CLIPS IN PLACE. A resumed
+    # run would trim already-trimmed audio, and the second pass does not stop at the
+    # first pass's boundary - it eats into the speech. Cheap to re-run, not safe to.
+    if not args.no_trim and not args.skip_corpus:
         print("\n" + "=" * 60)
         print("Trimming silence (aligns speech with the detection window)...")
         print("=" * 60)

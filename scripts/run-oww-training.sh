@@ -21,8 +21,21 @@
 # Usage:
 #   ./scripts/run-oww-training.sh "hey seeree"
 #   ./scripts/run-oww-training.sh "hey seeree" --samples-per-voice 400 --training-steps 100000
+#   SKIP_CORPUS=1 ./scripts/run-oww-training.sh "hey seeree"
 #
 # Any extra arguments are passed through to train.py.
+#
+#   SKIP_BUILD=1     use the existing image (see below for when)
+#   SKIP_CORPUS=1    reuse data/corpus/<wake>/oww/ instead of regenerating it
+#
+# SKIP_CORPUS IS FOR RESUMING, NOT FOR TUNING THE CORPUS. It exists because both
+# recorded OOMs strike after generation has completed, so the failure destroys the
+# cheap half of the run and preserves the expensive half. It skips TTS, real-clip
+# copying and trimming, and still re-runs augmentation and training - so
+# --training-steps, --layer-size and --max-negative-weight are all still live, while
+# --samples-per-voice and friends are silently inert because the clips already exist.
+# The unlike-mWW part: it also means no TTS server starts at all, which is the
+# cleanest possible answer to the VRAM contention that caused the OOM.
 
 set -euo pipefail
 
@@ -40,6 +53,7 @@ cd "$(dirname "$0")/.."
 # tr rather than ${x,,} so this does not need bash 4 (macOS ships 3.2).
 SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
 MODEL="output/${SAFE_NAME}/oww/${SAFE_NAME}.onnx"
+CORPUS="data/corpus/${SAFE_NAME}/oww"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 LOG="training-${SAFE_NAME}-${STAMP}.log"
 
@@ -87,25 +101,40 @@ WANTS_PIPER=""
 for arg in "$@"; do
     [[ "$arg" == --piper-fraction* ]] && WANTS_PIPER=1
 done
+# Neither TTS engine is needed when the corpus is being reused, so do not pay for
+# either. Kokoro in particular is the point: not starting it is strictly better than
+# starting it and stopping it again in a race, which is how the 16.09 GiB OOM
+# happened. A SKIP_CORPUS=1 re-run has the whole card from the first instruction.
+if [[ "${SKIP_CORPUS:-}" == "1" ]]; then
+    WANTS_PIPER=""
+fi
 if [[ -n "$WANTS_PIPER" ]]; then
     echo "=== $(date '+%H:%M:%S')  starting Piper"
     docker compose up -d piper
 fi
 
-echo "=== $(date '+%H:%M:%S')  starting Kokoro"
-docker compose up -d kokoro kokoro2
+if [[ "${SKIP_CORPUS:-}" == "1" ]]; then
+    # Down, not merely unstarted: a Kokoro left up by an earlier run holds ~8 GiB
+    # and this path has no watcher to stop it, because there is no generation stage
+    # to watch for.
+    echo "=== $(date '+%H:%M:%S')  SKIP_CORPUS=1 - reusing $CORPUS, no TTS needed"
+    docker compose stop kokoro kokoro2 >/dev/null 2>&1 || true
+else
+    echo "=== $(date '+%H:%M:%S')  starting Kokoro"
+    docker compose up -d kokoro kokoro2
 
-# Wait for readiness rather than assuming: the GPU image spends a while loading
-# voices, and train.py's probe would otherwise fail on a container that is up but
-# not yet serving.
-for name in kokoro:8880 kokoro2:8881; do
-    port="${name##*:}"
-    for _ in $(seq 1 60); do
-        curl -sf "http://localhost:${port}/v1/audio/voices" >/dev/null 2>&1 && break
-        sleep 2
+    # Wait for readiness rather than assuming: the GPU image spends a while loading
+    # voices, and train.py's probe would otherwise fail on a container that is up but
+    # not yet serving.
+    for name in kokoro:8880 kokoro2:8881; do
+        port="${name##*:}"
+        for _ in $(seq 1 60); do
+            curl -sf "http://localhost:${port}/v1/audio/voices" >/dev/null 2>&1 && break
+            sleep 2
+        done
     done
-done
-echo "=== $(date '+%H:%M:%S')  Kokoro ready"
+    echo "=== $(date '+%H:%M:%S')  Kokoro ready"
+fi
 
 # WAIT FROM INSIDE THE COMPOSE NETWORK, NOT FROM THE HOST. Piper speaks Wyoming over
 # TCP rather than HTTP, so readiness is a connect check - and a host-side connect to
@@ -155,6 +184,11 @@ echo "=== $(date '+%H:%M:%S')  training (log: $LOG)"
 # tail -f with SIGPIPE and the pipeline reports failure, so the `&&` never runs; and
 # BSD grep buffers stdin, so it may never process a line until EOF, which tail -f
 # never sends. A polling loop has neither problem.
+#
+# Not started under SKIP_CORPUS=1: Kokoro was stopped before the run began, so there
+# is nothing to wait for and a watcher would only sit there until the run ends.
+WATCH_PID=""
+if [[ "${SKIP_CORPUS:-}" != "1" ]]; then
 MAIN_PID=$$
 (
     while kill -0 "$MAIN_PID" 2>/dev/null; do
@@ -167,6 +201,7 @@ MAIN_PID=$$
     done
 ) &
 WATCH_PID=$!
+fi
 
 # Build the command with each argument quoted, so it survives being passed to
 # `script` as a single string.
@@ -177,6 +212,7 @@ CMD="docker compose run --rm oww-trainer python -m train.oww.train"
 # exist, and openWakeWord augments with no impulse responses and no background audio
 # rather than erroring.
 CMD="$CMD --wake-word $(printf '%q' "$WAKE_WORD") --data-dir /app/data/external"
+[[ "${SKIP_CORPUS:-}" == "1" ]] && CMD="$CMD --skip-corpus"
 for arg in "$@"; do CMD="$CMD $(printf '%q' "$arg")"; done
 
 # Run under `script` so the container gets a pty. Piping to tee otherwise denies
@@ -198,8 +234,10 @@ set -e
 
 # `wait` after `kill` suppresses bash's asynchronous "Terminated" job-control
 # message, which would otherwise print in the middle of the summary.
-{ kill "$WATCH_PID" 2>/dev/null; pkill -P "$WATCH_PID" 2>/dev/null; \
-  wait "$WATCH_PID"; } 2>/dev/null || true
+if [[ -n "$WATCH_PID" ]]; then
+    { kill "$WATCH_PID" 2>/dev/null; pkill -P "$WATCH_PID" 2>/dev/null; \
+      wait "$WATCH_PID"; } 2>/dev/null || true
+fi
 
 echo
 # Whether the model was WRITTEN is the real signal, not the exit code. openwakeword

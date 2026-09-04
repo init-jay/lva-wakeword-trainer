@@ -41,6 +41,17 @@ Both name their output after the code *and* the audio that produced it, so two r
 from the same commit with different recordings are told apart. `SKIP_BUILD=1` reuses
 the image; see each script's header for the other escapes.
 
+If a run dies *after* the corpus is built — a CUDA OOM at the feature array is the
+usual way — resume without paying for the TTS again:
+
+```bash
+SKIP_CORPUS=1 ./scripts/run-oww-training.sh "hey seeree"
+SKIP_CORPUS=1 ./scripts/run-mww-training.sh "hey seeree"
+```
+
+For resuming, not for tuning. Training flags still apply; the ones that shape the
+corpus are inert, because the clips already exist.
+
 **3 · Eval.** Runs on whichever machine you are sitting at. Generate the adversarial
 corpus once, then score:
 
