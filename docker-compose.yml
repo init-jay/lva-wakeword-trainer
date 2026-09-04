@@ -13,11 +13,6 @@ x-piper: &piper
     # Voices are downloaded on demand and get large - libritts_r alone carries 904
     # speakers - so they persist here rather than in the container.
     - ./data/piper_voices:/data
-  # NO DEVICE RESERVATION, IN ANY OVERLAY. Piper cannot use CUDA at all any more:
-  # docker/Dockerfile.piper builds on rhasspy/wyoming-piper, which ships stock CPU
-  # onnxruntime. That is deliberate - `--use-cuda` measured 2.5x SLOWER, because
-  # wyoming-piper opens a session per request and Piper's VITS models are too small
-  # to amortise CUDA context setup.
 
 services:
   kokoro:
@@ -30,14 +25,6 @@ services:
     ports:
       - "8881:8880"
 
-  # Deliberately a single instance - see the measurement above.
-  #
-  # `--voice` is REQUIRED by wyoming-piper even though it downloads voices on
-  # demand: without it the process exits 2 with "--voice is required for the piper
-  # backend" before binding the port, and the only symptom further up the stack is
-  # that the service name stops resolving. It is only the DEFAULT for requests that
-  # do not name a voice - corpus/piper.py always names one, so this does not
-  # constrain which voices the corpus can use.
   piper:
     <<: *piper
     ports:
@@ -45,15 +32,6 @@ services:
     command: ["--uri", "tcp://0.0.0.0:10200", "--data-dir", "/data",
               "--download-dir", "/data", "--voice", "en_US-lessac-medium"]
 
-  # Evaluation harness - step 3. CPU only, no GPU reservation, and the one
-  # service here meant to run ON THE MAC rather than on the training server - it
-  # builds native for linux/arm64. It carries both inference stacks and neither
-  # trainer, because scoring a model and training one have incompatible pins.
-  #
-  #   docker compose build eval
-  #   docker compose run --rm eval python -m eval.backends --model M
-  #   docker compose run --rm eval python -m eval.compare_models --models A B --sweep
-  #
   eval:
     build:
       context: .
@@ -78,9 +56,7 @@ services:
   # microWakeWord trainer, for the ESP32 target - step 2. A SEPARATE image
   # from `oww-trainer` because mWW requires numpy>=2 and this repo pins numpy<2 for
   # openWakeWord and torch - they cannot share an environment. See Dockerfile.mww.cuda.
-  #
-  # No depends_on: the corpus is built by the openWakeWord side or by corpus/ directly,
-  # and this service only reads directories. Start it explicitly.
+
   mww-trainer:
     build:
       context: .
