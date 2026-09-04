@@ -1,0 +1,32 @@
+augmentation_batch_size: 16
+augmentation_rounds: 3
+background_paths:
+- data/external/audioset_16k
+- data/external/fma
+background_paths_duplication_rate:
+- 1
+batch_n_per_class:
+  ACAV100M_sample: 1024
+  adversarial_negative: 50
+  positive: 50
+corpus_dir: /Users/jay/Documents/Repos/lva-wakeword-trainer/data/corpus/hey_seeree/oww
+custom_negative_phrases: []
+false_positive_validation_data_path: data/external/validation_set_features.npy
+feature_data_files:
+  ACAV100M_sample: data/external/openwakeword_features_ACAV100M_2000_hrs_16bit.npy
+layer_size: 64
+max_negative_weight: 2000
+model_name: hey_seeree
+model_type: dnn
+n_samples: 19483
+n_samples_val: 1948
+output_dir: /Users/jay/Documents/Repos/lva-wakeword-trainer/output/hey_seeree/oww
+rir_paths:
+- data/external/mit_rirs
+steps: 50000
+target_accuracy: 0.7
+target_false_positives_per_hour: 0.1
+target_phrase:
+- hey_seeree
+target_recall: 0.5
+tts_batch_size: 50

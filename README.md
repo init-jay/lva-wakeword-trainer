@@ -83,39 +83,60 @@ commands for each of the three scripts in `scripts/`.
 
 ## How long it takes
 
-Two machines, both measured end to end with `time`:
+Three environments, all measured with `time` on the same wake word:
 
 - **CUDA box** — RTX 3090, 20 GB RAM, 4 cores, `docker-compose.cuda.yml`
-- **Mac** — M1 Max, 64 GB, 10 cores, `docker-compose.cpu.yml`, no GPU at all
+- **Mac, Docker** — M1 Max, 64 GB, 10 cores, `docker-compose.cpu.yml`, no GPU
+- **Mac, host** — same Mac, no container: `scripts/*-applesilicon.sh`
 
-| Step | CUDA box | Mac, CPU only |
-|---|---|---|
-| Fetch external corpora | download-bound, ~43 GB for both targets | same |
-| Record | human time, 20–50 clips per speaker | same |
-| Train — microWakeWord | **28m03s** | **26m06s** |
-| Train — openWakeWord | **28m59s** | not yet measured |
-| Eval | minutes | minutes |
-| Preflight | needs a mic | needs a mic |
+| Step | CUDA box | Mac, Docker | Mac, host |
+|---|---|---|---|
+| Fetch external corpora | download-bound, ~43 GB for both targets | same | same |
+| Record | human time, 20–50 clips per speaker | same | same |
+| Train — microWakeWord | **28m03s** | **26m06s** | n/a, stays in Docker |
+| Train — openWakeWord | **28m59s** | ~2h 15m | ~1h 15m (stages summed) |
+| ├ Kokoro corpus | included above | ~49 min | ~49 min |
+| ├ Augmentation + features | included above | ~21 min | ~21 min |
+| └ Training, 50k steps | ~16 min | **~37 min** | **~5m30s** |
+| Eval | minutes | minutes | minutes |
+| Preflight | needs a mic | needs a mic | needs a mic |
 
-**The Mac is not slower, and for microWakeWord it was faster.** That is not a quirk:
-the mWW model is 25,537 parameters, too small to fill a 3090, and most of a run is
-not training at all. Piper corpus generation is CPU-only on both machines by
-choice — `--use-cuda` measured 2.5x *slower* — so the majority of the work ran on
-4 cores on the VM and 10 on the Mac. The GPU's advantage applied to a small slice
-while its weaker CPU applied to the rest.
+**On Apple Silicon, leaving the container is worth ~7x on the training stage.** 250
+it/s on the host against 26 in the container — same corpus, same commit, same
+torch 2.5.1, only the environment differs. The macOS wheels link Accelerate and the
+linux/arm64 ones do not; the container also mmaps a 16 GB feature array across
+Docker Desktop's filesystem boundary, which the host reads natively. Those two have
+not been separated, so treat "7x" as the combined effect rather than a claim about
+either one. `apple-port.md` phase 1b has the component measurements.
 
-Do not read that as "the GPU is pointless". It is a claim about one small model.
-openWakeWord is a different shape — it mmaps a 17.28 GB feature array and trains a
-much larger network — and has not been measured on CPU yet.
+**And it was not a trade against quality.** Evaluated on the same holdout, the
+host-trained model beat the container-trained one at every matched false-accept
+point and for every speaker - jay_runon, the largest sample at n=57, went 35% ->
+51%. Two runs is not proof, and this repo has measured 10 points of run-to-run
+variance before, but the direction was consistent everywhere.
 
-Both figures are full script runs at defaults, not the training stage alone:
-`run-mww-training.sh` covers corpus, features, training and manifest;
-`run-oww-training.sh` covers TTS generation, augmentation, training and the tflite
-conversion. The two targets are independent, so neither needs the other first.
+**microWakeWord stays in Docker**, and the reason is the interesting part: the host
+advantage is op-dependent, not general. The macOS torch build ships without oneDNN
+and measured **12x SLOWER on conv1d** while winning GEMM 3x. openWakeWord's trainable
+model is `Linear` x7 and one LSTM with no convolutions at all - the half that wins.
+mixednet is convolutional - the half that loses. That probe was torch and mWW trains
+with TensorFlow, so it points away from a host port rather than proving one would
+fail; nobody has measured TF the same way, and at 26m06s there is little to chase.
+Either way there is no blanket "native is faster" here.
 
-Three things move these numbers more than the hardware does. `SKIP_CORPUS=1` skips
-corpus generation on a re-run, which is most of the openWakeWord figure. Docker
-Desktop's memory limit decides whether that 17.28 GB array is mmap'd or thrashed,
-and falling short page-faults rather than erroring. And on the CUDA box, holding the
-card alone is the difference between finishing and not: a Kokoro server left up cost
-a run a 16.09 GiB allocation with 15.34 GiB free.
+Do not read the mww result as "the GPU is pointless" either. It is a claim about one
+25,537-parameter model, too small to fill a 3090, in a run that is mostly not
+training: Piper corpus generation is CPU-only on both machines by choice, since
+`--use-cuda` measured 2.5x *slower*.
+
+Figures for whole scripts are full runs at defaults - `run-mww-training.sh` covers
+corpus, features, training and manifest; `run-oww-training.sh` covers TTS generation,
+augmentation, training and the tflite conversion. The two targets are independent.
+
+Four things move these numbers more than the hardware does. `SKIP_CORPUS=1` skips
+corpus generation on a re-run, which is the largest single stage. `KOKORO_EXTERNAL=1`
+with `scripts/start-kokoro-host.sh` takes TTS out of the container, worth 3.7x on
+that stage. Docker Desktop's memory limit decides whether the 17.28 GB array is
+mmap'd or thrashed, and falling short page-faults rather than erroring. And on the
+CUDA box, holding the card alone is the difference between finishing and not: a
+Kokoro server left up cost a run a 16.09 GiB allocation with 15.34 GiB free.

@@ -59,6 +59,22 @@ dependencies = [
     "torch-audiomentations==0.11.0",
     "acoustics==0.2.6",
     "pronouncing==0.2.0",
+    # setuptools IS A REAL RUNTIME DEPENDENCY HERE, not build tooling. pronouncing
+    # 0.2.0 does `from pkg_resources import resource_stream` at import, pkg_resources
+    # ships inside setuptools, and Python 3.12 no longer bundles either. The trainer
+    # images get it for free because their pip base image installs it; a uv venv is
+    # clean and does not, so openwakeword/data.py fails on `import pronouncing`.
+    #
+    # BOUNDED BECAUSE pkg_resources IS ALREADY GONE. setuptools removed it after 80;
+    # an unbounded pin installed 84.0.0 here and `import pronouncing` still failed,
+    # with setuptools present. The trainer images are unaffected only because their
+    # base image predates the removal - which is the same "works because it was built
+    # earlier" trap as scipy/acoustics in docker/requirements.txt.
+    #
+    # This is a stay of execution, not a fix. pronouncing 0.2.0 is from 2016 and
+    # unmaintained; when a bound below 81 becomes untenable it needs replacing or
+    # vendoring - it is used only for the adversarial phoneme lists.
+    "setuptools<81",
     "datasets==2.14.6",
     "deep-phonemizer==0.0.19",
 

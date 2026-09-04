@@ -70,8 +70,13 @@ fi
 # Each patch prints "WARNING: patch target not found" and exits 0 rather than failing
 # if upstream has moved, so re-running after an openWakeWord update is safe but the
 # output is worth reading.
+#
+# Plus one the images do NOT apply: macos-dataloader-fork.py. macOS spawns worker
+# processes where Linux forks, and the training DataLoader wraps a lambda and a
+# method-local class, neither of which can be pickled. It is a no-op anywhere but
+# darwin, so it lives here rather than in the shared four.
 for p in skip-piper-import honour-augmentation-rounds feature-device-selection \
-         configurable-corpus-dir; do
+         configurable-corpus-dir macos-dataloader-fork; do
     python3 "patches/$p.py" "$CLONE/openwakeword/train.py"
 done
 
@@ -102,6 +107,12 @@ echo "==> syncing $ENV_DIR"
 # pip leaves the already-installed wheel alone - so this matches their behaviour
 # deliberately rather than diverging from it. Everything it actually needs is
 # declared in train-applesilicon/pyproject.toml.
+#
+# MUST COME AFTER `uv sync`, AND MUST BE REDONE AFTER ANY LATER ONE. sync prunes
+# whatever is not in the lockfile, and this package is deliberately not - so a bare
+# `uv sync` in that directory silently uninstalls openwakeword and the next run dies
+# on `ModuleNotFoundError: No module named 'openwakeword'`. Re-running this script is
+# the supported way to repair that; it is idempotent.
 ( cd "$ENV_DIR" && uv pip install --no-deps -e "../$CLONE" --quiet )
 
 # --- prove it ----------------------------------------------------------------------

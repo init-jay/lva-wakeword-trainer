@@ -52,6 +52,27 @@ if [[ ! -d openwakeword/openwakeword ]]; then
     exit 2
 fi
 
+# host.docker.internal IS A CONTAINER-ONLY NAME. It is what run-oww-training.sh needs
+# to reach a host Kokoro from inside the compose network, so it tends to be left
+# exported in the shell - and here it resolves to nothing:
+#
+#     NameResolutionError: Failed to resolve 'host.docker.internal'
+#     ERROR: no usable Kokoro servers
+#
+# On the host the same server is simply localhost. Rewrite rather than fail: the
+# intent is unambiguous, and the alternative is an error about DNS for what is really
+# a leftover environment variable.
+if [[ "${KOKORO_URL:-}" == *host.docker.internal* ]]; then
+    KOKORO_URL="${KOKORO_URL//host.docker.internal/localhost}"
+    export KOKORO_URL
+    echo "=== note: rewrote host.docker.internal -> localhost in KOKORO_URL"
+    echo "          ($KOKORO_URL) - that name only resolves inside a container."
+fi
+
+# KOKORO_EXTERNAL means nothing here - this script starts no containers, so every
+# Kokoro is external. Unset it so it cannot be read as "something was arranged".
+unset KOKORO_EXTERNAL
+
 SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
 MODEL="output/${SAFE_NAME}/oww/${SAFE_NAME}.onnx"
 STAMP="$(date +%Y%m%d-%H%M%S)"
