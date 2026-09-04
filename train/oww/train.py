@@ -842,11 +842,70 @@ def run_augmentation():
     ], check=True)
 
 
+def wait_for_kokoro_shutdown(timeout: int = 120):
+    """Block until the Kokoro servers have released their VRAM.
+
+    A BARRIER, NOT A COURTESY. run-oww-training.sh watches this script's log for
+    "Training model" and then stops Kokoro from the host - but that is a 2 s poll
+    followed by SIGTERM and two container shutdowns, racing a torch.empty() that
+    runs in milliseconds. The host cannot win, so the run OOM'd here:
+
+        torch.OutOfMemoryError: Tried to allocate 16.09 GiB.
+        GPU 0 has a total capacity of 23.56 GiB of which 15.34 GiB is free.
+
+    8.2 GiB was Kokoro, still resident. Note the gap against the ~2.4 GiB the script
+    header still quoted at the time: that figure predates the public 0.8.1 image.
+    Waiting for the ports to close is what makes the sequencing real rather than
+    hopeful, and it is nearly free when Kokoro is already down.
+
+    Not fatal on timeout. The generation stage has finished by now, so failing here
+    would throw away the expensive half of the run to avoid a failure that may not
+    happen - a smaller corpus can fit alongside Kokoro. Report and continue.
+    """
+    import socket
+
+    servers = [("kokoro", 8880), ("kokoro2", 8881)]
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        alive = []
+        for host, port in servers:
+            try:
+                socket.create_connection((host, port), 1).close()
+                alive.append(f"{host}:{port}")
+            except OSError:
+                pass
+        if not alive:
+            return
+        time.sleep(2)
+
+    print(f"  WARNING: {', '.join(alive)} still answering after {timeout}s.")
+    print("           Training will allocate with their VRAM still held, which is")
+    print("           what caused the 16.09 GiB OOM this wait exists to prevent.")
+
+
+def report_free_vram():
+    """Print free VRAM going into training, so the next OOM is diagnosable."""
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return
+        free, total = torch.cuda.mem_get_info()
+        gib = 1024 ** 3
+        print(f"  VRAM: {free / gib:.2f} GiB free of {total / gib:.2f} GiB")
+    except Exception as e:
+        print(f"  Could not read VRAM: {e}")
+
+
 def run_training():
     """Run OpenWakeWord model training."""
     print("\n" + "=" * 60)
     print("Training model...")
     print("=" * 60)
+
+    # Both BEFORE the subprocess: it allocates the feature array on its first
+    # breath, so anything reported afterwards describes a decision already made.
+    wait_for_kokoro_shutdown()
+    report_free_vram()
 
     train_script = str(WORK_DIR / "openwakeword/openwakeword/train.py")
     result = subprocess.run([

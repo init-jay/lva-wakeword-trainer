@@ -6,10 +6,12 @@
 # easy to forget and expensive to get wrong:
 #
 #   * Kokoro must be UP for generation and DOWN for training. The GPU-resident
-#     feature patch holds ~16.6 GiB of VRAM, and openwakeword's validation step
-#     allocates ~2.76 GiB in one go. With Kokoro's two CUDA contexts (~2.4 GiB) still
-#     resident, that overflows - which killed a run at 37,500 of 50,000 steps, after
-#     generation and feature computation had already completed.
+#     feature patch holds ~16.6 GiB of VRAM, so anything else on the card is the
+#     difference between a run and an OOM. Two have happened, at opposite ends of
+#     training: the validation step's ~2.76 GiB allocation killed a run at 37,500 of
+#     50,000 steps, and the feature array's 16.09 GiB killed one before step 1 with
+#     ~8 GiB of Kokoro still resident. Both after generation and feature computation
+#     had completed - the expensive half is always already spent when this bites.
 #
 #   * The model must be checked for freshness. train.py now verifies this itself,
 #     but the check is repeated here against the file you are about to copy off the
@@ -134,9 +136,19 @@ fi
 echo "=== $(date '+%H:%M:%S')  training (log: $LOG)"
 : > "$LOG"
 
-# Stop Kokoro the moment feature computation finishes, freeing its ~2.4 GiB before
-# openwakeword's validation allocation needs it. Started before training so the
-# marker cannot be missed.
+# Stop Kokoro the moment feature computation finishes, freeing its VRAM before
+# openwakeword allocates. Started before training so the marker cannot be missed.
+#
+# THIS STOP IS ASYNCHRONOUS AND CANNOT BE RELIED ON ALONE. It is a 2 s poll, then
+# SIGTERM, then two container shutdowns - racing a torch.empty() in the trainer that
+# runs in milliseconds after the marker is printed. It lost, and the run died on
+# "Tried to allocate 16.09 GiB ... 15.34 GiB is free" with ~8 GiB still held by
+# Kokoro. train.oww.train therefore BLOCKS on the ports closing before it allocates;
+# this loop is what makes that wait terminate, not what makes it safe.
+#
+# ~8 GiB across the two containers, measured against the public 0.8.1 image. An
+# earlier ~2.4 GiB figure here predated that image and understated it by 3x, which
+# is why the sizing is quoted with the image it was measured on.
 # Poll the log rather than `tail -f | grep -q`. That pipeline is fragile in two
 # ways that both fail SILENTLY, leaving Kokoro running and reproducing the OOM this
 # exists to prevent: with pipefail inherited, grep -q exiting on a match kills
