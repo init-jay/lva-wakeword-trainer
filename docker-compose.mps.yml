@@ -15,15 +15,15 @@
 #
 # So the choice on a Mac is not "CPU image or Metal image". It is:
 #
-#   in Docker      CPU, via docker-compose.cpu.yml           <- exists, use this
-#   outside Docker Metal, via a host uv environment          <- train-host/, unused
+#   in Docker      CPU, via docker-compose.cpu.yml      <- exists, use this
+#   outside Docker Metal, or just a faster CPU torch    <- train-applesilicon/
 #
-# train-host/ carries a resolved pyproject.toml and uv.lock for that second route. It
-# is not wired to anything, on purpose: the CPU baseline has to be measured before
-# anyone can say whether Metal is worth a fourth host environment to maintain.
-# apple-port.md phases that work and records what is already known - notably that
-# tensorflow-metal cannot pair with TensorFlow 2.21.0, so the microWakeWord half has
-# no Metal story even outside Docker.
+# train-applesilicon/ carries a resolved pyproject.toml and uv.lock for that second
+# route. It is not wired to anything yet, but it is no longer only about Metal: the
+# macOS wheels link Accelerate, which measured 6.3x the container's torch on a
+# GEMM-shaped train step with no GPU involved at all. apple-port.md phase 1b has the
+# numbers, and phase 2 the Metal question - including that tensorflow-metal cannot
+# pair with TensorFlow 2.21.0, so microWakeWord has no Metal story either way.
 #
 # Kept as a file rather than deleted so that the question "is there an Apple Silicon
 # GPU path?" is answerable from `ls`, and answered "no, and here is where to go

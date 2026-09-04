@@ -211,7 +211,7 @@ That last one is worth generalising. The repo already learned from
 adds a second gap: *installed on x86* and *installable on arm64* are different things
 too, and neither `requires_dist` nor a working amd64 build predicts the other.
 
-`train-host/` holds a resolved `pyproject.toml` and `uv.lock` for the host route. uv
+`train-applesilicon/` holds a resolved `pyproject.toml` and `uv.lock` for the host route. uv
 resolved the pinned openWakeWord stack (speechbrain 0.5.14, datasets 2.14.6,
 `numpy<2`) on macOS/CPython 3.12 in 143 packages, which settled the open question of
 whether a host env was even possible.
@@ -242,7 +242,7 @@ Kokoro throughput turned up a 3.7x gap between the same Kokoro-FastAPI version i
 container and on the host — native arm64 both times, no emulation. That is a *torch*
 gap, and both trainers were built on the assumption that it does not exist.
 
-Probing torch directly, identical script, container against `train-host/`:
+Probing torch directly, identical script, container against `train-applesilicon/`:
 
 | operation | container (linux/arm64) | host (macOS arm64) | |
 |---|---|---|---|
@@ -283,7 +283,7 @@ than it sounds.
 
 The honest next step is the cheap one: run the actual openWakeWord model through both
 environments and compare wall time on the training stage alone, with `SKIP_CORPUS=1`
-so nothing else moves. `train-host/` exists for precisely this and is otherwise
+so nothing else moves. `train-applesilicon/` exists for precisely this and is otherwise
 unused.
 
 ### Phase 2 — MPS for the model, CoreML for the features, measured separately

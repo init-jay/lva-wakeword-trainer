@@ -1,5 +1,5 @@
 [project]
-name = "train-host"
+name = "train-applesilicon"
 version = "0.1.0"
 description = "Step 2 on the host, for Apple Silicon - the trainer the CUDA images cannot be"
 requires-python = ">=3.11,<3.13"

@@ -123,5 +123,5 @@ far.
 ├── docker-compose.cuda.yml       overlay: NVIDIA devices - kokoro, trainers, piper
 ├── docker-compose.cpu.yml        overlay: CPU trainers - Apple Silicon, or any non-NVIDIA box
 ├── docker-compose.mps.yml        overlay: Metal - permanently empty, see apple-port.md
-└── train-host/                   unused: the host uv env MPS would need, kept for phase 2
+└── train-applesilicon/           host uv env, no container - see apple-port.md phase 1b
 ```
