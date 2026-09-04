@@ -958,6 +958,21 @@ def main():
                              "saturates one core, so more PROCESSES scale where more "
                              "client threads do not. (Not on Metal, where two "
                              "instances share one GPU and measured no faster.)")
+    parser.add_argument("--kokoro-runon-url", default=os.environ.get("KOKORO_RUNON_URL"),
+                        help="Send RUN-ON clips to a different Kokoro than the plain "
+                             "ones. Worth it when the two have different fastest "
+                             "settings: measured on an M1 Max, plain is fastest on a "
+                             "CPU server with batching (88 ms/clip) while run-ons are "
+                             "fastest on an MPS server without it (143 vs 229). Must "
+                             "serve the same voices; this is checked. Default: reuse "
+                             "--kokoro-url.")
+    parser.add_argument("--runon-tts-batch", type=int, default=None,
+                        help="Batch size for run-ons only, since the best value "
+                             "differs from plain clips: batching is 2.83x on a CPU "
+                             "server and 0.51x - a LOSS - for run-ons on MPS, because "
+                             "the ISTFT stage Kokoro-FastAPI pins to CPU is linear in "
+                             "audio length and run-ons are long already. Use 1 with "
+                             "an MPS --kokoro-runon-url. Default: --tts-batch.")
     parser.add_argument("--data-dir", default="data/external",
                         help="Where the third-party downloads live: the ACAV100M "
                         "and validation feature .npy files, audioset_16k, fma, "
@@ -1071,6 +1086,31 @@ def main():
             print("ERROR: No Kokoro voices available!")
             sys.exit(1)
         print(f"  {len(pool)} server(s), {len(kokoro_voices)} shared English voices")
+
+        # The run-on pool, which is the same pool unless told otherwise. See the
+        # call site below for the measurements that make a second one worth starting.
+        runon_batch = args.runon_tts_batch or args.tts_batch
+        if args.kokoro_runon_url:
+            runon_pool = KokoroPool(args.kokoro_runon_url.split(","))
+            runon_voices = probe_kokoro_servers(runon_pool)
+            # VOICE PARITY IS CHECKED, NOT ASSUMED. Both pools render positives for
+            # the same corpus, and the run-on jobs are built from `kokoro_voices` -
+            # the PLAIN pool's list. A run-on server missing a voice would fail every
+            # job naming it, quietly, and the corpus would end up with run-ons for a
+            # subset of speakers - a per-voice imbalance no scorecard would attribute
+            # to a TTS misconfiguration.
+            missing = sorted(set(kokoro_voices) - set(runon_voices))
+            if missing:
+                print(f"ERROR: the run-on server is missing {len(missing)} voice(s) "
+                      f"the plain server offers: {', '.join(missing[:5])}"
+                      f"{' ...' if len(missing) > 5 else ''}")
+                print("       Both pools must serve the same voices - run the same "
+                      "Kokoro version on each.")
+                sys.exit(1)
+            print(f"  run-on: {len(runon_pool)} server(s) at {args.kokoro_runon_url}, "
+                  f"batch {runon_batch}")
+        else:
+            runon_pool = pool
 
         excluded = set(MISPRONOUNCING_VOICES.get(safe_name, []))
         excluded.update(v.strip() for v in args.exclude_voices.split(",") if v.strip())
@@ -1211,15 +1251,33 @@ def main():
                                    PLAIN_SPEED_GRID, "Piper positive test")
 
         if runon_train:
-            # One reference cache across both sets: the phrase-alone lengths are the
-            # same, and rebuilding it would cost a few hundred needless TTS calls.
+            # RUN-ONS CAN GO TO A DIFFERENT SERVER, AT A DIFFERENT BATCH SIZE, because
+            # the fastest configuration for them is not the fastest for plain clips.
+            # Measured on an M1 Max, ms per clip, Kokoro-FastAPI v0.8.1 throughout:
+            #
+            #                          plain            run-on
+            #   host cpu, batched       88  <- best      229
+            #   host mps, unbatched    110               143  <- best
+            #   host mps, batched      161               279
+            #   docker cpu, batched    323               837
+            #
+            # Two things flip between the columns. Run-ons are longer, so the ISTFT
+            # stage Kokoro-FastAPI pins to CPU costs more, and Metal's advantage on
+            # the rest of the graph finally outweighs it. And batching helps plain
+            # clips (2.83x on cpu) while hurting run-ons on mps (0.51x), because
+            # joining ~10 already-long utterances makes one very long one and that
+            # CPU-resident stage is linear in audio length.
+            #
+            # So: plain on a CPU server with batching, run-ons on an MPS server
+            # without. Defaults fall back to the single pool, so this stays one
+            # server unless someone deliberately starts two.
             reference = {}
-            generate_runon_samples(pool, kokoro_voices, pos_train,
+            generate_runon_samples(runon_pool, kokoro_voices, pos_train,
                                    runon_train, wake_word, "Kokoro run-on train",
-                                   reference, args.tts_workers, args.tts_batch)
-            generate_runon_samples(pool, kokoro_voices, pos_test,
+                                   reference, args.tts_workers, runon_batch)
+            generate_runon_samples(runon_pool, kokoro_voices, pos_test,
                                    runon_test, wake_word, "Kokoro run-on test",
-                                   reference, args.tts_workers, args.tts_batch)
+                                   reference, args.tts_workers, runon_batch)
 
         # Before the real clips are copied in, so the shift only ever sees Kokoro
         # output - and before trimming, so the shifted copies are trimmed like the rest.
