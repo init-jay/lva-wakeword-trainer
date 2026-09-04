@@ -108,15 +108,20 @@ far.
 ├── docker/
 │   ├── Dockerfile.oww.cuda       trains on an NVIDIA GPU, linux/amd64
 │   ├── Dockerfile.mww.cuda       trains on an NVIDIA GPU, linux/amd64
+│   ├── Dockerfile.oww.cpu        same trainer, no GPU - multi-arch, native on arm64
+│   ├── Dockerfile.mww.cpu        same, on python:3.12-slim - the TF image is amd64-only
 │   ├── Dockerfile.piper          CUDA base, but runs CPU-only by choice
 │   ├── Dockerfile.kokoro         CPU by default; CUDA via docker-compose.cuda.yml
 │   ├── Dockerfile.eval           CPU only, native on Apple Silicon
-│   └── requirements.txt          the oww trainer's deps
+│   └── requirements.txt          shared by BOTH oww trainers, cuda and cpu
 ├── scripts/
 │   ├── download-external-data.sh  -> data/external/  [all|oww|mww]
 │   ├── run-oww-training.sh        2 · one command, corpus built by the run
 │   └── run-mww-training.sh        2 · four stages, corpus built separately
+├── .dockerignore                 keeps data/ (~43 GB) out of every build context
 ├── docker-compose.yml            no GPU required, so eval and record run anywhere
 ├── docker-compose.cuda.yml       overlay: NVIDIA devices - kokoro, trainers, piper
-└── docker-compose.mps.yml        overlay: Apple Silicon - placeholder, see apple-port.md
+├── docker-compose.cpu.yml        overlay: CPU trainers - Apple Silicon, or any non-NVIDIA box
+├── docker-compose.mps.yml        overlay: Metal - permanently empty, see apple-port.md
+└── train-host/                   unused: the host uv env MPS would need, kept for phase 2
 ```

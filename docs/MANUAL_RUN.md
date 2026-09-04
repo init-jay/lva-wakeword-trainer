@@ -106,12 +106,27 @@ uv run test_model.py --model ../output/hey_seeree/mww/<tag>.json
 If peaks sit just under your threshold, the operating point is wrong for the room —
 not the model.
 
-### On an NVIDIA box
+### Picking an overlay for the training step
 
 Nothing in the base compose file requires a GPU, so evaluation and recording work
-anywhere. On the training machine, add the CUDA overlay once per shell — it is NVIDIA
-only, and will not match an AMD card under ROCm:
+anywhere. Training is the one step that cares, and it picks a set of images:
 
 ```bash
+# NVIDIA box. Will not match an AMD card under ROCm - `driver: nvidia` is a CUDA
+# reservation and has no vendor-neutral spelling.
 export COMPOSE_FILE=docker-compose.yml:docker-compose.cuda.yml
+
+# Everything else: Apple Silicon, AMD, or a CPU-only Linux box. Multi-arch images,
+# native on arm64, no emulation.
+export COMPOSE_FILE=docker-compose.yml:docker-compose.cpu.yml
 ```
+
+Set one per shell, then use the scripts in `scripts/` unchanged — they read
+`COMPOSE_FILE` like every other compose command.
+
+**On a Mac, `cpu` is the only option, and `docker-compose.mps.yml` is empty on
+purpose.** Docker Desktop passes no Metal device through, so a containerised MPS
+build would get CPU without saying so. Before blaming the CPU for a slow run, raise
+Docker Desktop's memory limit: openWakeWord mmaps a 17.28 GB feature array, and
+running short of RAM page-faults rather than erroring — the same stall the CUDA box
+hit at 20 GB.

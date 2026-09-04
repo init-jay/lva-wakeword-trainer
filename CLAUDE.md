@@ -33,8 +33,11 @@ guess a wake word from the repo's existing `hey_seeree` files.
 ## What you cannot do
 
 - **Record or preflight.** Both need a human speaking into a microphone.
-- **Train on a Mac.** Both trainer images are `linux/amd64` CUDA. See `apple-port.md`
-  — the conclusion is "don't", and the reasoning is worth reading before relitigating.
+- **Use a GPU on a Mac.** Training itself now works there — `docker-compose.cpu.yml`
+  builds both trainers multi-arch, native on arm64 — but on CPU only, and unmeasured
+  as of 2026-09-04. Docker Desktop passes no Metal device through, so there is no MPS
+  image to select and `docker-compose.mps.yml` is empty on purpose. Read
+  `apple-port.md` before relitigating; it has the measurements and the phased plan.
 - **Pick `probability_cutoff` from a default.** It comes from the measured ROC.
 
 ## Where things run
@@ -42,11 +45,18 @@ guess a wake word from the repo's existing `hey_seeree` files.
 | step | machine |
 |---|---|
 | record, preflight | the human's machine, host, `uv` |
-| train | the CUDA box, Docker |
+| train | the CUDA box, Docker — or anywhere, on CPU, with the `cpu` overlay |
 | eval | either — the `eval` image builds native on Apple Silicon |
 
 On the CUDA box: `export COMPOSE_FILE=docker-compose.yml:docker-compose.cuda.yml`.
 NVIDIA only - `driver: nvidia` does not match an AMD card under ROCm.
+
+Anywhere else, including a Mac: `docker-compose.yml:docker-compose.cpu.yml`, which
+swaps both trainers for multi-arch CPU images. Slower, unmeasured as of 2026-09-04,
+and the only in-Docker option on Apple Silicon - Docker Desktop passes no Metal
+device through, so there is no MPS image to select and `docker-compose.mps.yml`
+stays empty. Give Docker Desktop enough RAM first: the 17.28 GB feature array is
+mmap'd, and running short of memory page-faults rather than erroring.
 `SKIP_BUILD=1` on either training script reuses the image; needed after a
 `docker builder prune`, since the rebuild is then cold.
 

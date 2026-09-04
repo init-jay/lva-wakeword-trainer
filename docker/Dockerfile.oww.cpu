@@ -1,0 +1,197 @@
+# openWakeWord trainer, CPU - the Apple Silicon target, step 2.
+#
+# .cpu IS A CLAIM ABOUT THE HARDWARE IT USES, NOT THE HARDWARE IT RUNS ON. This
+# image is multi-arch: python:3.12-slim resolves to linux/arm64 on a Mac and
+# linux/amd64 elsewhere, and tensorflow, torch and onnxruntime all publish
+# manylinux aarch64 wheels, so nothing here needs emulation. What it does NOT do is
+# use a GPU of any kind.
+#
+# WHY THERE IS NO .mps VARIANT, AND WHY THAT IS NOT AN OVERSIGHT. Docker Desktop
+# does not pass the Metal device through to containers. A torch build that selects
+# `mps` inside a container finds no device and falls back to CPU - silently, which
+# is worse than failing. So a containerised Apple Silicon trainer is a CPU trainer
+# by construction, and the only way to reach Metal is a host environment outside
+# Docker entirely. apple-port.md carries the full reasoning.
+#
+# WHY CPU IS A REASONABLE TARGET ANYWAY. The two things the CUDA path actually
+# bought were measured, and neither was raw compute:
+#
+#   1. NOT computing features single-threaded. That cost 36 minutes of an 83-minute
+#      run, and the cause was a device-selection bug, not the absence of a GPU -
+#      patches/feature-device-selection.py fixes it by asking onnxruntime instead of
+#      torch. Multi-threaded CPU feature computation is the fixed state, not a
+#      degraded one.
+#   2. NOT swapping. The 17.28 GB ACAV100M feature array thrashed against the VM's
+#      20 GB of RAM. On a machine with enough memory that problem does not exist,
+#      which is why patches/gpu-resident-features.py is deliberately NOT applied
+#      below - see the patch section.
+#
+# Neither is a claim that this is as fast as a 3090. It is a claim about which of
+# the 3090's advantages were real. Measure before believing either way; the run
+# scripts print wall time and apple-port.md records the CUDA figures to beat
+# (oww 28m59s, mww 28m02s).
+#
+FROM python:3.12-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# libsndfile1 is soundfile's native library, which speechbrain and audiomentations
+# read audio through; build-essential is for the few sdists in the pinned set that
+# have no aarch64 wheel.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl build-essential libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# THE CPU INDEX, NOT PyPI - and this is not a preference, it is a 651 MB mistake
+# caught mid-build.
+#
+# `pip install torch` from PyPI on linux/aarch64 does NOT give a CPU build. It
+# resolves the same CUDA-enabled wheel it gives on x86, and starts pulling the CUDA
+# runtime with it - observed here, building for arm64 on an M1 Max:
+#
+#     Downloading torch-2.14.0-cp312-cp312-manylinux_2_28_aarch64.whl (454.0 MB)
+#     Downloading cuda_toolkit-13.0.3.0-py2.py3-none-any.whl
+#     Downloading nvidia_cudnn_cu13-9.24.0.43-py3-none-manylinux_2_27_aarch64.whl (651.0 MB)
+#
+# Those aarch64 CUDA wheels exist for NVIDIA's ARM machines - Jetson, GH200 - and are
+# entirely dead weight in an image whose whole purpose is not having a GPU. On a Mac
+# they can never load at all.
+#
+# The +cpu wheels from PyTorch's CPU index carry no nvidia-* dependencies. This is
+# the same trap docker/requirements.txt documents from the other direction, where
+# `tensorflow-cpu` was the WRONG choice - the lesson is not "prefer cpu variants",
+# it is that the package name and the index both decide what you get, and only a
+# build log settles it.
+RUN pip install --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cpu \
+        torch torchaudio \
+    && python3 -c "\
+import torch; \
+print('torch', torch.__version__, 'cuda available:', torch.cuda.is_available()); \
+assert '+cpu' in torch.__version__, 'not the CPU build - check the index-url above'" \
+    && python3 -c "\
+import glob, site; \
+nv = [p for r in site.getsitepackages() for p in glob.glob(r + '/nvidia*')]; \
+assert not nv, f'CUDA wheels leaked into the CPU image: {nv}'; \
+print('no nvidia-* packages installed')"
+
+# onnx2tf FIRST, AND WITHOUT ITS DEPENDENCIES. This is the one place where the CPU
+# image cannot simply reuse requirements.txt, and the reason is arm64-only.
+#
+# requirements.txt leaves onnx2tf floating. Under `numpy<2` and `tensorflow==2.21.0`
+# pip can only satisfy that with onnx2tf 1.29.24 - every 2.x pins either numpy 2
+# (2.3+) or tensorflow 2.19.0 (2.0.23-2.2.2), so neither is reachable. onnx2tf
+# 1.29.24 in turn pins `onnxsim==0.4.36`, and THAT is the package with no aarch64
+# wheel. On x86 nobody notices: 0.4.36 ships x86_64 wheels. On arm64 pip falls back
+# to a 21 MB sdist and the build dies:
+#
+#     Downloading onnxsim-0.4.36.tar.gz (21.0 MB)
+#     AssertionError: Could not find "cmake" executable!
+#
+# Installing cmake would "fix" it by compiling a C++ ONNX simplifier that THIS REPO
+# NEVER RUNS: train/oww/onnx2tflite.py invokes `onnx2tf -i ... -o ... -nuo -osd`,
+# and -nuo is --not_use_onnxsim. So the dependency is real to pip and dead to us.
+#
+# --no-deps skips the resolution entirely, and onnxsim-prebuilt supplies the same
+# `onnxsim` module from a wheel (verified: it installs onnxsim/__init__.py and
+# reports version 0.4.39-post2) so that any import at module load still succeeds.
+#
+# PINNED, not floating, unlike requirements.txt - because --no-deps removes the
+# constraint solving that would otherwise keep this in step with the CUDA image, and
+# a CPU-vs-CUDA comparison through two different converters would measure the
+# converter. 1.29.24 is what the CUDA image's own resolution lands on.
+#
+# onnx2tf IS FILTERED OUT OF requirements.txt AND INSTALLED SEPARATELY BELOW.
+#
+# Installing it first and letting requirements.txt find it already present does NOT
+# work, which was the first attempt: pip re-resolves the dependencies of a package
+# named in a requirements file even when that package is already installed, so it
+# went back for onnxsim and failed exactly as before. The line has to be gone.
+#
+# The `!  diff` is an assertion, not decoration. A silent no-op filter would install
+# onnx2tf WITH its dependencies and reintroduce the cmake failure, so a
+# requirements.txt that no longer contains a bare `onnx2tf` line must fail the build
+# here rather than surprise someone later.
+#
+# Its explicit onnx / sng4onnx / psutil entries matter more in this image than in the
+# CUDA one: with --no-deps below, they are the ONLY thing installing onnx2tf's
+# undeclared imports.
+COPY docker/requirements.txt .
+RUN grep -vx 'onnx2tf' requirements.txt > requirements.cpu.txt \
+    && ! diff -q requirements.txt requirements.cpu.txt > /dev/null \
+    && pip install --no-cache-dir -r requirements.cpu.txt
+
+# PINNED, not floating, unlike requirements.txt - because --no-deps removes the
+# constraint solving that would otherwise keep this in step with the CUDA image, and
+# a CPU-vs-CUDA comparison through two different converters would measure the
+# converter. 1.29.24 is what the CUDA image's own resolution lands on.
+RUN pip install --no-cache-dir --no-deps \
+        onnx2tf==1.29.24 \
+        onnxsim-prebuilt==0.4.39.post2
+
+RUN git clone https://github.com/dscripka/openWakeWord openwakeword \
+    && pip install --no-cache-dir -e ./openwakeword
+
+# NO onnxruntime-gpu SWAP HERE, unlike the CUDA image. onnxruntime-gpu publishes no
+# macOS or linux/arm64 wheel, and there is no GPU to reach in any case, so the CPU
+# package openwakeword's setup.py pins is the one that stays. Assert it imports and
+# report the providers, so a build that silently lost the package fails here rather
+# than an hour into a run.
+RUN python3 -c "\
+import onnxruntime; \
+print('onnxruntime', onnxruntime.__version__, 'providers:', onnxruntime.get_available_providers()); \
+assert 'CPUExecutionProvider' in onnxruntime.get_available_providers()"
+
+# --- patches ---------------------------------------------------------------------
+#
+# FOUR OF THE FIVE, and the omission is the point. See patches/ for each.
+
+COPY patches/skip-piper-import.py /tmp/skip-piper-import.py
+RUN python3 /tmp/skip-piper-import.py openwakeword/openwakeword/train.py
+
+COPY patches/honour-augmentation-rounds.py /tmp/honour-augmentation-rounds.py
+RUN python3 /tmp/honour-augmentation-rounds.py openwakeword/openwakeword/train.py
+
+# Still needed on CPU, and arguably more. Upstream picks the device from torch and
+# sets ncpu=1 whenever torch reports CUDA; here torch reports no CUDA, so upstream
+# would take the multi-threaded branch by luck rather than by decision. The patch
+# makes it a decision, and keeps the two images behaving identically.
+COPY patches/feature-device-selection.py /tmp/feature-device-selection.py
+RUN python3 /tmp/feature-device-selection.py openwakeword/openwakeword/train.py
+
+COPY patches/configurable-corpus-dir.py /tmp/configurable-corpus-dir.py
+RUN python3 /tmp/configurable-corpus-dir.py openwakeword/openwakeword/train.py
+
+# patches/gpu-resident-features.py IS NOT APPLIED, and must not be. It moves the
+# 17.28 GB feature array into VRAM. There is no VRAM here, so it would fail - and
+# the problem it solves is a RAM shortage, not a missing GPU: the VM had 20 GB and
+# swapped 7.2 of 8 GB. Give this container enough memory and mmap is fine.
+#
+# THE MEMORY IS THEREFORE THE REAL REQUIREMENT OF THIS IMAGE. Docker Desktop's
+# default VM allocation is far below what that array needs, and the failure mode is
+# not an error - it is the same page-fault thrashing the patch was written to
+# escape, on a machine that has the RAM but did not give it to Docker. Raise
+# Settings > Resources > Memory before blaming the CPU for a slow run.
+
+RUN mkdir -p openwakeword/openwakeword/resources/models \
+    && curl -L -o openwakeword/openwakeword/resources/models/embedding_model.onnx \
+        'https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/embedding_model.onnx' \
+    && curl -L -o openwakeword/openwakeword/resources/models/melspectrogram.onnx \
+        'https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/melspectrogram.onnx'
+
+# The onnx -> tflite toolchain, checked at BUILD time for the reason the CUDA image
+# gives: conversion runs after the whole training run, so a broken toolchain would
+# surface at the worst possible moment.
+RUN python3 -c "import tensorflow as tf; print('tensorflow', tf.__version__)" \
+    && python3 -c "import onnx2tf" \
+    && command -v onnx2tf
+
+# COPY for the build-time import check; docker-compose bind-mounts train/ over it at
+# runtime. Same split as Dockerfile.oww.cuda, and the same reasons.
+COPY train/ ./train/
+
+RUN python3 -c "import train.corpus.augment, train.corpus.negatives, \
+                       train.corpus.real, train.corpus.piper"

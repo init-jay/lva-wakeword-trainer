@@ -1,0 +1,83 @@
+[project]
+name = "train-host"
+version = "0.1.0"
+description = "Step 2 on the host, for Apple Silicon - the trainer the CUDA images cannot be"
+requires-python = ">=3.11,<3.13"
+
+# THE THIRD HOST ENVIRONMENT, after record/ and preflight/, and for a different
+# reason than either of those. They run on the host because they need a MICROPHONE.
+# This one runs on the host because Docker Desktop does not pass the Metal device
+# through, so a containerised "MPS" build silently gets CPU. See apple-port.md.
+#
+# WHY IT IS NOT AT train/host/. `COPY train/ ./train/` in both trainer Dockerfiles
+# would sweep a .venv into the images, and a macOS torch install is several GB. The
+# .dockerignore keeps it out of the build context too, so the mistake needs two
+# errors rather than one.
+#
+# WHAT RUNS WHERE ON A MAC, once this exists:
+#
+#   corpus generation   Docker, unchanged - kokoro-fastapi-cpu and Piper are both
+#                       CPU-only by choice and already run on arm64
+#   training            HERE
+#   eval                Docker, unchanged - Dockerfile.eval builds native arm64
+#
+# So this environment covers the one stage that could not move, not the pipeline.
+
+dependencies = [
+    # Core, matching docker/requirements.txt. numpy<2 is openWakeWord's constraint,
+    # not a macOS one - speechbrain 0.5.14 and datasets 2.14.6 predate the numpy 2 ABI.
+    "scipy",
+    "numpy<2",
+    "pyarrow>=8.0.0,<15.0.0",
+    "tqdm",
+    "pyyaml",
+    "requests",
+
+    # PLAIN torch, NOT the cu121 index the Dockerfile uses. The macOS arm64 wheels
+    # carry the MPS backend already; there is no separate "torch-metal" to install
+    # and no index-url to set. Phase 1 still runs this on CPU - see the runner.
+    "torch",
+    "torchaudio",
+
+    # openWakeWord's training pipeline, pinned exactly as the image pins them.
+    "mutagen==1.47.0",
+    "torchinfo==1.8.0",
+    "torchmetrics==1.2.0",
+    "speechbrain==0.5.14",
+    "audiomentations==0.33.0",
+    "torch-audiomentations==0.11.0",
+    "acoustics==0.2.6",
+    "pronouncing==0.2.0",
+    "datasets==2.14.6",
+    "deep-phonemizer==0.0.19",
+
+    # Feature computation. The CPU package, NOT onnxruntime-gpu - which publishes no
+    # macOS wheel at all. This is the one that carries CoreMLExecutionProvider, so
+    # the phase 2 change is a provider name in patches/feature-device-selection.py
+    # rather than a different package.
+    "onnxruntime>=1.19,<2",
+
+    # ONNX -> tflite conversion, so a host run produces the same two artefacts a
+    # CUDA run does. tensorflow 2.21.0 publishes macosx_12_0_arm64 wheels, so this
+    # is native and needs no Rosetta.
+    #
+    # tensorflow-metal IS DELIBERATELY ABSENT and is not an oversight: its newest
+    # release (1.2.0, 2025-01-31) predates TensorFlow 2.21.0 (2026-03-06) by five
+    # minor versions, and it declares no TensorFlow dependency to check against.
+    # Conversion is CPU work anyway. apple-port.md has the full finding.
+    #
+    # onnx, sng4onnx and psutil are onnx2tf's undeclared imports. They are listed
+    # for the same reason docker/requirements.txt lists them: removing them on the
+    # strength of onnx2tf's metadata broke the build with ModuleNotFoundError.
+    "tensorflow==2.21.0",
+    "onnx2tf",
+    "onnx",
+    "onnx-graphsurgeon",
+    "sng4onnx",
+    "tf_keras",
+    "psutil",
+    "ai-edge-litert",
+]
+
+[tool.uv]
+package = false

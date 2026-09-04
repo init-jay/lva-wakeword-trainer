@@ -1,0 +1,55 @@
+# What the build context may NOT contain.
+#
+# Every service builds with `context: .`, so without this file the whole repo is
+# tarred and sent to the daemon on every build - INCLUDING data/, which is ~43 GB
+# once download-external-data.sh has run. None of it is reachable by a COPY: the
+# only sources any Dockerfile names are train/, docker/requirements.txt and
+# patches/*.py.
+#
+# THIS BECAME LOAD-BEARING WITH THE HOST TRAINER. train-host/ has its own uv
+# environment, and a macOS torch install is several GB. It sits outside train/ for
+# exactly this reason - a .venv under train/ would be swept up by `COPY train/`
+# and baked into both trainer images - but keeping it out of the context as well
+# means the mistake cannot be made by moving one directory.
+#
+# Only ADD entries that no Dockerfile COPYs. Excluding something a build needs
+# fails at build time with a confusing "file not found", not here.
+
+# Corpora, recordings and models. Gigabytes, and mounted at runtime rather than
+# copied - see docker-compose.yml.
+data/
+output/
+
+# Host uv environments. Not used in any image; record/ and preflight/ never were.
+.venv/
+venv/
+.venv-*/
+**/.venv/
+train-host/
+
+# The openWakeWord clone the HOST trainer patches. The images make their own clone
+# at build time (see docker/Dockerfile.oww.cuda) and must not inherit a host one
+# patched for a different device.
+openwakeword/
+
+# History and editor state.
+.git/
+.gitignore
+.claude/
+.vscode/
+.idea/
+.DS_Store
+
+# Python leftovers, which would otherwise invalidate layer caches for no reason.
+__pycache__/
+**/__pycache__/
+*.pyc
+*.egg-info/
+
+# Host-only steps and prose. Kept out of the context so a doc edit does not
+# re-send it; nothing in any image reads them.
+record/
+preflight/
+docs/
+*.md
+training-*.log

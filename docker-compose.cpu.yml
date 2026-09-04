@@ -1,0 +1,40 @@
+# CPU overlay - point both trainers at their CPU images. Any architecture.
+#
+#     export COMPOSE_FILE=docker-compose.yml:docker-compose.cpu.yml
+#     docker compose build oww-trainer mww-trainer
+#
+# THIS IS THE APPLE SILICON PATH, and it is an overlay rather than a separate
+# service so that everything else - the wordlists mount, the corpus/output split,
+# the scripts in scripts/ - stays exactly as it is. Only the base image changes.
+#
+# It is not Apple-specific though, and the name says so. A Linux box with no NVIDIA
+# card uses the same overlay, as does an AMD one: the CPU images are the fallback
+# for "no CUDA", not for "is a Mac".
+#
+# WHY THERE IS NO METAL EQUIVALENT OF THIS FILE. Docker Desktop does not pass the
+# Metal device through, so a torch build that asks for `mps` inside a container
+# finds nothing and falls back to CPU without saying so. Reaching Metal means
+# leaving Docker entirely - a host environment like record/ and preflight/ have.
+# docker-compose.mps.yml is the placeholder for that conversation and stays empty;
+# apple-port.md carries the reasoning and the phased plan.
+#
+# WHAT TO EXPECT. Unmeasured on Apple Silicon at the time of writing - that
+# measurement is the point of these images. The CUDA figures to compare against, on
+# an RTX 3090 / 20 GB / 4 cores, are oww 28m59s and mww 28m02s end to end. Read
+# apple-port.md before concluding a slow run means "CPU is hopeless": the two things
+# CUDA actually bought were multi-threaded feature computation and not swapping,
+# and the second one is a memory setting on a Mac, not a hardware limit.
+#
+# GIVE DOCKER ENOUGH MEMORY FIRST. openWakeWord's negative feature array is 17.28 GB
+# and is mmap'd, not streamed. Docker Desktop's default VM allocation is well under
+# that, and exceeding it does not error - it page-faults, which looks like a slow
+# CPU rather than a misconfiguration. Settings > Resources > Memory.
+
+services:
+  oww-trainer:
+    build:
+      dockerfile: docker/Dockerfile.oww.cpu
+
+  mww-trainer:
+    build:
+      dockerfile: docker/Dockerfile.mww.cpu
