@@ -1,41 +1,47 @@
 #!/usr/bin/env bash
 #
-# Kokoro-FastAPI on the HOST, on Apple Silicon, using Metal.
+# Kokoro-FastAPI on the HOST, for Apple Silicon. CPU by default - see below.
 #
-# WHY THIS IS NOT A DOCKER SERVICE LIKE EVERYTHING ELSE HERE. Docker Desktop passes
-# no Metal device through, so `DEVICE_TYPE=mps` inside a container finds nothing and
-# falls back to CPU - silently, which is the bad kind of failure. Reaching the GPU on
-# a Mac means running outside Docker. That is the same wall docker-compose.mps.yml
-# documents for the trainers; this is the one service where going around it pays.
+# WHY THIS EXISTS: THE CONTAINER'S TORCH IS SLOW ON ARM, NOT THE MAC.
 #
-# WHAT IT BUYS. Measured on an M1 Max, same Kokoro-FastAPI v0.8.1 install throughout,
-# with only DEVICE_TYPE changed between rows:
+# Measured on an M1 Max with tools/bench_tts.py and a direct kokoro_tts_batch probe,
+# rendering "hey seeree" through Kokoro-FastAPI v0.8.1. BATCHED, because that is how
+# train/oww/train.py actually calls it (--tts-batch defaults to 16):
 #
-#     host, DEVICE_TYPE=mps      8.02 clips/s   120 ms median   RTF 17.0
-#     host, DEVICE_TYPE=cpu      3.56 clips/s   283 ms median   RTF  7.5
-#     docker, CPU image          ~4    clips/s
+#     host,   cpu,  batched      88 ms/clip   11.4 clips/s   <- best, and the default
+#     host,   mps,  UNbatched   110 ms/clip    9.1 clips/s
+#     host,   mps,  batched     161 ms/clip    6.2 clips/s
+#     docker, cpu,  batched     323 ms/clip    3.1 clips/s   <- what we had
 #
-# 2.25x for Metal. The host-versus-container difference is nil - 3.56 against ~4 - so
-# the gain is the device and not the environment, which is why the CPU row was
-# measured on this same install rather than assumed from the Docker number.
+# 3.7x, and NOT from the GPU. The container is native arm64 with all 10 CPUs (checked
+# - `uname -m` says aarch64, and it is not emulated the way Dockerfile.piper's CUDA
+# base was), so the gap is the torch build: the host runs the macOS arm64 wheel on
+# Accelerate, the image a generic linux/arm64 one. That is the whole finding.
 #
-# A SECOND INSTANCE BUYS NOTHING: 9.07 clips/s against 8.45, and throughput stays
-# flat from 1 to 8 client threads while latency grows in proportion. Two processes
-# share one GPU and serialise on it. Start ONE. That is the opposite of the CUDA box,
-# where instances scale and the compose file runs kokoro and kokoro2 - do not carry
-# that habit across.
+# WHY MPS LOSES DESPITE WINNING AN UNBATCHED BENCHMARK. Unbatched, Metal is 2.25x
+# CPU - which is what an earlier measurement here reported, and it was misleading
+# because the pipeline never renders unbatched. Kokoro-FastAPI keeps the ISTFT layers
+# on CPU while the rest runs on Metal ("Moving model to MPS device with CPU fallback
+# for unsupported operations", api/src/inference/kokoro_v1.py). Batching joins ~10
+# texts into one long utterance, and ISTFT cost is LINEAR IN AUDIO LENGTH - so
+# batching pushes ten times the work into the one stage that is not on the GPU, plus
+# a ten times larger transfer back. Batching therefore measures 2.83x FASTER on cpu
+# and 0.68x on mps: a net loss.
 #
-# WHY MPS WINS HERE WHEN IT OFTEN DOES NOT. StyleTTS2's vocoder leans on FFT/STFT
-# ops MPS does not implement, and the usual outcome is PYTORCH_ENABLE_MPS_FALLBACK
-# scattering them to CPU mid-graph, paying a round trip each way and measuring slower
-# than plain CPU. Kokoro-FastAPI avoids that by PLACING the ISTFT layers on CPU
-# deliberately and keeping the rest on Metal ("Moving model to MPS device with CPU
-# fallback for unsupported operations", api/src/inference/kokoro_v1.py). The fallback
-# env var below is belt and braces, not the mechanism.
+# --mps IS KEPT FOR ONE REAL CASE: run-ons, where it is the fastest option measured
+# (143 ms/clip unbatched against 229 batched on cpu). Run-ons are ~40% of positives.
+# Nobody has tried splitting the corpus across two servers by clip type; if the
+# corpus stage ever needs to be faster than this, that is the next thing to measure.
+#
+# A SECOND INSTANCE BUYS NOTHING ON METAL: 9.07 clips/s against 8.45, throughput flat
+# from 1 to 8 client threads while latency grows in proportion. Two processes share
+# one GPU and serialise on it. On the CUDA box instances DO scale and compose runs
+# kokoro and kokoro2 - do not carry that habit across.
 #
 # USAGE:
-#     ./scripts/start-kokoro-mps.sh                 # foreground, Ctrl-C to stop
-#     ./scripts/start-kokoro-mps.sh --port 8890     # if 8880 is taken by Docker
+#     ./scripts/start-kokoro-host.sh                # cpu, foreground, Ctrl-C to stop
+#     ./scripts/start-kokoro-host.sh --mps          # Metal, for run-on-heavy work
+#     ./scripts/start-kokoro-host.sh --port 8890    # if 8880 is taken by Docker
 #
 # Then point a training run at it - from inside the compose network the host is
 # host.docker.internal, and KOKORO_EXTERNAL stops the script starting its own:
@@ -52,14 +58,15 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PORT=8880
-DEVICE=mps
+# cpu, because batched it is the fastest of the four configurations measured. --mps
+# is the opt-in, not the default - the reverse of what this script assumed when it
+# was written, and the header says why.
+DEVICE=cpu
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --port)   PORT="$2"; shift 2 ;;
-        # For re-measuring the A/B above rather than for normal use - the Docker CPU
-        # image is the better CPU path, since it needs no host Python at all.
-        --cpu)    DEVICE=cpu; shift ;;
-        *) echo "usage: $0 [--port N] [--cpu]" >&2; exit 2 ;;
+        --mps)    DEVICE=mps; shift ;;
+        *) echo "usage: $0 [--port N] [--mps]" >&2; exit 2 ;;
     esac
 done
 
@@ -71,7 +78,7 @@ KOKORO_REF="v0.8.1"
 APP_DIR="data/external/kokoro-fastapi"
 
 if [[ "$(uname -m)" != "arm64" && "$DEVICE" == "mps" ]]; then
-    echo "ERROR: --device mps needs Apple Silicon; this is $(uname -m)." >&2
+    echo "ERROR: --mps needs Apple Silicon; this is $(uname -m)." >&2
     echo "       On any other machine use the Docker service instead:" >&2
     echo "         docker compose up -d kokoro" >&2
     exit 2

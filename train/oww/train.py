@@ -956,7 +956,8 @@ def main():
                         help="Kokoro TTS URL. Comma-separate several to split the work "
                              "across them: one Kokoro process is single-threaded and "
                              "saturates one core, so more PROCESSES scale where more "
-                             "client threads do not.")
+                             "client threads do not. (Not on Metal, where two "
+                             "instances share one GPU and measured no faster.)")
     parser.add_argument("--data-dir", default="data/external",
                         help="Where the third-party downloads live: the ACAV100M "
                         "and validation feature .npy files, audioset_16k, fma, "

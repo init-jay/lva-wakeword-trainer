@@ -36,6 +36,21 @@ if [[ -z "$WAKE_WORD" ]]; then
     echo "usage: $0 \"wake word\" [extra train.mww.train args...]" >&2
     exit 2
 fi
+
+# A WAKE WORD IS WORDS - same check, same reason, as run-oww-training.sh, where a
+# collapsed line continuation passed environment assignments as arguments and a run
+# started on "hey seereeKOKORO_EXTERNAL=1". Every path below derives from this
+# string. See that script's copy for the full account.
+if [[ ! "$WAKE_WORD" =~ ^[A-Za-z][A-Za-z\'’-]*([[:space:]]+[A-Za-z][A-Za-z\'’-]*)*$ ]]; then
+    echo "ERROR: '$WAKE_WORD' does not look like a wake word." >&2
+    echo "       Expected words only - letters, spaces, apostrophes, hyphens." >&2
+    if [[ "$WAKE_WORD" == *=* ]]; then
+        echo >&2
+        echo "       It contains '='. Environment assignments must come BEFORE the" >&2
+        echo "       script; a pasted line continuation often loses them." >&2
+    fi
+    exit 2
+fi
 shift
 
 # The REPO ROOT, not this script's directory - every docker compose call below needs

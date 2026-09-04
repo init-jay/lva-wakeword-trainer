@@ -44,6 +44,34 @@ if [[ -z "$WAKE_WORD" ]]; then
     echo "usage: $0 \"wake word\" [extra train.py args...]" >&2
     exit 2
 fi
+
+# A WAKE WORD IS WORDS. Anything else is a mistyped command line, and this check
+# exists because one got through: a pasted multi-line invocation whose `\`
+# continuation collapsed passed the environment assignments as ARGUMENTS, so
+# KOKORO_EXTERNAL=1 was never set and the run started on the wake word
+#
+#     hey seereeKOKORO_EXTERNAL=1
+#
+# It named its outputs after that, took a minute to fail, and failed somewhere
+# unrelated - in train.py's argument parser, reporting a missing .onnx. Everything
+# downstream here derives paths from this string, so a bad one is cheap to catch now
+# and confusing to diagnose later.
+#
+# Letters, spaces, apostrophes and hyphens only. Deliberately narrow: the wordlists
+# and the TTS engines both take plain text, and no legitimate wake word has needed
+# more. Widen it if a real one does, not to make an error message go away.
+if [[ ! "$WAKE_WORD" =~ ^[A-Za-z][A-Za-z\'’-]*([[:space:]]+[A-Za-z][A-Za-z\'’-]*)*$ ]]; then
+    echo "ERROR: '$WAKE_WORD' does not look like a wake word." >&2
+    echo "       Expected words only - letters, spaces, apostrophes, hyphens." >&2
+    if [[ "$WAKE_WORD" == *=* ]]; then
+        echo >&2
+        echo "       It contains '='. Environment assignments must come BEFORE the" >&2
+        echo "       script, and a pasted line continuation often loses them:" >&2
+        echo "         export KOKORO_EXTERNAL=1 KOKORO_URL=http://...:8882" >&2
+        echo "         $0 \"hey seeree\"" >&2
+    fi
+    exit 2
+fi
 shift
 
 # The REPO ROOT, not this script's directory - it moved to scripts/ in the reorg

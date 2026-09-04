@@ -8,20 +8,36 @@ engines here answer it in opposite directions:
     concurrent requests just queue (4 client threads: 15.0 it/s against 14.1
     sequential). More INSTANCES scale, roughly linearly, until the cores run out.
 
-    EXCEPT ON METAL, WHERE INSTANCES STOP SCALING. Measured on an M1 Max against a
-    host Kokoro-FastAPI v0.8.1, the same install throughout, DEVICE_TYPE the only
-    thing changed:
+    EXCEPT ON METAL, WHERE INSTANCES STOP SCALING: a second MPS instance measured
+    9.07 clips/s against 8.45, i.e. nothing, with throughput flat from 1 to 8 client
+    threads while latency grew in proportion. Two processes share one GPU and
+    serialise on it. On CUDA start two; on Metal start one.
 
-        host, mps        8.02 clips/s   120 ms median   RTF 17.0
-        host, cpu        3.56 clips/s   283 ms median   RTF  7.5
-        docker, cpu     ~4    clips/s
+    WHAT THIS TOOL CANNOT TELL YOU, AND IT MATTERS. It renders ONE CLIP PER REQUEST.
+    train/oww/train.py does not - it batches (--tts-batch 16), and batching changes
+    the RANKING, not just the numbers. Measured on an M1 Max, Kokoro-FastAPI v0.8.1
+    throughout, "hey seeree" as plain positives:
 
-    So Metal is worth 2.25x, and it IS Metal rather than the environment - the host
-    CPU row lands next to the Docker one. But a second MPS instance measured 9.07
-    against 8.45 clips/s, i.e. nothing, and throughput stayed flat from 1 to 8 client
-    threads while latency grew in proportion. The instances share one GPU and
-    serialise on it. On CUDA start two; on Metal start one. See
-    scripts/start-kokoro-mps.sh.
+                             unbatched        batched     batching gain
+        host,   cpu           249 ms/clip      88 ms/clip     2.83x
+        host,   mps           110 ms/clip     161 ms/clip     0.68x   <- a LOSS
+        docker, cpu           852 ms/clip     323 ms/clip     2.64x
+
+    Unbatched, Metal looks 2.25x better than CPU and this tool will say so. Batched,
+    host CPU wins outright at 88 ms/clip and Metal is third. The cause is that
+    Kokoro-FastAPI keeps the ISTFT layers on CPU while the rest runs on Metal, and
+    ISTFT cost is linear in audio length - so joining ~10 texts into one utterance
+    moves ten times the work into the one stage that is not on the GPU.
+
+    So: measure in the mode you will run in. A sweep here that contradicts a real
+    corpus run is not noise, it is this. scripts/start-kokoro-host.sh carries the
+    full table and defaults to the configuration that won.
+
+    The other surprise in that table is the docker row. It is native arm64 with all
+    10 CPUs - not emulated - and still 3.7x slower than the same version on the host,
+    because the image ships a generic linux/arm64 torch while the host wheel uses
+    Accelerate. On Apple Silicon the win is leaving the container, not reaching the
+    GPU.
   - Piper is not. onnxruntime parallelises across cores, and one instance measured
     980% CPU - ten cores. A second instance was 0.88x, slower than one, because the
     two contend for the cores the first was already using.
