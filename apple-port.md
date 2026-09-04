@@ -26,7 +26,24 @@ that patch is simply not applied. See "gpu-resident-features.py becomes unnecess
 Disk is fine too - 148 GB free, against ~18 GB for the openWakeWord half of
 `data/external/` (~17.2 GB ACAV100M plus ~730 MB shared).
 
-## MLX is not a drop-in, and that is the main finding
+**The result so far, and it is not the one this document expected.** microWakeWord
+finished in **26m06s on the Mac against 28m03s on the RTX 3090** - CPU only, in
+Docker, no Metal anywhere. The two things the GPU actually bought openWakeWord were
+never compute (see "Whether it is worth doing at all"), and for a 25,537-parameter
+model they were not worth much at all.
+
+**And the biggest lever found so far is not a GPU question.** It is that the same
+library is markedly faster outside a container than inside one on this hardware -
+3.7x for Kokoro, 6.3x on a GEMM-shaped torch train step - because the macOS wheels
+link Accelerate. That cuts the other way for convolutions, where the macOS build has
+no oneDNN and is 12x slower. Phase 1b has the numbers; it is the section to read
+before optimising anything here.
+
+## MLX is not a drop-in
+
+(Written when this was the main finding. It has been overtaken: the largest measured
+effect on this hardware is the container/host library split in Phase 1b, which needs
+no new framework at all. This section still stands on its own terms.)
 
 MLX is a separate array framework. openWakeWord trains with **PyTorch** and
 microWakeWord with **TensorFlow**, and neither has an MLX backend. Adopting MLX
@@ -194,11 +211,16 @@ That last one is worth generalising. The repo already learned from
 adds a second gap: *installed on x86* and *installable on arm64* are different things
 too, and neither `requires_dist` nor a working amd64 build predicts the other.
 
-`train-host/` holds a resolved `pyproject.toml` and `uv.lock` for the host route.
-It is **not used by anything** and is kept only because phase 2 needs it: uv resolved
-the pinned openWakeWord stack (speechbrain 0.5.14, datasets 2.14.6, `numpy<2`) on
-macOS/CPython 3.12 in 143 packages, which was the open question about whether a host
-env was even possible. Delete it if MPS is abandoned.
+`train-host/` holds a resolved `pyproject.toml` and `uv.lock` for the host route. uv
+resolved the pinned openWakeWord stack (speechbrain 0.5.14, datasets 2.14.6,
+`numpy<2`) on macOS/CPython 3.12 in 143 packages, which settled the open question of
+whether a host env was even possible.
+
+It was kept for phase 2, on the assumption that only MPS would justify it. Phase 1b
+below overtakes that: the host torch is **6.3x faster than the container's on a
+GEMM-shaped train step**, on CPU, with no GPU involved at all. So this directory is
+now the most likely home of the next real openWakeWord speedup rather than a
+placeholder for a deferred one. Do not delete it.
 
 The patch set survives this almost intact, which is the main way MPS differs from
 the MLX rewrite analysed above — MPS keeps PyTorch, so the patches keep applying:
@@ -212,6 +234,57 @@ the MLX rewrite analysed above — MPS keeps PyTorch, so the patches keep applyi
 | `gpu-resident-features.py` | **not applied** — 64 GB makes it unnecessary |
 
 Two of five touched, one of those by deletion.
+
+### Phase 1b — the container is the wrong place for openWakeWord, and the right one for microWakeWord
+
+**This is the finding that most changes the plan, and it arrived sideways.** Chasing
+Kokoro throughput turned up a 3.7x gap between the same Kokoro-FastAPI version in a
+container and on the host — native arm64 both times, no emulation. That is a *torch*
+gap, and both trainers were built on the assumption that it does not exist.
+
+Probing torch directly, identical script, container against `train-host/`:
+
+| operation | container (linux/arm64) | host (macOS arm64) | |
+|---|---|---|---|
+| `matmul 2048³` | 53.05 ms | **17.42 ms** | host **3.0x** |
+| train step, 1024 batch, MLP | 26.39 ms | **4.19 ms** | host **6.3x** |
+| `conv1d 512×16×96` | **7.38 ms** | 90.16 ms | host **12x SLOWER** |
+
+The conv row is not noise — three trials, 88.15 / 90.44 / 88.39 ms — and the cause
+is one flag:
+
+    threads 8 | mkldnn False        # host
+    linear equiv: 0.48 ms           # same tensor through a GEMM path
+
+**The macOS wheel ships without oneDNN, so convolutions fall back to a reference
+kernel; the linux wheel has it. Meanwhile GEMM on the host goes to Accelerate.** Two
+libraries, two ops, opposite winners. "Go native on Apple Silicon" is not a blanket
+improvement, and anyone who asserts it without measuring will be right about half the
+model and badly wrong about the other half.
+
+Which half you land on is decided by architecture:
+
+* **openWakeWord is `Linear` x7 and one `LSTM` — no convolutions at all** (counted in
+  its own `train.py`). Pure GEMM, so the host's missing oneDNN costs nothing and
+  Accelerate is a straight win. `docker/Dockerfile.oww.cpu` is therefore running the
+  slower of the two torches for the one model it trains.
+* **microWakeWord is mixednet — convolutional.** On host torch that is the 12x
+  reference-kernel path. It is TensorFlow rather than torch so this probe does not
+  transfer directly, but the direction is a warning, not an encouragement, and
+  `docker/Dockerfile.mww.cpu` measured 26m06s against the 3090's 28m03s without any
+  of this. Leave it in the container until someone measures TF the same way.
+
+**Before acting on the 6.3x**, two things it does not yet prove. The probe is a
+synthetic MLP, not openWakeWord's real model — the LSTM is a third code path that
+neither Accelerate nor oneDNN covers cleanly. And the training loop is a minority of
+an openWakeWord run: TTS and onnxruntime feature computation dominate, and the
+training stage itself is ~16 minutes. A 6.3x on a minority stage is worth much less
+than it sounds.
+
+The honest next step is the cheap one: run the actual openWakeWord model through both
+environments and compare wall time on the training stage alone, with `SKIP_CORPUS=1`
+so nothing else moves. `train-host/` exists for precisely this and is otherwise
+unused.
 
 ### Phase 2 — MPS for the model, CoreML for the features, measured separately
 
@@ -231,17 +304,33 @@ difference or an unimplemented operator falling back to CPU, so the check is tha
 the trained model still converts and still evaluates — the pipeline already has that
 instrument, in `onnx2tflite.py`'s conversion scoring and in `eval/compare_models.py`.
 
-### Phase 3 — microWakeWord, host, CPU
+### Phase 3 — microWakeWord: DONE, and it stays in the container
 
-Same host-environment treatment, no Metal, per the tensorflow-metal finding. Expect
-this to be the easy half.
+This was written as "same host-environment treatment, no Metal, expect the easy
+half". It is done, and it went the other way: the CPU **image** finished in 26m06s
+against the 3090's 28m03s, so there is nothing left to chase and no host environment
+to build.
+
+Phase 1b is the reason not to build one anyway. mixednet is convolutional, and on
+macOS the torch wheel has no oneDNN and takes a 12x reference-kernel path for
+convolutions. That measurement is torch, not TensorFlow, so it does not transfer
+directly - but it points away from the host, not towards it, and a Phase 3 that
+assumed the opposite would have been an expensive way to find out.
+
+If anyone does revisit this, measure TensorFlow the same way first: a conv-shaped
+step in `docker/Dockerfile.mww.cpu` against the same step in a host TF install. One
+number decides it, and it costs minutes.
 
 ### What would make this not worth finishing
 
-Stop and stay on the CUDA box if phase 1 shows CPU training so slow that the
-feedback loop — step 3 back into step 2, which is the actual pipeline — becomes
-painful. The bar is not the 3090's ~29 minutes; it is whatever keeps a
-change-one-thing iteration inside a sitting.
+Written as "stop if phase 1 shows CPU training too slow for the feedback loop". Phase
+1 has now answered that for microWakeWord — 26m06s, faster than the 3090 — so the
+question survives only for openWakeWord, where the corpus stage rather than training
+is the thing that hurts.
+
+The bar was never the 3090's ~29 minutes. It is whatever keeps a change-one-thing
+iteration inside a sitting, and the levers that move it most are the ones found by
+accident: `SKIP_CORPUS=1`, and getting the TTS off the container's libraries.
 
 The standing warning from the TTS side applies to every phase here: `train.py`
 records a Kokoro process pinned at 101.8% CPU — one core — while the GPU sat at 21%

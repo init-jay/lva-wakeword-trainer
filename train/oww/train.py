@@ -882,8 +882,20 @@ def wait_for_kokoro_shutdown(timeout: int = 120):
     Not fatal on timeout. The generation stage has finished by now, so failing here
     would throw away the expensive half of the run to avoid a failure that may not
     happen - a smaller corpus can fit alongside Kokoro. Report and continue.
+
+    SKIPPED ENTIRELY WITHOUT CUDA. Everything above is about VRAM, and on a CPU run
+    there is none to contend for - Kokoro holding host RAM is not a problem this
+    barrier can help with. Worse than useless there, in fact: on the Mac it waited
+    the full 120 s and then printed a warning naming a 16.09 GiB OOM that cannot
+    occur on a machine with no GPU, which reads as a real problem and is not one.
+    It waits at all because KOKORO_EXTERNAL leaves the containers up on purpose.
     """
     import socket
+
+    import torch
+    if not torch.cuda.is_available():
+        print("  no CUDA - not waiting for Kokoro (nothing holds VRAM here)")
+        return
 
     servers = [("kokoro", 8880), ("kokoro2", 8881)]
     deadline = time.monotonic() + timeout

@@ -60,18 +60,45 @@ WORKDIR /app
 # entirely dead weight in an image whose whole purpose is not having a GPU. On a Mac
 # they can never load at all.
 #
-# The +cpu wheels from PyTorch's CPU index carry no nvidia-* dependencies. This is
+# The CPU index's wheels carry no nvidia-* dependencies. Note that on aarch64 they
+# are NOT tagged `+cpu` the way the x86 ones are - 2.5.1 arrives as plain "2.5.1" -
+# so the check below tests torch.version.cuda rather than the version string, which
+# an earlier version of this file got wrong. This is
 # the same trap docker/requirements.txt documents from the other direction, where
 # `tensorflow-cpu` was the WRONG choice - the lesson is not "prefer cpu variants",
 # it is that the package name and the index both decide what you get, and only a
 # build log settles it.
+#
+# PINNED TO 2.5.1 TO MATCH THE CUDA IMAGE, and the pin is the fix for three separate
+# build failures rather than a tidiness measure.
+#
+# Unpinned, this resolved torch 2.14.0 / torchaudio 2.11.0 while the CUDA image runs
+# torch 2.5.1+cu121 / torchaudio 2.5.1+cu121 on Python 3.10.12 (read off the running
+# image, not inferred). openWakeWord's stack is pinned to that era, so every step
+# forward broke something further in:
+#
+#   torchaudio >= ~2.9  removed set_audio_backend, which torch-audiomentations
+#                       0.11.0 calls at import
+#   torchaudio >= ~2.9  routes torchaudio.load through torchcodec, which is not
+#                       installed - and this one only surfaced AFTER a full corpus
+#                       generation, inside the augmentation subprocess
+#
+# Both vanish at 2.5.1. openWakeWord's own `torchaudio>=0.13.1,<1` pin is a red
+# herring: pip does not enforce it against the already-installed wheel, so NEITHER
+# image obeys it. Do not "fix" that by satisfying it - it would drag torch back to
+# 1.13 and 2022.
+#
+# AND MATCHING VERSIONS IS WHAT MAKES A CPU-vs-CUDA COMPARISON MEAN ANYTHING. With
+# 2.14 here and 2.5.1 there, a wall-clock difference measures nine minor releases of
+# PyTorch as much as it measures the hardware. Raise both together or neither.
 RUN pip install --no-cache-dir \
         --index-url https://download.pytorch.org/whl/cpu \
-        torch torchaudio \
+        torch==2.5.1 torchaudio==2.5.1 \
     && python3 -c "\
-import torch; \
-print('torch', torch.__version__, 'cuda available:', torch.cuda.is_available()); \
-assert '+cpu' in torch.__version__, 'not the CPU build - check the index-url above'" \
+import torch, torchaudio; \
+print('torch', torch.__version__, 'torchaudio', torchaudio.__version__, \
+      'cuda build:', torch.version.cuda); \
+assert torch.version.cuda is None, f'CUDA build installed: {torch.version.cuda}'" \
     && python3 -c "\
 import glob, site; \
 nv = [p for r in site.getsitepackages() for p in glob.glob(r + '/nvidia*')]; \
@@ -174,6 +201,36 @@ RUN python3 /tmp/feature-device-selection.py openwakeword/openwakeword/train.py
 
 COPY patches/configurable-corpus-dir.py /tmp/configurable-corpus-dir.py
 RUN python3 /tmp/configurable-corpus-dir.py openwakeword/openwakeword/train.py
+
+# A FIFTH PATCH THIS IMAGE NEEDS AND THE CUDA ONE DOES NOT, and it patches an
+# installed dependency rather than the openWakeWord clone.
+#
+# torch-audiomentations 0.11.0 calls torchaudio.set_audio_backend at import, removed
+# in torchaudio 2.2. The CUDA image escapes it because openWakeWord's setup.py pins
+# `torchaudio>=0.13.1,<1` and downgrades into a release that still has the function.
+# This image is Python 3.12 and torchaudio <1 has no cp312 wheel, so that escape does
+# not exist and no pin can create it. See the patch for the full account.
+#
+# It runs AFTER `pip install -e ./openwakeword` above deliberately: that install is
+# the last thing that can move torchaudio or torch-audiomentations, and patching a
+# file pip may still replace would silently undo it.
+#
+# The import check below is what proves it worked. This failed AFTER a full corpus
+# generation - the whole expensive half of a run - because the import happens in the
+# augmentation subprocess, not at startup.
+COPY patches/torchaudio-set-audio-backend.py /tmp/torchaudio-set-audio-backend.py
+# The path is GLOBBED, not imported. Asking Python where torch_audiomentations lives
+# means importing it, which is the exact thing that raises here - so site-packages is
+# searched on disk instead. An empty result fails the build rather than silently
+# patching nothing.
+RUN TA_IO="$(python3 -c 'import glob, site; \
+        hits = [p for r in site.getsitepackages() \
+                for p in glob.glob(r + "/torch_audiomentations/utils/io.py")]; \
+        print(hits[0] if hits else "")')" \
+    && test -n "$TA_IO" \
+    && python3 /tmp/torchaudio-set-audio-backend.py "$TA_IO" \
+    && python3 -c "import torch_audiomentations; print('torch_audiomentations imports OK')" \
+    && python3 -c "import openwakeword.data; print('openwakeword.data imports OK')"
 
 # patches/gpu-resident-features.py IS NOT APPLIED, and must not be. It moves the
 # 17.28 GB feature array into VRAM. There is no VRAM here, so it would fail - and

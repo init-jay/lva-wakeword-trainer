@@ -16,7 +16,23 @@
 # this pipeline runs. Recording is record/record_samples.py, on the host.
 
 # Core training dependencies
-scipy
+#
+# scipy IS BOUNDED BECAUSE acoustics IS PINNED. `acoustics==0.2.6` below is from 2015
+# and does `from scipy.special import sph_harm`, which scipy DEPRECATED in 1.15 and
+# REMOVED in 1.17 (renamed sph_harm_y). Unbounded, a build in 2026 resolves 1.18 and
+# openwakeword/data.py fails at import:
+#
+#     ImportError: cannot import name 'sph_harm' from 'scipy.special'.
+#     Did you mean: 'sph_harm_y'?
+#
+# This did not bite the CUDA image because it was built when scipy was older, which
+# is the whole problem with leaving it floating: the image works, the same Dockerfile
+# rebuilt later does not, and nothing in the run tag records the difference. The
+# CPU image found it because it was built fresh.
+#
+# 1.16.3 (2025-10-28) is the last release before the removal. Raise this only
+# together with acoustics, and only after checking data.py still imports.
+scipy<1.17
 numpy<2
 pyarrow>=8.0.0,<15.0.0
 tqdm
