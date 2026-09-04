@@ -1,0 +1,42 @@
+# PLACEHOLDER - Apple Silicon (Metal / MPS) overlay. NOT IMPLEMENTED.
+#
+# The counterpart to docker-compose.cuda.yml: that one adds NVIDIA devices to the two
+# trainers, this one would point them at an Apple Silicon build instead. It is a stub
+# on purpose - applying it today changes nothing, because the images it would need do
+# not exist.
+#
+#     docker compose -f docker-compose.yml -f docker-compose.mps.yml build oww-trainer
+#
+# WHY IT IS EMPTY RATHER THAN WRONG. The blocker is not compose, it is the images.
+# Both trainers are linux/amd64 CUDA builds (docker/Dockerfile.oww.cuda,
+# docker/Dockerfile.mww.cuda) with no CPU or Metal fallback inside them, so there is
+# no device to select and no base image to swap to. An overlay cannot fix that: it
+# selects between builds, and only one build exists.
+#
+# WHAT WOULD ACTUALLY HAVE TO EXIST FIRST, in the order it should be attempted:
+#
+#   1. docker/Dockerfile.oww.mps - and note the GPU would still be UNREACHABLE from a
+#      container on macOS. Docker Desktop does not pass the Metal device through, so a
+#      containerised "MPS" build gets CPU. A real Apple Silicon path is therefore a
+#      HOST environment like record/ and preflight/ already have, with its own
+#      pyproject.toml and uv lock - not a compose overlay at all. That is the main
+#      reason this file is still a stub.
+#   2. PyTorch MPS for the openWakeWord model, and the CoreML execution provider for
+#      onnxruntime's feature computation. eval/paths.py-style provider detection is
+#      already framework-agnostic; patches/feature-device-selection.py keys off
+#      onnxruntime.get_available_providers() rather than torch, so it ports nearly
+#      unchanged.
+#   3. tensorflow-metal for microWakeWord - the weak link. It has historically lagged
+#      TensorFlow releases, and docker/Dockerfile.mww.cuda pins 2.21.0 to match its
+#      base image. Verify that pairing exists before assuming this half is possible.
+#
+# AND FIRST, MEASURE WHETHER IT IS WORTH IT. The mww model is ~25,537 parameters with
+# a CPU baseline of ~46 s per 500 steps - about 15 minutes for a full run - so the GPU
+# may buy little. openWakeWord's wins were not raw compute either: they were avoiding
+# single-threaded feature computation and avoiding swap, both reachable on CPU with
+# enough RAM. See apple-port.md, which works through this and concludes: do not port.
+#
+# Kept as a file rather than a paragraph in apple-port.md so that the question "is
+# there an Apple Silicon path?" is answerable from `ls` - and answered "not yet, and
+# here is why" rather than by silence.
+services: {}

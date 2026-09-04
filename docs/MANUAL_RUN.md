@@ -95,11 +95,12 @@ uv run test_model.py --model ../output/hey_seeree/mww/<tag>.json
 If peaks sit just under your threshold, the operating point is wrong for the room —
 not the model.
 
-### On a GPU box
+### On an NVIDIA box
 
-The TTS servers default to CPU so evaluation works anywhere. On the training machine,
-add the overlay once per shell:
+Nothing in the base compose file requires a GPU, so evaluation and recording work
+anywhere. On the training machine, add the CUDA overlay once per shell — it is NVIDIA
+only, and will not match an AMD card under ROCm:
 
 ```bash
-export COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml
+export COMPOSE_FILE=docker-compose.yml:docker-compose.cuda.yml
 ```

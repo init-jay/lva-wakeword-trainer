@@ -13,7 +13,7 @@
 #    thing standing between a corpus and an unexplainable score change.
 #
 # 2. CPU IS THE DEFAULT, GPU IS OPT-IN. Corpus generation has to be possible on the
-#    machine doing the EVALUATION, which is the Mac - `docker-compose.gpu.yml` is what
+#    machine doing the EVALUATION, which is the Mac - `docker-compose.cuda.yml` is what
 #    the training server adds. Both variants publish linux/arm64, so the CPU image
 #    runs native on Apple Silicon rather than under emulation.
 #

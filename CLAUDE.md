@@ -42,10 +42,11 @@ guess a wake word from the repo's existing `hey_seeree` files.
 | step | machine |
 |---|---|
 | record, preflight | the human's machine, host, `uv` |
-| train | the GPU box, Docker |
+| train | the CUDA box, Docker |
 | eval | either — the `eval` image builds native on Apple Silicon |
 
-On the GPU box: `export COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml`.
+On the CUDA box: `export COMPOSE_FILE=docker-compose.yml:docker-compose.cuda.yml`.
+NVIDIA only - `driver: nvidia` does not match an AMD card under ROCm.
 `SKIP_BUILD=1` on either training script reuses the image; needed after a
 `docker builder prune`, since the rebuild is then cold.
 

@@ -1,5 +1,13 @@
 # microWakeWord trainer - the ESP32 target (ARCHITECTURE.md step 2).
 #
+# .cuda IN THE NAME IS A CLAIM ABOUT THE BASE, NOT A PREFERENCE. This image is
+# built on tensorflow/tensorflow:2.21.0-gpu, trains on an NVIDIA GPU,
+# and is linux/amd64 - it does not run natively on Apple Silicon, and there is no
+# CPU fallback inside it.
+# The suffix leaves room for a .cpu variant beside it without either being mistaken
+# for the other; apple-port.md says why one does not exist yet.
+#
+#
 # SEPARATE FROM THE openWakeWord IMAGE ON PURPOSE, and not by preference: mWW's
 # setup.py requires `numpy>=2.0` while docker/requirements.txt pins `numpy<2` for
 # openWakeWord and torch. They cannot coexist in one environment. That turns out to be

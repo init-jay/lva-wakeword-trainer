@@ -5,7 +5,7 @@ whether MLX has equivalents to the CUDA speed-ups the training images rely on.
 
 **Nothing here has been measured on Apple Silicon.** Every number below comes from
 the training VM (20 GB RAM, RTX 3090, 4 cores) or from the CPU baselines already
-recorded in `docker/Dockerfile.mww`. Treat the whole document as a plan, not a
+recorded in `docker/Dockerfile.mww.cuda`. Treat the whole document as a plan, not a
 result.
 
 ## MLX is not a drop-in, and that is the main finding
@@ -60,7 +60,7 @@ middle ground here; it is a function of installed memory.
 
 The measurements already in this repo argue mostly no.
 
-**microWakeWord barely benefits from a GPU as it is.** `docker/Dockerfile.mww`
+**microWakeWord barely benefits from a GPU as it is.** `docker/Dockerfile.mww.cuda`
 records a CPU baseline of ~46 s per 500 steps on a 25,537-parameter model — about 15
 minutes for a 10,000-step run — and notes that a model this small may not fill a
 GPU. It will not fill an M-series GPU either. The CPU path is already acceptable,
@@ -87,7 +87,7 @@ a native host environment of the kind `record/` and `preflight/` already have, e
 with its own `pyproject.toml` and uv lock. That is a third and fourth host
 environment to maintain, not a compose overlay.
 
-`docker-compose.gpu.yml` is not a precedent for this. It selects a different base
+`docker-compose.cuda.yml` is not a precedent for this. It selects a different base
 image for a service that is *pulled*, not built; it cannot make a CUDA training
 image run natively on arm64.
 

@@ -1,3 +1,12 @@
+# openWakeWord trainer - the server target, step 2.
+#
+# .cuda IN THE NAME IS A CLAIM ABOUT THE BASE, NOT A PREFERENCE. This image is
+# built on nvidia/cuda:12.1.1-devel-ubuntu22.04, trains on an NVIDIA GPU,
+# and is linux/amd64 - it does not run natively on Apple Silicon, and there is no
+# CPU fallback inside it.
+# The suffix leaves room for a .cpu or .mps variant beside it without either being
+# mistaken for the other; apple-port.md says why one does not exist yet.
+#
 FROM nvidia/cuda:12.1.1-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive

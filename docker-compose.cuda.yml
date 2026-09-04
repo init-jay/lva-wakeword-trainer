@@ -1,0 +1,95 @@
+# CUDA overlay - NVIDIA only. Apply it on the training server:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.cuda.yml up -d kokoro kokoro2
+#
+# Or set it once for the shell, so plain `docker compose` picks both up:
+#
+#     export COMPOSE_FILE=docker-compose.yml:docker-compose.cuda.yml
+#
+# WHY AN OVERLAY AND NOT A FLAG. A `deploy.resources.reservations.devices` block
+# cannot be made conditional inside one compose file - there is no falsy value that
+# means "no device", and a compose file asking for an nvidia device FAILS TO START on
+# a machine that has none. That is what kept `kokoro` from running on the Mac, which
+# is the machine the evaluation corpus most needs to be generatable on. Compose merges
+# `deploy` additively across -f files, so the reservation belongs in the file that is
+# only ever applied where an NVIDIA GPU exists.
+#
+# NVIDIA, NOT "GPU". `driver: nvidia` is a CUDA reservation: it does not match an
+# AMD card under ROCm, or Apple Silicon, and there is no vendor-neutral spelling of
+# it. The file is named for what it actually requires so nobody applies it to a
+# Radeon box and reads the failure as a compose problem.
+#
+# KOKORO AND BOTH TRAINERS TAKE THEIR DEVICES FROM HERE. One place to look, and one
+# thing to add on a CUDA host - rather than kokoro being conditional while the two
+# trainers hardcoded a device the base file then demanded everywhere.
+#
+# PIPER IS HERE TOO, THOUGH IT DOES NOT CURRENTLY USE THE DEVICE. It is started
+# without `--use-cuda`, so it holds no CUDA context and the reservation is inert. It
+# is kept so the A/B that docker/Dockerfile.piper asks for stays a two-line change
+# rather than a compose edit - and keeping it HERE rather than in the base file is
+# what lets `docker compose up piper` work on a machine with no GPU, which is where
+# the microWakeWord corpus would otherwise be ungeneratable.
+#
+# The trade that buys: `docker compose up oww-trainer` without CUDA now
+# STARTS instead of refusing, and fails later inside CUDA init. That is a worse error
+# message than "no such device", and it is accepted deliberately - the alternative was
+# a base file that could not be parsed usefully on the Mac, which is where the eval
+# and record steps live.
+#
+# For an Apple Silicon variant see docker-compose.mps.yml, which is a placeholder.
+services:
+  kokoro:
+    build:
+      args:
+        KOKORO_IMAGE: ghcr.io/remsky/kokoro-fastapi-gpu:v0.8.1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  kokoro2:
+    build:
+      args:
+        KOKORO_IMAGE: ghcr.io/remsky/kokoro-fastapi-gpu:v0.8.1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # The two trainers. Both images are CUDA-based (docker/Dockerfile.*.cuda) and have
+  # no CPU fallback inside them, so this reservation is what makes them work at all
+  # rather than a speed-up - unlike kokoro above, which is genuinely useful both ways.
+  oww-trainer:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  mww-trainer:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Inert today - see the header. Present so enabling `--use-cuda` needs no compose
+  # change, and so that every device reservation in the project is in one file.
+  piper:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

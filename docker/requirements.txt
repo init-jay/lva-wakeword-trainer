@@ -1,8 +1,8 @@
-# Dependencies for the openWakeWord TRAINER IMAGE (docker/Dockerfile.oww) only.
+# Dependencies for the openWakeWord TRAINER IMAGE (docker/Dockerfile.oww.cuda) only.
 #
 # Named requirements.txt for the editor support that name carries, not because it
 # is the repo's requirements - it sits in docker/ beside the one Dockerfile that
-# COPIes it, and this header is what says which. docker/Dockerfile.mww has no
+# COPIes it, and this header is what says which. docker/Dockerfile.mww.cuda has no
 # counterpart on purpose: its three installs are order-dependent against the
 # microwakeword source install, so a requirements file could not express them.
 #
@@ -89,7 +89,7 @@ deep-phonemizer==0.0.19
 # out on the strength of a `requires_dist` listing; the environment is the authority,
 # and it disagreed once already.
 #
-# The build check below this in Dockerfile.oww is what caught it, which is precisely
+# The build check below this in Dockerfile.oww.cuda is what caught it, which is precisely
 # why that check exists: conversion runs AFTER a ~16 minute training run, so a
 # dependency set that only resolves on paper would surface at the worst moment.
 tensorflow==2.21.0

@@ -51,7 +51,7 @@ On the training server, add the GPU overlay for the faster image — same comman
 otherwise, and the two render the same voices, so the corpora are interchangeable:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d kokoro
+docker compose -f docker-compose.yml -f docker-compose.cuda.yml up -d kokoro
 ```
 
 `--dry-run` prints the wordlists without calling the server; use it to check the

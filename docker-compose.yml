@@ -13,13 +13,11 @@ x-piper: &piper
     # Voices are downloaded on demand and get large - libritts_r alone carries 904
     # speakers - so they persist here rather than in the container.
     - ./data/piper_voices:/data
-  deploy:
-    resources:
-      reservations:
-        devices:
-          - driver: nvidia
-            count: all
-            capabilities: [gpu]
+  # NO DEVICE RESERVATION. Piper is started without `--use-cuda`, so it holds no CUDA
+  # context and a reservation would buy nothing - while making `docker compose up
+  # piper` fail outright on a machine with no GPU, which is where the microWakeWord
+  # corpus would otherwise be generatable. docker-compose.cuda.yml adds one back, so
+  # the `--use-cuda` A/B its Dockerfile asks for is still a two-line change.
 
 services:
   kokoro:
@@ -79,21 +77,14 @@ services:
 
   # microWakeWord trainer, for the ESP32 target - step 2. A SEPARATE image
   # from `oww-trainer` because mWW requires numpy>=2 and this repo pins numpy<2 for
-  # openWakeWord and torch - they cannot share an environment. See Dockerfile.mww.
+  # openWakeWord and torch - they cannot share an environment. See Dockerfile.mww.cuda.
   #
   # No depends_on: the corpus is built by the openWakeWord side or by corpus/ directly,
   # and this service only reads directories. Start it explicitly.
   mww-trainer:
     build:
       context: .
-      dockerfile: docker/Dockerfile.mww
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      dockerfile: docker/Dockerfile.mww.cuda
     volumes:
       # ONE MOUNT COVERS THE INPUTS, and data/ separates them by how replaceable
       # they are:
@@ -119,14 +110,7 @@ services:
   oww-trainer:
     build:
       context: .
-      dockerfile: docker/Dockerfile.oww
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      dockerfile: docker/Dockerfile.oww.cuda
     volumes:
       # Same split as the mww service above: data/ is inputs and generated corpus,
       # output/ is models. train.py rmtree's data/corpus/<wake_word>/oww/ every run.
