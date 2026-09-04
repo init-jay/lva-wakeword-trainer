@@ -7,6 +7,21 @@ engines here answer it in opposite directions:
   - Kokoro is single-threaded. One process pins one core, the GPU sits at 21%, and
     concurrent requests just queue (4 client threads: 15.0 it/s against 14.1
     sequential). More INSTANCES scale, roughly linearly, until the cores run out.
+
+    EXCEPT ON METAL, WHERE INSTANCES STOP SCALING. Measured on an M1 Max against a
+    host Kokoro-FastAPI v0.8.1, the same install throughout, DEVICE_TYPE the only
+    thing changed:
+
+        host, mps        8.02 clips/s   120 ms median   RTF 17.0
+        host, cpu        3.56 clips/s   283 ms median   RTF  7.5
+        docker, cpu     ~4    clips/s
+
+    So Metal is worth 2.25x, and it IS Metal rather than the environment - the host
+    CPU row lands next to the Docker one. But a second MPS instance measured 9.07
+    against 8.45 clips/s, i.e. nothing, and throughput stayed flat from 1 to 8 client
+    threads while latency grew in proportion. The instances share one GPU and
+    serialise on it. On CUDA start two; on Metal start one. See
+    scripts/start-kokoro-mps.sh.
   - Piper is not. onnxruntime parallelises across cores, and one instance measured
     980% CPU - ten cores. A second instance was 0.88x, slower than one, because the
     two contend for the cores the first was already using.

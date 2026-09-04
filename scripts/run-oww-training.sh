@@ -118,7 +118,56 @@ if [[ "${SKIP_CORPUS:-}" == "1" ]]; then
     # and this path has no watcher to stop it, because there is no generation stage
     # to watch for.
     echo "=== $(date '+%H:%M:%S')  SKIP_CORPUS=1 - reusing $CORPUS, no TTS needed"
-    docker compose stop kokoro kokoro2 >/dev/null 2>&1 || true
+    [[ -z "${KOKORO_EXTERNAL:-}" ]] && docker compose stop kokoro kokoro2 >/dev/null 2>&1
+    true
+elif [[ -n "${KOKORO_EXTERNAL:-}" ]]; then
+    # KOKORO IS SOMEONE ELSE'S PROBLEM. Start nothing, stop nothing, and take
+    # KOKORO_URL exactly as given.
+    #
+    # THE CASE THIS EXISTS FOR IS METAL. Docker Desktop passes no Metal device
+    # through, so an MPS Kokoro has to be a HOST process - and then `docker compose
+    # up -d kokoro kokoro2` cannot even start, because the host process already holds
+    # 8880. Measured on an M1 Max, same Kokoro-FastAPI v0.8.1 install throughout,
+    # only DEVICE_TYPE changed:
+    #
+    #     host, DEVICE_TYPE=mps    8.02 clips/s   120 ms median
+    #     host, DEVICE_TYPE=cpu    3.56 clips/s   283 ms median
+    #     docker, CPU image        ~4    clips/s
+    #
+    # 2.25x, and the host/container difference is nil - 3.56 against ~4 - so the gain
+    # is Metal, not the environment. A SECOND MPS INSTANCE BUYS NOTHING (9.07 vs 8.45
+    # clips/s): they share one GPU and serialise on it. Point this at one server.
+    #
+    # It generalises past Metal: any Kokoro this script did not start - one on
+    # another box, one already warm from a previous run - works the same way. Note
+    # the repo's own warning before reaching for a remote one, though: adding two
+    # REMOTE servers to two local ones measured SLOWER, because batching amortises
+    # latency and not the ~640 KB a batch of 16 sends back.
+    #
+    # From inside the compose network the host is `host.docker.internal`:
+    #
+    #     KOKORO_EXTERNAL=1 KOKORO_URL=http://host.docker.internal:8880 \
+    #         ./scripts/run-oww-training.sh "hey seeree"
+    if [[ -z "${KOKORO_URL:-}" ]]; then
+        echo "ERROR: KOKORO_EXTERNAL=1 but KOKORO_URL is unset." >&2
+        echo "       Nothing will be started, so there is nothing to fall back to." >&2
+        exit 2
+    fi
+    echo "=== $(date '+%H:%M:%S')  KOKORO_EXTERNAL=1 - using $KOKORO_URL, starting nothing"
+
+    # Probe from INSIDE the network, not the host. The whole point of this path is
+    # that the server is somewhere compose did not put it, so a host-side curl can
+    # succeed against a URL the trainer cannot resolve - host.docker.internal being
+    # exactly that case. Fail here rather than after the voice probe.
+    docker compose run --rm --no-deps --entrypoint python3 oww-trainer -c "
+import sys, urllib.request
+for url in '${KOKORO_URL}'.split(','):
+    try:
+        urllib.request.urlopen(url.rstrip('/') + '/v1/audio/voices', timeout=10).read(1)
+    except Exception as e:
+        sys.exit(f'cannot reach {url} from inside the compose network: {e}')
+print('  reachable from the trainer')
+"
 else
     echo "=== $(date '+%H:%M:%S')  starting Kokoro"
     docker compose up -d kokoro kokoro2
@@ -187,8 +236,14 @@ echo "=== $(date '+%H:%M:%S')  training (log: $LOG)"
 #
 # Not started under SKIP_CORPUS=1: Kokoro was stopped before the run began, so there
 # is nothing to wait for and a watcher would only sit there until the run ends.
+#
+# Not under KOKORO_EXTERNAL=1 either, and for a stronger reason than "pointless":
+# stopping a server this script did not start is out of bounds. The host MPS process
+# is the user's, and on a shared box the URL may be someone else's entirely. The VRAM
+# argument that justifies the stop does not apply anyway - an external Kokoro is not
+# on the training GPU, which is the whole point of it being external.
 WATCH_PID=""
-if [[ "${SKIP_CORPUS:-}" != "1" ]]; then
+if [[ "${SKIP_CORPUS:-}" != "1" && -z "${KOKORO_EXTERNAL:-}" ]]; then
 MAIN_PID=$$
 (
     while kill -0 "$MAIN_PID" 2>/dev/null; do
@@ -205,7 +260,14 @@ fi
 
 # Build the command with each argument quoted, so it survives being passed to
 # `script` as a single string.
-CMD="docker compose run --rm oww-trainer python -m train.oww.train"
+CMD="docker compose run --rm"
+# -e OVERRIDES THE SERVICE'S OWN KOKORO_URL, and without it this whole path is inert.
+# docker-compose.yml sets KOKORO_URL=http://kokoro:8880,http://kokoro2:8880 in the
+# oww-trainer service, and a value set in `environment:` beats the one inherited from
+# the shell - so exporting KOKORO_URL alone would be silently ignored and the run
+# would dial the containers that KOKORO_EXTERNAL=1 deliberately did not start.
+[[ -n "${KOKORO_EXTERNAL:-}" ]] && CMD="$CMD -e KOKORO_URL=$(printf '%q' "$KOKORO_URL")"
+CMD="$CMD oww-trainer python -m train.oww.train"
 # /app/data/external, NOT /app/data. The third-party corpora moved into
 # data/external/ and train.py builds rir_paths/background_paths/feature_data_files
 # by joining this prefix - so the old value points at directories that no longer
