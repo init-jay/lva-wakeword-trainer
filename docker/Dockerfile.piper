@@ -1,61 +1,50 @@
-# Piper TTS behind a Wyoming server, with the GPU available.
+# Piper TTS behind a Wyoming server. CPU, on every architecture.
 #
-# WHY BUILD THIS AT ALL: the published image, rhasspy/wyoming-piper, is
-# `FROM debian:trixie-slim` with stock CPU onnxruntime. It cannot use a GPU no
-# matter what flags it is given, so GPU parity with the Kokoro services needs an
-# image of our own.
+# THIS USED TO BE A CUDA IMAGE, AND THE MEASUREMENT IS WHY IT IS NOT.
 #
-# WHETHER THE GPU IS WORTH IT IS AN OPEN QUESTION - see docker-compose.yml. The
-# measurement already in this repo says a Kokoro process is single-threaded at
-# 101.8% CPU while the GPU sits at 21%, and Piper's VITS models are smaller than
-# Kokoro's StyleTTS2. So expect throughput to come from running more INSTANCES, and
-# treat `--use-cuda` as a flag to A/B rather than an obvious win. It is in the
-# compose command line, not baked in here, so it can be removed without a rebuild.
-
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
-
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONUNBUFFERED=1
-
-# -cudnn-runtime rather than the -devel base the trainer uses: onnxruntime-gpu needs
-# the CUDA runtime and cuDNN, nothing here compiles, and this base carries cuDNN 9
-# directly. That avoids the ld.so.conf.d dance in Dockerfile:40-57, which only exists
-# there because the trainer's -devel base has no cuDNN and borrows torch's pip wheels.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN pip install --no-cache-dir piper-tts wyoming-piper
-
-# Same trap as the trainer image (Dockerfile:27-38), same fix. piper-tts declares
-# `onnxruntime<2,>=1` - the CPU-only package - and onnxruntime and onnxruntime-gpu
-# are separate PyPI distributions that both provide the `onnxruntime` module. Left
-# alone the CPU build wins by import order and `--use-cuda` silently does nothing.
+# It was built on nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04, installing
+# piper-tts and wyoming-piper and then swapping the CPU onnxruntime for
+# onnxruntime-gpu, purely so that `--use-cuda` was available to A/B against the
+# Kokoro services. That A/B has since been run and CUDA LOST:
 #
-# 1.19 is the first release whose default wheels are built against CUDA 12, which is
-# what this base provides.
-RUN pip uninstall -y onnxruntime \
-    && pip install --no-cache-dir "onnxruntime-gpu>=1.19,<2"
+#     --use-cuda measured 2.5x SLOWER
+#       - scripts/run-oww-training.sh, and docker/Dockerfile.kokoro
+#
+# train/corpus/piper.py explains the mechanism: wyoming-piper starts a fresh session
+# per request, so under --use-cuda every request pays CUDA context setup. Piper's
+# VITS models are small enough that the setup dominates the inference.
+#
+# So the CUDA base was carrying a flag nobody should enable, and on Apple Silicon it
+# was actively harmful: nvidia/cuda images are linux/amd64 only, so `docker compose
+# up piper` on an M-series Mac ran the ENTIRE microWakeWord corpus stage under qemu
+# emulation - silently, since emulation succeeds. A CPU baseline measured that way
+# times the emulator.
+#
+# WHAT REPLACED IT, AND WHY THERE IS NOTHING LEFT TO BUILD. Strip CUDA from the old
+# file and what remains is `pip install piper-tts wyoming-piper` on a Debian base,
+# plus an entrypoint - which is precisely what rhasspy/wyoming-piper already is, and
+# it publishes linux/amd64 and linux/arm64. The old header called the published
+# image inadequate because it "cannot use a GPU no matter what flags it is given".
+# That is now a description of what we want.
+#
+# PINNED, not :latest. The onnx2tf drift between the CUDA and CPU trainer images is
+# the cautionary tale: a floating dependency makes the artefact a function of WHEN an
+# image was built, and the run tag (<commit>-d<audio hash>) records neither the date
+# nor the version. Bump this deliberately.
+FROM rhasspy/wyoming-piper:2.4.3
 
-# Fail the build, not a corpus run, if the CUDA provider is missing. This lists
-# providers compiled into the build and so works without a GPU present at build time
-# - it proves the right wheel is installed, not that the runtime host has a card.
-RUN python3 -c "\
-import onnxruntime; \
-providers = onnxruntime.get_available_providers(); \
-print('onnxruntime', onnxruntime.__version__, 'providers:', providers); \
-assert 'CUDAExecutionProvider' in providers, 'CUDA provider missing from the build'" \
-    && python3 -c "import wyoming_piper, piper; print('wyoming-piper and piper import OK')"
-
-# Voices are downloaded on demand into --download-dir and are large once a
-# multi-speaker model like libritts_r is pulled, so this wants to be a mounted
-# volume rather than image layers. See docker-compose.yml.
+# Voices are downloaded on demand into --download-dir and get large once a
+# multi-speaker model like libritts_r is pulled - it carries 904 speakers - so this
+# wants to be a mounted volume rather than image layers. See docker-compose.yml.
 VOLUME ["/data"]
 EXPOSE 10200
 
-# `--voice` is required by wyoming-piper even though voices download on demand -
-# without it the process exits 2 before binding the port. It is only the default for
-# requests that do not name a voice, and corpus/piper.py always names one.
-ENTRYPOINT ["python3", "-m", "wyoming_piper"]
-CMD ["--uri", "tcp://0.0.0.0:10200", "--data-dir", "/data", "--download-dir", "/data", \
-     "--voice", "en_US-lessac-medium"]
+# INHERITED FROM THE BASE, NOT RESTATED: the entrypoint and the default command.
+# docker-compose.yml passes --uri, --data-dir, --download-dir and --voice explicitly,
+# so the CMD here would be shadowed anyway - and restating an entrypoint that
+# upstream owns is how the two silently diverge on the next base bump.
+#
+# `--voice` stays required in that compose command even though voices download on
+# demand: without it wyoming-piper exits 2 before binding the port. It is only the
+# default for requests that do not name a voice, and train/corpus/piper.py always
+# names one.

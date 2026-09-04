@@ -83,13 +83,9 @@ services:
               count: all
               capabilities: [gpu]
 
-  # Inert today - see the header. Present so enabling `--use-cuda` needs no compose
-  # change, and so that every device reservation in the project is in one file.
-  piper:
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+  # PIPER IS DELIBERATELY ABSENT FROM THIS FILE. It used to carry an inert
+  # reservation, kept so that enabling `--use-cuda` was a two-line change. That A/B
+  # has since been run and lost - 2.5x SLOWER - so docker/Dockerfile.piper no longer
+  # builds on a CUDA base and there is no device for a reservation to hand it.
+  # Adding one back would only make `docker compose up piper` fail on a non-NVIDIA
+  # host for nothing.

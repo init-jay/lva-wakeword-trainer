@@ -29,3 +29,6 @@ __pycache__/
 .idea/
 *.zip
 .claude/settings.json
+
+# training logs
+*.log

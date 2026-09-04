@@ -99,11 +99,6 @@ print('no nvidia-* packages installed')"
 # `onnxsim` module from a wheel (verified: it installs onnxsim/__init__.py and
 # reports version 0.4.39-post2) so that any import at module load still succeeds.
 #
-# PINNED, not floating, unlike requirements.txt - because --no-deps removes the
-# constraint solving that would otherwise keep this in step with the CUDA image, and
-# a CPU-vs-CUDA comparison through two different converters would measure the
-# converter. 1.29.24 is what the CUDA image's own resolution lands on.
-#
 # onnx2tf IS FILTERED OUT OF requirements.txt AND INSTALLED SEPARATELY BELOW.
 #
 # Installing it first and letting requirements.txt find it already present does NOT
@@ -125,9 +120,24 @@ RUN grep -vx 'onnx2tf' requirements.txt > requirements.cpu.txt \
     && pip install --no-cache-dir -r requirements.cpu.txt
 
 # PINNED, not floating, unlike requirements.txt - because --no-deps removes the
-# constraint solving that would otherwise keep this in step with the CUDA image, and
-# a CPU-vs-CUDA comparison through two different converters would measure the
-# converter. 1.29.24 is what the CUDA image's own resolution lands on.
+# constraint solving that would otherwise keep this in step with the CUDA image.
+#
+# IT IS NOT IN STEP, AND THAT IS MEASURED RATHER THAN ASSUMED. Converting the same
+# hey_seeree_705c23b.onnx through both images picks OPPOSITE adaptations:
+#
+#   this image (onnx2tf 1.29.24)  reshape 7.15e-07 MATCH | transpose 4.22e-01 wrong
+#   the CUDA image on the VM      reshape 9.83e-01 wrong | transpose 8.94e-08 MATCH
+#
+# Per train/oww/onnx2tflite.py, reshape-correct is the OLDER onnx2tf behaviour and
+# transpose-correct the NEWER, so the VM's floating install is AHEAD of this pin.
+# Both models are correct - that script bakes in whichever adaptation scored and
+# refuses to write one if neither does - so nothing ships broken either way. What it
+# shows is that a floating onnx2tf makes the converter a function of WHEN an image
+# was built, and the run tag (<commit>-d<audio>) records neither.
+#
+# Left pinned deliberately: a pin that is wrong in a known, documented direction
+# beats a float that is wrong in an unknown one. Raise it once the VM's version is
+# read off `pip show onnx2tf` and both images can move together.
 RUN pip install --no-cache-dir --no-deps \
         onnx2tf==1.29.24 \
         onnxsim-prebuilt==0.4.39.post2

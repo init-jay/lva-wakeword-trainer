@@ -38,3 +38,21 @@ services:
   mww-trainer:
     build:
       dockerfile: docker/Dockerfile.mww.cpu
+
+  # PIPER MUST BE OVERRIDDEN TOO, and forgetting it is worse than forgetting a
+  # trainer. docker/Dockerfile.piper builds on nvidia/cuda:12.4.1-cudnn-runtime,
+  # which is linux/amd64 only - so on Apple Silicon it does not fail, it runs the
+  # ENTIRE microWakeWord corpus stage under qemu emulation. A baseline measured that
+  # way times the emulator.
+  #
+  # NEITHER TTS SERVICE NEEDS AN OVERRIDE, and both used to look like they might.
+  #
+  # Piper is multi-arch because docker/Dockerfile.piper no longer builds on a CUDA
+  # base at all - `--use-cuda` measured 2.5x SLOWER, so the flag it existed to enable
+  # was one nobody should use. It now sits on rhasspy/wyoming-piper, linux/amd64 and
+  # linux/arm64. Before that change this overlay was incomplete in the worst way: the
+  # trainers ran native while Piper generated the entire microWakeWord corpus under
+  # qemu, which succeeds silently and makes the timing meaningless.
+  #
+  # Kokoro is multi-arch already: ghcr.io/remsky/kokoro-fastapi-cpu:v0.8.1 publishes
+  # linux/arm64 alongside amd64, verified with `docker manifest inspect`.

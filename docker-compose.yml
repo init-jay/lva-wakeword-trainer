@@ -13,11 +13,11 @@ x-piper: &piper
     # Voices are downloaded on demand and get large - libritts_r alone carries 904
     # speakers - so they persist here rather than in the container.
     - ./data/piper_voices:/data
-  # NO DEVICE RESERVATION. Piper is started without `--use-cuda`, so it holds no CUDA
-  # context and a reservation would buy nothing - while making `docker compose up
-  # piper` fail outright on a machine with no GPU, which is where the microWakeWord
-  # corpus would otherwise be generatable. docker-compose.cuda.yml adds one back, so
-  # the `--use-cuda` A/B its Dockerfile asks for is still a two-line change.
+  # NO DEVICE RESERVATION, IN ANY OVERLAY. Piper cannot use CUDA at all any more:
+  # docker/Dockerfile.piper builds on rhasspy/wyoming-piper, which ships stock CPU
+  # onnxruntime. That is deliberate - `--use-cuda` measured 2.5x SLOWER, because
+  # wyoming-piper opens a session per request and Piper's VITS models are too small
+  # to amortise CUDA context setup.
 
 services:
   kokoro:
