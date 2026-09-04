@@ -101,14 +101,29 @@ else
     run "starting Piper"
     docker compose up -d piper
 
-    # Piper speaks Wyoming over TCP, not HTTP, so readiness is a connect check. It
-    # binds the port only after loading its default voice, and corpus.py's voice
-    # enumeration would otherwise fail against a container that is up but not
-    # serving.
-    for _ in $(seq 1 60); do
-        (exec 3<>/dev/tcp/localhost/10200) 2>/dev/null && { exec 3<&-; break; }
-        sleep 2
-    done
+    # WAIT FROM INSIDE THE COMPOSE NETWORK, NOT FROM THE HOST. Piper speaks Wyoming
+    # over TCP rather than HTTP, so readiness is a connect check - and a host-side
+    # connect to localhost:10200 is a FALSE POSITIVE. Docker's port proxy accepts as
+    # soon as the container starts, before wyoming-piper has loaded its default voice
+    # and bound the port inside it. That check passed on its first attempt, printed
+    # "Piper ready" in the same second as "starting Piper", and the corpus container
+    # then died on "Connection refused" dialling piper:10200.
+    #
+    # Kokoro's check in run-oww-training.sh is unaffected: it issues a real HTTP
+    # request, which the proxy cannot answer on the app's behalf.
+    #
+    # Polling the same DNS name the real command uses is the only check that means
+    # anything. One container start, looping inside it.
+    docker compose run --rm --no-deps --entrypoint python3 mww-trainer -c "
+import socket, sys, time
+for _ in range(90):
+    try:
+        socket.create_connection(('piper', 10200), 2).close()
+        sys.exit(0)
+    except OSError:
+        time.sleep(2)
+sys.exit('piper did not start listening on piper:10200 within 180s')
+"
     run "Piper ready"
 
     run "building corpus (log: $LOG)"

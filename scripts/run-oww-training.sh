@@ -105,15 +105,27 @@ for name in kokoro:8880 kokoro2:8881; do
 done
 echo "=== $(date '+%H:%M:%S')  Kokoro ready"
 
-# Piper speaks Wyoming over TCP, not HTTP, so readiness is a connect check rather
-# than a curl. Waiting matters as much as it does for Kokoro: the container binds
-# the port only after loading its default voice, and train.py's voice enumeration
-# would otherwise fail against a container that is up but not yet serving.
+# WAIT FROM INSIDE THE COMPOSE NETWORK, NOT FROM THE HOST. Piper speaks Wyoming over
+# TCP rather than HTTP, so readiness is a connect check - and a host-side connect to
+# localhost:10200 is a FALSE POSITIVE. Docker's port proxy accepts as soon as the
+# container starts, before wyoming-piper has loaded its default voice and bound the
+# port inside it. That check passed on its first attempt, printed "Piper ready" in
+# the same second as "starting Piper", and the corpus container then died on
+# "Connection refused" dialling piper:10200.
+#
+# The Kokoro loop above is unaffected: it issues a real HTTP request, which the proxy
+# cannot answer on the app's behalf.
 if [[ -n "$WANTS_PIPER" ]]; then
-    for _ in $(seq 1 60); do
-        (exec 3<>/dev/tcp/localhost/10200) 2>/dev/null && { exec 3<&-; break; }
-        sleep 2
-    done
+    docker compose run --rm --no-deps --entrypoint python3 oww-trainer -c "
+import socket, sys, time
+for _ in range(90):
+    try:
+        socket.create_connection(('piper', 10200), 2).close()
+        sys.exit(0)
+    except OSError:
+        time.sleep(2)
+sys.exit('piper did not start listening on piper:10200 within 180s')
+"
     echo "=== $(date '+%H:%M:%S')  Piper ready"
 fi
 
