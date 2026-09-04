@@ -90,9 +90,17 @@ Measured on the training VM: **RTX 3090, 20 GB RAM, 4 cores**.
 | Fetch external corpora | any, once per machine | download-bound, ~43 GB for both targets |
 | Record | host + mic | human time, 20–50 clips per speaker |
 | Train — microWakeWord | RTX 3090 | **28 min** end to end, all four stages |
-| Train — openWakeWord | RTX 3090 | hours; corpus generation dominates |
+| Train — openWakeWord | RTX 3090 | **29 min** end to end, TTS corpus included |
 | Eval | Mac or Linux, CPU | minutes |
 | Preflight | host + mic | human time |
 
-The 28 minutes is a full `run-mww-training.sh` pass at defaults — corpus, features,
-training and manifest — not the training stage alone.
+Both are full script runs at defaults, not the training stage alone —
+`run-mww-training.sh` covers corpus, features, training and manifest;
+`run-oww-training.sh` covers TTS generation, augmentation, training and the tflite
+conversion. Training both targets is therefore about an hour, and they are
+independent, so there is no need to run one before the other.
+
+Two things move these numbers more than the GPU does. `SKIP_CORPUS=1` skips corpus
+generation on a re-run, which is most of the openWakeWord figure. And a run that
+holds the card alone is the difference between finishing and not: a Kokoro server
+left up cost a run a 16.09 GiB allocation with 15.34 GiB free.
