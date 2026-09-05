@@ -75,7 +75,17 @@ dependencies = [
     # unmaintained; when a bound below 81 becomes untenable it needs replacing or
     # vendoring - it is used only for the adversarial phoneme lists.
     "setuptools<81",
-    "datasets==2.14.6",
+    # datasets IS DELIBERATELY ABSENT, unlike docker/requirements.txt which pins
+    # 2.14.6. Nothing on the host training path imports it: openWakeWord's train.py
+    # does not (its only mention of the word is a comment in custom_verifier_model.py,
+    # which this pipeline never runs), and the one thing that does - resampling MIT
+    # RIRs, AudioSet and FMA in download-external-data.sh - runs INSIDE the trainer
+    # container, per that script's own usage lines.
+    #
+    # It was copied here with the rest of the image's requirements and then blocked
+    # the mlx extra: datasets 2.14.6 caps huggingface-hub below 1.0 and kokoro-mlx
+    # needs >=1.0. Removing an unused pin is the honest fix; an override would have
+    # left datasets installed and quietly wrong.
     "deep-phonemizer==0.0.19",
 
     # Feature computation. The CPU package, NOT onnxruntime-gpu - which publishes no
@@ -105,6 +115,32 @@ dependencies = [
     "psutil",
     "ai-edge-litert",
 ]
+
+[project.optional-dependencies]
+# Kokoro TTS in-process, instead of over HTTP to the container or a host server.
+# ~1.7x on the corpus stage at single-clip, ~2.9x batched - see
+# train/corpus/kokoro_mlx.py for the measurements and the two caveats (28 English
+# voices against the service's 42, and unverified pronunciation).
+#
+# THE FORK, NOT UPSTREAM. Upstream computes the per-phoneme durations that word
+# timestamps are derived from and then discards them; the fork returns them. Without
+# timestamps there is no exact run-on cut point, and the estimate-based fallback
+# measured +153 ms late - the error that left microWakeWord with no run-on positives
+# at all. Nothing else differs between the two.
+#
+# OPTIONAL because it is Apple Silicon only and the trainer images must not need it:
+# train/corpus/kokoro_mlx.py imports it lazily and reports why it is unusable rather
+# than failing at import.
+#
+#     uv sync --extra mlx
+mlx = [
+    "kokoro-mlx",
+]
+
+[tool.uv.sources]
+# Pinned to the fork's main. uv records the resolved commit in uv.lock, so a run is
+# reproducible even though this points at a branch.
+kokoro-mlx = { git = "https://github.com/init-jay/kokoro-mlx", branch = "main" }
 
 [tool.uv]
 package = false

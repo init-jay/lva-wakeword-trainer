@@ -295,10 +295,6 @@ CMD="docker compose run --rm"
 # the shell - so exporting KOKORO_URL alone would be silently ignored and the run
 # would dial the containers that KOKORO_EXTERNAL=1 deliberately did not start.
 [[ -n "${KOKORO_EXTERNAL:-}" ]] && CMD="$CMD -e KOKORO_URL=$(printf '%q' "$KOKORO_URL")"
-# Forwarded the same way and for the same reason. Unset by default, so run-ons reuse
-# the plain pool; set it to send them to a second server - on Apple Silicon an MPS
-# one, with --runon-tts-batch 1. See train.py's flag help for the measurements.
-[[ -n "${KOKORO_RUNON_URL:-}" ]] && CMD="$CMD -e KOKORO_RUNON_URL=$(printf '%q' "$KOKORO_RUNON_URL")"
 CMD="$CMD oww-trainer python -m train.oww.train"
 # /app/data/external, NOT /app/data. The third-party corpora moved into
 # data/external/ and train.py builds rir_paths/background_paths/feature_data_files

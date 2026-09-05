@@ -62,19 +62,48 @@ fi
 # On the host the same server is simply localhost. Rewrite rather than fail: the
 # intent is unambiguous, and the alternative is an error about DNS for what is really
 # a leftover environment variable.
-for _v in KOKORO_URL KOKORO_RUNON_URL; do
-    if [[ "${!_v:-}" == *host.docker.internal* ]]; then
-        printf -v "$_v" '%s' "${!_v//host.docker.internal/localhost}"
-        export "${_v?}"
-        echo "=== note: rewrote host.docker.internal -> localhost in $_v"
-        echo "          (${!_v}) - that name only resolves inside a container."
-    fi
-done
-unset _v
+if [[ "${KOKORO_URL:-}" == *host.docker.internal* ]]; then
+    KOKORO_URL="${KOKORO_URL//host.docker.internal/localhost}"
+    export KOKORO_URL
+    echo "=== note: rewrote host.docker.internal -> localhost in KOKORO_URL"
+    echo "          ($KOKORO_URL) - that name only resolves inside a container."
+fi
+
+# A leftover KOKORO_RUNON_URL points at a second TTS server that no longer has a
+# reason to exist - run-ons and plain clips now render through the same pool. Left
+# set, it fails the run at the voice probe (it did, against a server that had been
+# stopped) long after the shell that exported it is out of mind.
+if [[ -n "${KOKORO_RUNON_URL:-}" ]]; then
+    echo "=== note: ignoring KOKORO_RUNON_URL - run-ons use the same pool now"
+    unset KOKORO_RUNON_URL
+fi
 
 # KOKORO_EXTERNAL means nothing here - this script starts no containers, so every
 # Kokoro is external. Unset it so it cannot be read as "something was arranged".
 unset KOKORO_EXTERNAL
+
+# ESPEAK FOR THE IN-PROCESS TTS BACKEND. misaki, which kokoro-mlx phonemises with,
+# loads espeak-ng through a wheel that hardcodes its own build path - so without
+# these it fails at the FIRST CLIP with a /Users/runner/... path, long after the run
+# has started, and the message mentions neither TTS nor MLX.
+#
+# Exported unconditionally rather than only for mlx:// because they are inert
+# otherwise: nothing else in the run reads them.
+export ESPEAK_DATA_PATH="${ESPEAK_DATA_PATH:-/opt/homebrew/share/espeak-ng-data}"
+export PHONEMIZER_ESPEAK_LIBRARY="${PHONEMIZER_ESPEAK_LIBRARY:-/opt/homebrew/lib/libespeak-ng.dylib}"
+
+# Fail before the corpus stage rather than during it. An mlx:// run that cannot
+# phonemise produces nothing usable, and finding that out at clip 1 of 23,760 is
+# still worse than finding it out now.
+for arg in "$@"; do
+    if [[ "$arg" == mlx://* || "$arg" == "mlx" ]]; then
+        if [[ ! -f "$ESPEAK_DATA_PATH/phontab" ]]; then
+            echo "ERROR: --kokoro-url mlx:// needs espeak-ng data at $ESPEAK_DATA_PATH" >&2
+            echo "       brew install espeak-ng" >&2
+            exit 2
+        fi
+    fi
+done
 
 SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
 MODEL="output/${SAFE_NAME}/oww/${SAFE_NAME}.onnx"

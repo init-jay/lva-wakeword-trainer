@@ -45,6 +45,22 @@ fi
 
 command -v uv >/dev/null || { echo "ERROR: uv not found - https://docs.astral.sh/uv/" >&2; exit 2; }
 
+# espeak-ng, needed only by the optional MLX TTS backend (misaki's G2P). Warned about
+# rather than fatal: the trainer itself does not need it, and --skip-corpus runs never
+# touch TTS at all.
+#
+# The failure without it names a path on the machine the wheel was BUILT on, because
+# espeakng-loader hardcodes it - and it surfaces after the model has loaded, so it
+# reads as an MLX problem:
+#
+#     Error processing file '/Users/runner/work/espeakng-loader/.../phontab'
+ESPEAK_DATA="${ESPEAK_DATA_PATH:-/opt/homebrew/share/espeak-ng-data}"
+if [[ ! -f "$ESPEAK_DATA/phontab" ]]; then
+    echo "WARNING: no espeak-ng data at $ESPEAK_DATA"
+    echo "         The MLX TTS backend (--kokoro-url mlx://) will not work."
+    echo "         Fix with: brew install espeak-ng"
+fi
+
 # --- the openWakeWord clone -------------------------------------------------------
 #
 # AT THE REPO ROOT, NOT INSIDE train-applesilicon/, and not by preference:
@@ -97,8 +113,39 @@ for m in embedding_model melspectrogram; do
 done
 
 # --- the environment ---------------------------------------------------------------
+#
+# --extra mlx pulls kokoro-mlx, which renders the Kokoro corpus IN THIS PROCESS
+# instead of over HTTP to a container or a host server. Measured on an M1 Max at
+# 16 kHz: 57 ms/clip single against the service's 88 ms/clip BATCHED, and 25 ms/clip
+# batched. Enabled with `--kokoro-url mlx://` on the training run; see
+# train/corpus/kokoro_mlx.py.
+#
+# It is an extra rather than a plain dependency because it is Apple Silicon only and
+# the trainer images must never need it - the backend imports it lazily and reports
+# why it is unusable rather than failing at import.
 echo "==> syncing $ENV_DIR"
-( cd "$ENV_DIR" && uv sync --quiet )
+( cd "$ENV_DIR" && uv sync --extra mlx --quiet )
+
+# THE SPACY MODEL misaki NEEDS, INSTALLED HERE RATHER THAN ON FIRST USE.
+#
+# misaki (kokoro-mlx's G2P) downloads en_core_web_sm lazily by SHELLING OUT to
+# `uv pip install`. That child process has no VIRTUAL_ENV when the trainer is invoked
+# by absolute path rather than an activated venv, so it dies with
+#
+#     error: No virtual environment found; run `uv venv` to create an environment
+#
+# which names uv and says nothing about spacy, misaki or TTS. Worse, it happens at
+# the first clip - after the run has printed its plan and started work.
+#
+# VIRTUAL_ENV is set explicitly for the same reason: spacy's downloader shells out
+# too, and inherits whatever this script's environment gives it.
+if [[ -d "$ENV_DIR/.venv" ]]; then
+    if ! "$ENV_DIR/.venv/bin/python" -c "import en_core_web_sm" 2>/dev/null; then
+        echo "==> installing en_core_web_sm (misaki G2P)"
+        ( cd "$ENV_DIR" && VIRTUAL_ENV="$(pwd)/.venv" \
+            .venv/bin/python -m spacy download en_core_web_sm 2>&1 | tail -1 )
+    fi
+fi
 
 # openwakeword itself, installed from the clone WITHOUT its dependencies.
 #
@@ -119,6 +166,15 @@ echo "==> syncing $ENV_DIR"
 #
 # The same build-time checks the Dockerfile runs, for the same reason: a broken import
 # should surface now, not after an hour of corpus generation.
+#
+# The MLX check RENDERS A CLIP rather than just importing, because the failures this
+# path has are runtime ones: espeak-ng data resolving to a build-machine path, a
+# missing spacy model, a model that downloads but will not run. An import proves none
+# of those. It also exercises the word timestamps, which are what run-on cuts depend
+# on - a backend that renders audio but returns no timestamps would silently push
+# every run-on onto the +153 ms estimate.
+ESPEAK_DATA_PATH="$ESPEAK_DATA" \
+PHONEMIZER_ESPEAK_LIBRARY="${PHONEMIZER_ESPEAK_LIBRARY:-/opt/homebrew/lib/libespeak-ng.dylib}" \
 "$ENV_DIR/.venv/bin/python" - <<'PY'
 import torch, torchaudio, onnxruntime
 print(f"  torch {torch.__version__}  torchaudio {torchaudio.__version__}")
@@ -127,8 +183,28 @@ print(f"  onnxruntime {onnxruntime.__version__}: {onnxruntime.get_available_prov
 import torch_audiomentations          # noqa: F401
 import openwakeword.data              # noqa: F401
 print("  openwakeword.data imports OK")
+
+import sys
+sys.path.insert(0, ".")
+from train.corpus import kokoro_mlx
+
+ok, why = kokoro_mlx.available()
+if not ok:
+    print(f"  kokoro-mlx NOT usable: {why}")
+    print("  (the HTTP path still works - see scripts/start-kokoro-host.sh)")
+else:
+    voices = kokoro_mlx.voices()
+    audio, ts = kokoro_mlx.render_timed(voices[0], "hey seeree what is on tonight", 1.0)
+    if audio is None or not ts:
+        sys.exit("  kokoro-mlx rendered nothing, or returned no timestamps - "
+                 "run-on cuts would fall back to the degraded estimate")
+    print(f"  kokoro-mlx OK: {len(voices)} English voices, "
+          f"{len(audio) / 16000:.2f}s clip, {len(ts)} word timestamps")
 PY
 
 echo
 echo "==> ready. Train with:"
 echo "      ./scripts/run-oww-training-applesilicon.sh \"hey seeree\" --skip-corpus"
+echo
+echo "    To generate a corpus too, in-process rather than via a TTS server:"
+echo "      ./scripts/run-oww-training-applesilicon.sh \"hey seeree\" --kokoro-url mlx://"
