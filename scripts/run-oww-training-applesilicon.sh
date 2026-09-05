@@ -62,12 +62,15 @@ fi
 # On the host the same server is simply localhost. Rewrite rather than fail: the
 # intent is unambiguous, and the alternative is an error about DNS for what is really
 # a leftover environment variable.
-if [[ "${KOKORO_URL:-}" == *host.docker.internal* ]]; then
-    KOKORO_URL="${KOKORO_URL//host.docker.internal/localhost}"
-    export KOKORO_URL
-    echo "=== note: rewrote host.docker.internal -> localhost in KOKORO_URL"
-    echo "          ($KOKORO_URL) - that name only resolves inside a container."
-fi
+for _v in KOKORO_URL KOKORO_RUNON_URL; do
+    if [[ "${!_v:-}" == *host.docker.internal* ]]; then
+        printf -v "$_v" '%s' "${!_v//host.docker.internal/localhost}"
+        export "${_v?}"
+        echo "=== note: rewrote host.docker.internal -> localhost in $_v"
+        echo "          (${!_v}) - that name only resolves inside a container."
+    fi
+done
+unset _v
 
 # KOKORO_EXTERNAL means nothing here - this script starts no containers, so every
 # Kokoro is external. Unset it so it cannot be read as "something was arranged".
