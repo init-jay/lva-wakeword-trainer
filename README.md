@@ -139,36 +139,51 @@ Corpus generation is the largest stage, so the TTS engine matters more than the
 trainer. Three configurations, all on the M1 Max, all generating the SAME corpus
 (22 voices, 13,183 positives, 6,600 negatives) so the comparison is engine-only:
 
-| | corpus TTS | run-on recall @ 4/32 FA |
-|---|---|---|
-| Kokoro-FastAPI in Docker | ~2h (est.) | not run |
-| **Kokoro-FastAPI on the host** | **30m29s** | **65%** |
-| kokoro-mlx, in-process (`--kokoro-url mlx://`) | **19m06s** | 45% |
+| | corpus TTS | whole run | run-on recall @ 6/32 FA |
+|---|---|---|---|
+| Kokoro-FastAPI in Docker | ~2h (est.) | not run | not run |
+| **Kokoro-FastAPI on the host** | **30m29s** | 47m56s | **82%** |
+| kokoro-mlx, in-process (`--kokoro-url mlx://`) | **19m06s** / 24m54s | 37m / 47m43s | 51% -> 61% |
 
-**MLX is 1.6x faster and produces a worse corpus, so the host server is the default.**
-The regression is specific to run-ons - plain positives are comparable (82% vs 78%) -
-and it is large where it appears: `jay_runon`, the biggest holdout sample at n=57,
-scores 61% against 37%.
+**MLX generates the corpus 1.2-1.6x faster and produces a worse corpus, so the host
+server is the default.** The regression is specific to run-ons; plain positives are
+comparable.
 
-The likely cause is the run-on CUT POINT rather than audio quality. Run-on clips are
-the wake word plus a short tail of the following command, and comparing clip lengths
-after trimming shows MLX keeping almost none of that tail:
+TWO NUMBERS PER MLX CELL, BECAUSE THE SPREAD IS THE POINT. Identical corpus,
+identical engine, two runs a day apart: TTS 19m06s then 24m54s, training 256 then
+140 it/s. Nothing changed but what else the machine was doing. Treat any single
+timing here as +/- 30%, and never compare two configurations measured on different
+days - an earlier "MLX is only 9% faster" reading came from a run while the machine
+was paging 540,000 times against 296 MB of free swap, and was simply wrong.
+
+The `51% -> 61%` is a timestamp fix landing between the two MLX runs. Run-on clips
+are the wake word plus a short tail of the following command, cut at a word boundary
+the TTS engine reports, and kokoro-mlx was reporting that boundary ~34 ms early -
+enough to leave almost no tail:
 
     run-on minus plain, which should be the tail:
       FastAPI   697 - 580 = 117 ms
       MLX       645 - 610 =  35 ms      RUNON_TAIL_MS is 150-300
 
-A run-on with no tail is just a plain positive, so the model never learns to fire
-when speech continues past the wake word. See `train/corpus/kokoro_mlx.py`.
+A run-on with no tail is just a plain positive, so the model never learns to fire when
+speech continues past the wake word.
 
-**What this run did settle:** voice count is not the problem. The same FastAPI corpus
-at 22 voices scored BETTER than an earlier one at 36 (82/65 against 76/56 at 4/32),
-so the 14 voices MLX lacks cost nothing - they are `v0` legacy variants of speakers
-it already has, not distinct ones.
+Fixing it recovered run-on recall by +10 to +14 points at every operating point from
+6/32 false accepts upward, which confirms the cut was the mechanism. It did not close
+the gap: 84/61 against the host server's 90/82. Something in the audio itself - bf16
+weights, misaki phonemisation - still costs run-on detection, and that is unexplained.
+See `BUGREPORT-kokoro-mlx.md` and `train/corpus/kokoro_mlx.py`.
+
+**What this settled:** voice count is not the problem. The same FastAPI corpus at 22
+voices scored BETTER than an earlier one at 36 (82/65 against 76/56 at 4/32), so the
+13 voices MLX lacks cost nothing - they are `v0` legacy variants of speakers it
+already has, not distinct ones. Those are now skipped by default for every engine,
+which takes ~36% off the Kokoro clips: see `LEGACY_VOICE_MARKER` in
+`train/corpus/negatives.py`.
 
 MLX remains worth having for plain clips and negatives, which are 79% of the corpus
-and show no regression. That is the split to build if the cut point turns out not to
-be fixable.
+and show no regression. That is the split to build if the remaining run-on gap turns
+out not to be closable.
 
 Figures for whole scripts are full runs at defaults - `run-mww-training.sh` covers
 corpus, features, training and manifest; `run-oww-training.sh` covers TTS generation,
