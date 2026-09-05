@@ -49,7 +49,8 @@ if str(REPO_ROOT) not in sys.path:
 from train.corpus.augment import (CHILD_STRETCH, CHILD_STRETCH_FRACTION,  # noqa: E402
                                   add_child_range_copies, trim_directory,
                                   trim_silence)
-from train.corpus.negatives import (MISPRONOUNCING_VOICES,  # noqa: E402
+from train.corpus.negatives import (LEGACY_VOICE_MARKER,  # noqa: E402
+                                    MISPRONOUNCING_VOICES,
                                     TRAINING_COMMANDS, build_negative_phrases)
 from train.corpus.piper import (generate_piper_samples,  # noqa: E402
                                 select_piper_voices)
@@ -1059,6 +1060,14 @@ def main():
                         help="Comma-separated Kokoro voices to skip, added to the "
                              "built-in MISPRONOUNCING_VOICES list for this wake "
                              "word. Use for a wake word with no built-in entry.")
+    parser.add_argument("--include-legacy-voices", action="store_true",
+                        help="Keep Kokoro's v0 voices, which are skipped by default. "
+                             "They are older renderings of speakers already in the "
+                             "set (af_v0bella beside af_bella), so they cost ~36%% of "
+                             "the Kokoro clips and measured no accuracy gain - a "
+                             "22-voice corpus scored 82/65 against a 36-voice one's "
+                             "76/56 at 4 adversarial false accepts. Use this to "
+                             "reproduce a corpus generated before they were dropped.")
     parser.add_argument("--child-fraction", type=float,
                         default=CHILD_STRETCH_FRACTION,
                         help="Fraction of Kokoro positives that get an ADDITIONAL "
@@ -1122,11 +1131,27 @@ def main():
 
         excluded = set(MISPRONOUNCING_VOICES.get(safe_name, []))
         excluded.update(v.strip() for v in args.exclude_voices.split(",") if v.strip())
+
+        # The v0 legacy voices, dropped by default. Reported separately from the
+        # mispronouncing ones because the reason is entirely different: those are
+        # excluded to protect accuracy, these to save time that buys nothing. See
+        # LEGACY_VOICE_MARKER for the two corpora that measured it.
+        legacy = sorted(v for v in kokoro_voices if LEGACY_VOICE_MARKER in v)
+        if legacy and not args.include_legacy_voices:
+            excluded.update(legacy)
+            print(f"  Skipping {len(legacy)} v0 legacy voice(s) - older renderings of "
+                  f"speakers already in the set, {len(legacy) * 100 // len(kokoro_voices)}% "
+                  f"of the clips for no measured gain (--include-legacy-voices keeps them)")
+        elif legacy:
+            print(f"  Including {len(legacy)} v0 legacy voice(s) by request")
+
         if excluded:
             present = sorted(v for v in kokoro_voices if v in excluded)
             kokoro_voices = [v for v in kokoro_voices if v not in excluded]
-            print(f"  Excluding {len(present)} voice(s) that mispronounce the wake word: "
-                  f"{', '.join(present)}")
+            mispronouncing = sorted(set(present) - set(legacy))
+            if mispronouncing:
+                print(f"  Excluding {len(mispronouncing)} voice(s) that mispronounce "
+                      f"the wake word: {', '.join(mispronouncing)}")
             print(f"  {len(kokoro_voices)} voices remain")
             missing = sorted(excluded - set(present))
             if missing:

@@ -94,12 +94,16 @@ Three environments, all measured with `time` on the same wake word:
 | Fetch external corpora | download-bound, ~43 GB for both targets | same | same |
 | Record | human time, 20–50 clips per speaker | same | same |
 | Train — microWakeWord | **28m03s** | **26m06s** | n/a, stays in Docker |
-| Train — openWakeWord | **28m59s** | ~2h 15m | ~1h 15m (stages summed) |
-| ├ Kokoro corpus | included above | ~49 min | ~49 min |
-| ├ Augmentation + features | included above | ~21 min | ~21 min |
-| └ Training, 50k steps | ~16 min | **~37 min** | **~5m30s** |
+| Train — openWakeWord | **28m59s** | ~2h 15m | **47m56s** |
+| ├ Kokoro corpus | included above | ~49 min | **30m29s** |
+| ├ Augmentation + features | included above | ~21 min | ~12m30s |
+| └ Training, 50k steps | ~16 min | **~37 min** | **~4m35s** |
 | Eval | minutes | minutes | minutes |
 | Preflight | needs a mic | needs a mic | needs a mic |
+
+The Mac-host openWakeWord row is a single measured run at 22 voices, not a sum of
+stages. An earlier 36-voice run took ~1h15m; most of that difference is corpus size,
+not speed.
 
 **On Apple Silicon, leaving the container is worth ~7x on the training stage.** 250
 it/s on the host against 26 in the container — same corpus, same commit, same
@@ -128,6 +132,43 @@ Do not read the mww result as "the GPU is pointless" either. It is a claim about
 25,537-parameter model, too small to fill a 3090, in a run that is mostly not
 training: Piper corpus generation is CPU-only on both machines by choice, since
 `--use-cuda` measured 2.5x *slower*.
+
+### Kokoro TTS: three ways to run it, and why the fastest is not adopted
+
+Corpus generation is the largest stage, so the TTS engine matters more than the
+trainer. Three configurations, all on the M1 Max, all generating the SAME corpus
+(22 voices, 13,183 positives, 6,600 negatives) so the comparison is engine-only:
+
+| | corpus TTS | run-on recall @ 4/32 FA |
+|---|---|---|
+| Kokoro-FastAPI in Docker | ~2h (est.) | not run |
+| **Kokoro-FastAPI on the host** | **30m29s** | **65%** |
+| kokoro-mlx, in-process (`--kokoro-url mlx://`) | **19m06s** | 45% |
+
+**MLX is 1.6x faster and produces a worse corpus, so the host server is the default.**
+The regression is specific to run-ons - plain positives are comparable (82% vs 78%) -
+and it is large where it appears: `jay_runon`, the biggest holdout sample at n=57,
+scores 61% against 37%.
+
+The likely cause is the run-on CUT POINT rather than audio quality. Run-on clips are
+the wake word plus a short tail of the following command, and comparing clip lengths
+after trimming shows MLX keeping almost none of that tail:
+
+    run-on minus plain, which should be the tail:
+      FastAPI   697 - 580 = 117 ms
+      MLX       645 - 610 =  35 ms      RUNON_TAIL_MS is 150-300
+
+A run-on with no tail is just a plain positive, so the model never learns to fire
+when speech continues past the wake word. See `train/corpus/kokoro_mlx.py`.
+
+**What this run did settle:** voice count is not the problem. The same FastAPI corpus
+at 22 voices scored BETTER than an earlier one at 36 (82/65 against 76/56 at 4/32),
+so the 14 voices MLX lacks cost nothing - they are `v0` legacy variants of speakers
+it already has, not distinct ones.
+
+MLX remains worth having for plain clips and negatives, which are 79% of the corpus
+and show no regression. That is the split to build if the cut point turns out not to
+be fixable.
 
 Figures for whole scripts are full runs at defaults - `run-mww-training.sh` covers
 corpus, features, training and manifest; `run-oww-training.sh` covers TTS generation,

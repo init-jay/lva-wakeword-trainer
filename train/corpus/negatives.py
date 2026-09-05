@@ -66,6 +66,40 @@ TRAINING_COMMANDS = [
 # NOTE: these are Kokoro voice ids. The Piper equivalent is a separate list - Piper
 # phonemises with espeak-ng per MODEL rather than per speaker, so the unit being
 # excluded is a whole voice model, not a speaker within one (audit_voices.py:148).
+LEGACY_VOICE_MARKER = "_v0"
+"""Kokoro's v0 voices, skipped by default: they cost generation time and buy nothing.
+
+Kokoro-FastAPI serves 42 English voices; 13 carry this marker and are OLDER RENDERINGS
+OF SPEAKERS ALREADY IN THE SET - af_v0bella beside af_bella, am_v0michael beside
+am_michael, bf_v0emma beside bf_emma. They are not 13 additional speakers, which is
+what a raw voice count suggests and what made them look load-bearing.
+
+MEASURED, not assumed. Two openWakeWord corpora, same engine and trainer, differing
+only in whether the v0 voices were included, scored on the same held-out recordings
+at 4 adversarial false accepts:
+
+    36 voices, v0 included     plain 76%   run-on 56%
+    22 voices, v0 excluded     plain 82%   run-on 65%
+
+So excluding them did not cost accuracy - it was slightly ahead at every matched
+false-accept point, though several of those gaps sit near the ~10 point run-to-run
+variance this repo has measured, so the honest claim is "no measurable loss" rather
+than "an improvement".
+
+What it definitely buys is time: 13 of 36 voices is 36% of the Kokoro clips, and the
+corpus stage is the largest in an openWakeWord run.
+
+THE MEASURED RUN USED 22 VOICES, THIS FILTER LEAVES 23. That run also dropped
+af_jadzia, to match the voice set kokoro-mlx offers for an engine comparison.
+af_jadzia is a genuine distinct speaker rather than a v0 duplicate, so it is kept
+here - the filter drops legacy renderings, not voices MLX happens to lack.
+
+kokoro-mlx does not serve them at all, which is why its 28-voice set is not the
+handicap it first appears - see train/corpus/kokoro_mlx.py.
+
+--include-legacy-voices puts them back, for reproducing a pre-2026-09 corpus.
+"""
+
 MISPRONOUNCING_VOICES = {
     "hey_seeree": [
         "af_alloy", "am_echo", "bf_alice", "bf_lily", "bm_daniel", "bm_fable",
