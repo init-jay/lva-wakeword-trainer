@@ -143,10 +143,18 @@ def main():
         target = f"piper {args.host}:{args.port} voice={voice}"
     else:
         voice = args.voice or "af_bella"
-        make = lambda _host, _port: kokoro_caller(args.url, voice)
+        # BUILDS A URL PER TARGET, so --instances can address several servers. It
+        # used to ignore host/port and return args.url every time, which made a
+        # kokoro --instances sweep silently measure ONE server: four instances
+        # reported 1.85 clips/s against one instance's 1.86, and the "flat
+        # throughput, linear latency" "" signature looked like real contention rather
+        # than the bug it was.
+        make = lambda host, port: kokoro_caller(f"http://{host}:{port}", voice)
         target = f"kokoro {args.url} voice={voice}"
 
-    call = make(args.host, args.port)
+    # The single-server sweep uses --url as given; --instances below builds its own.
+    call = kokoro_caller(args.url, voice) if args.engine == "kokoro" \
+        else make(args.host, args.port)
     print(f"{target}\nwarming up...")
     try:
         for _ in range(3):
@@ -177,7 +185,12 @@ def main():
     print("\nFlat clips/s with latency growing in proportion to threads means the\n"
           "server serialises: more client threads will not help.")
 
-    if args.instances and args.engine == "piper":
+    # BOTH ENGINES. This was `and args.engine == "piper"`, so a kokoro sweep printed
+    # nothing and the caller had no way to tell the flag had been ignored. The
+    # question it answers - do instances add throughput, or contend for the same
+    # cores - is the more interesting one for kokoro, which unlike piper does not
+    # saturate the cores from a single process.
+    if args.instances:
         targets = [split(s) for s in args.instances]
         calls = [make(h, prt) for h, prt in targets]
         t0 = time.perf_counter()
