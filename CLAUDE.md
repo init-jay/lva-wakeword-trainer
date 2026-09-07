@@ -23,8 +23,9 @@ each **STOP** until the human has done their part.
 3. **External data**, once per machine: `./scripts/download-external-data.sh [all|oww|mww]`.
    ~43 GB for both. Check `df -h` first.
 4. **Train.** `./scripts/run-oww-training.sh "X"` and/or `./scripts/run-mww-training.sh "X"`.
-   On an Apple Silicon Mac, OWW runs on the host instead — the `train-apple-silicon`
-   skill carries that route, including the tflite-conversion workaround. Hours.
+   On an Apple Silicon Mac both targets run on the host instead - the
+   `train-apple-silicon` skill carries both routes, including the oww
+   tflite-conversion workaround and the host Piper for mww. Hours.
    Ask which target they want before running both.
 5. **Eval.** Use `eval-models`. Report per speaker and at matched false accepts.
 6. **STOP — preflight.** Also needs their microphone:
@@ -48,7 +49,7 @@ guess a wake word from the repo's existing `hey_seeree` files.
 | step | machine |
 |---|---|
 | record, preflight | the human's machine, host, `uv` |
-| train | the CUDA box, Docker — or anywhere, on CPU, with the `cpu` overlay |
+| train | the CUDA box, Docker - or anywhere, on CPU, with the `cpu` overlay; on a Mac, host (below) |
 | eval | either — the `eval` image builds native on Apple Silicon |
 
 On the CUDA box: `export COMPOSE_FILE=docker-compose.yml:docker-compose.cuda.yml`.
@@ -63,12 +64,17 @@ mmap'd, and running short of memory page-faults rather than erroring.
 `SKIP_BUILD=1` on either training script reuses the image; needed after a
 `docker builder prune`, since the rebuild is then cold.
 
-A Mac can also train openWakeWord entirely outside Docker: `train-applesilicon/` is
-a host uv env (`scripts/setup-applesilicon-trainer.sh`), run with
-`scripts/run-oww-training-applesilicon.sh`. That script starts no TTS - its corpus
-calls go to a host uv venv (`scripts/start-kokoro-host.sh`,
-`scripts/start-piper-host.sh`) or a Docker service on a reachable port. Status,
-measurements, and the phased plan: `apple-port.md`.
+A Mac can also train both targets entirely outside Docker: `train-applesilicon/`
+is a host uv env (torch, `scripts/setup-applesilicon-trainer.sh`) run with
+`scripts/run-oww-training-applesilicon.sh`, and `train-mww-applesilicon/` (TF,
+`scripts/setup-mww-applesilicon-trainer.sh`) with
+`scripts/run-mww-training-applesilicon.sh` - the mww corpus needs the host Piper
+(`scripts/start-piper-host.sh`) because it is 100% Piper. That script starts no
+tts servers of its own - its corpus calls go to a host uv venv
+(`scripts/start-kokoro-host.sh`, `scripts/start-piper-host.sh`) or a Docker
+service on a reachable port. The mww host route is the measured-faster one on a
+Mac (full run measured 14m14s there against 26m06s in the container, 1.8x). Status, measurements, and the phased plan:
+`apple-port.md`.
 
 ## Invariants that are easy to break
 

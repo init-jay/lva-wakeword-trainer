@@ -1,0 +1,78 @@
+[project]
+name = "train-mww-applesilicon"
+version = "0.1.0"
+description = "microWakeWord host trainer, Apple Silicon - the container-free counterpart to docker/Dockerfile.mww.cpu"
+# requires-python. 3.12, matching the oww environment and what was actually
+# verified: pendulum (pulled by audio-metadata) publishes no macos arm64 wheel
+# for cp313, and its sdist needs a Rust build that does not complete here -
+# `uv sync` with 3.13 selected fails in cargo. TF 2.21 ships cp312 wheels.
+requires-python = ">=3.12,<3.13"
+
+# THE FOURTH HOST ENVIRONMENT, after record/, preflight/ and train-applesilicon/,
+# and the reason is the same as train-applesilicon's: Docker Desktop passes no
+# Metal device through, and the container's TF is measured slower on this
+# hardware than the macOS wheel at the same version (apple-port.md, phase 3).
+#
+# A SEPARATE ENVIRONMENT FROM train-applesilicon, for the same reason the two
+# trainer images cannot share one: mWW requires numpy>=2, openWakeWord pins
+# numpy<2. See docker-compose.yml's mww-trainer comment.
+#
+# WHAT RUNS WHERE ON A MAC:
+#   corpus   scripts/start-piper-host.sh (this pipeline is 100% Piper - there is
+#            no Kokoro half to it) - the host Piper measures 2.4x faster than
+#            the compose piper service on this Mac, so the run script rewrites
+#            PIPER_URL to it
+#   features, train, manifest   HERE
+#   eval   Docker, unchanged
+#
+#     ./scripts/setup-mww-applesilicon-trainer.sh
+#     ./scripts/run-mww-training-applesilicon.sh "hey seeree"
+
+dependencies = [
+    # Pinned to the SAME version Dockerfile.mww.cpu installs from PyPI. This
+    # environment exists to answer one question - macOS wheel against
+    # linux/arm64 wheel - and a different version on either side contaminates
+    # the answer the way it did for torch in phase 1b. 2.21.0 publishes
+    # macosx_12_0_arm64 wheels for cp310-cp313; this venv is 3.12.
+    "tensorflow==2.21.0",
+
+    # mWW's hard constraint, and the one that splits this environment from
+    # train-applesilicon.
+    "numpy>=2.0",
+
+    # The compiled extension the features stage runs through. 2.0.2 is the
+    # release that ships a macosx_10_13_universal2 wheel - which also retires
+    # Dockerfile.mww.cpu's warning that upstream's notebook needs a macOS fork:
+    # that was true of the release before 2.0.2, and it does not apply here.
+    # The fork is what this pins against instead.
+    "pymicro-features==2.0.2",
+
+    # Same pin, same reason, as Dockerfile.mww.cpu: 4.x moved audio decoding
+    # to torchcodec, and microWakeWord loads clips through datasets.Audio().
+    "datasets[audio]<4.0",
+
+    # Needed even though nothing here looks at TensorBoard: mWW's training loop
+    # calls tf.summary.scalar and TF raises TBNotInstalledError rather than
+    # skipping. Same comment, same failure, as the Dockerfile.
+    "tensorboard",
+
+    # The rest is microWakeWord's install_requires, listed here so the
+    # microwakeword clone can be installed --no-deps and the lock stays the
+    # single source of truth - the same split the oww environment makes with
+    # openwakeword.
+    "audiomentations",
+    "audio-metadata",
+    "mmap-ninja",
+    "ai-edge-litert",
+    "webrtcvad-wheels",
+    "pyyaml",
+
+    # The repo's own code: train/corpus/piper.py (the corpus client) decodes
+    # and resamples with scipy, and every stage shows progress with tqdm.
+    # train-applesilicon has neither need.
+    "scipy",
+    "tqdm",
+]
+
+[tool.uv]
+package = false

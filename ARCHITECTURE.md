@@ -103,6 +103,7 @@ far.
 ├── tools/                        not in the diagram - one-off measurement
 │   ├── audit_voices.py
 │   ├── bench_tts.py
+│   ├── tf_probe.py
 │   └── measure_voice_f0.py
 ├── patches/
 ├── docker/
@@ -119,12 +120,16 @@ far.
 │   ├── run-oww-training.sh        2 · one command, corpus built by the run
 │   ├── run-mww-training.sh        2 · four stages, corpus built separately
 │   ├── start-kokoro-host.sh       TTS outside Docker - 3.7x the container on arm64
+│   ├── start-piper-host.sh        same, for Piper - 2.4x the container on arm64
 │   ├── setup-applesilicon-trainer.sh   what Dockerfile.oww.cpu does, on the host
-│   └── run-oww-training-applesilicon.sh  2 · same trainer, no container
+│   ├── run-oww-training-applesilicon.sh  2 · same trainer, no container
+│   ├── setup-mww-applesilicon-trainer.sh what Dockerfile.mww.cpu does, on the host
+│   └── run-mww-training-applesilicon.sh  2 · four stages, no container
 ├── .dockerignore                 keeps data/ (~43 GB) out of every build context
 ├── docker-compose.yml            no GPU required, so eval and record run anywhere
 ├── docker-compose.cuda.yml       overlay: NVIDIA devices - kokoro, trainers, piper
 ├── docker-compose.cpu.yml        overlay: CPU trainers - Apple Silicon, or any non-NVIDIA box
 ├── docker-compose.mps.yml        overlay: Metal - permanently empty, see apple-port.md
-└── train-applesilicon/           host uv env, no container - see apple-port.md phase 1b
+├── train-applesilicon/           host uv env for the oww trainer - apple-port.md phase 1b
+└── train-mww-applesilicon/       host uv env for the mww trainer - apple-port.md phase 3
 ```

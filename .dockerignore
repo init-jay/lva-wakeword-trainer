@@ -26,11 +26,17 @@ venv/
 .venv-*/
 **/.venv/
 train-applesilicon/
+train-mww-applesilicon/
 
 # The openWakeWord clone the HOST trainer patches. The images make their own clone
 # at build time (see docker/Dockerfile.oww.cuda) and must not inherit a host one
 # patched for a different device.
 openwakeword/
+
+# The microWakeWord clone the HOST trainer installs editable. The images make their
+# own clone at build time (docker/Dockerfile.mww.cpu) and must not inherit a host
+# one pinned to a different commit.
+microwakeword/
 
 # History and editor state.
 .git/

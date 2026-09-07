@@ -3,10 +3,11 @@
 A note on what it would take, and why it has not been done. Written after asking
 whether MLX has equivalents to the CUDA speed-ups the training images rely on.
 
-**Nothing here has been measured on Apple Silicon.** Every number below comes from
-the training VM (20 GB RAM, RTX 3090, 4 cores) or from the CPU baselines already
-recorded in `docker/Dockerfile.mww.cuda`. Treat the whole document as a plan, not a
-result.
+**Phases 1a, 1b and 3 are measured; phase 2 is not started.** The numbers below
+are from this Mac (M1 Max, 64 GB, 10 cores) unless they say they come from the
+training VM (20 GB RAM, RTX 3090, 4 cores) or from baselines recorded in
+`docker/Dockerfile.mww.cuda`. Where a measurement is still open, the section says
+so.
 
 ## Status, 2026-09-04: the open questions are answered, and two of them flipped
 
@@ -284,9 +285,10 @@ Which half you land on is decided by architecture:
   slower of the two torches for the one model it trains.
 * **microWakeWord is mixednet — convolutional.** On host torch that is the 12x
   reference-kernel path. It is TensorFlow rather than torch so this probe does not
-  transfer directly, but the direction is a warning, not an encouragement, and
-  `docker/Dockerfile.mww.cpu` measured 26m06s against the 3090's 28m03s without any
-  of this. Leave it in the container until someone measures TF the same way.
+  transfer directly, and that turned out to matter: measured in TF (phase 3), the
+  full mixednet step is 1.17x FASTER on the host, and the corpus stage's Piper is
+  2.4x faster. The conv row above remains true for torch; it was the wrong
+  framework to argue from.
 
 **Before acting on the 6.3x**, two things it does not yet prove. The probe is a
 synthetic MLP, not openWakeWord's real model — the LSTM is a third code path that
@@ -318,22 +320,87 @@ difference or an unimplemented operator falling back to CPU, so the check is tha
 the trained model still converts and still evaluates — the pipeline already has that
 instrument, in `onnx2tflite.py`'s conversion scoring and in `eval/compare_models.py`.
 
-### Phase 3 — microWakeWord: DONE, and it stays in the container
+### Phase 3 — microWakeWord: measured, and the host wins
 
-This was written as "same host-environment treatment, no Metal, expect the easy
-half". It is done, and it went the other way: the CPU **image** finished in 26m06s
-against the 3090's 28m03s, so there is nothing left to chase and no host environment
-to build.
+Written as "same host-environment treatment, no Metal, expect the easy half". The
+"easy half" was actually the hard measurement, because the phase 1b conv result
+pointed the other way — and it was torch, so it did not transfer. Measured now,
+2026-09-07, with `tools/tf_probe.py`: batch 128, the actual op shapes in
+`train/mww/train.py` (first conv (5,1) s3, the three MDConv blocks, a 1024³ GEMM,
+and a full train step forward+grad+update), the same `tensorflow==2.21.0` source
+build in both environments.
 
-Phase 1b is the reason not to build one anyway. mixednet is convolutional, and on
-macOS the torch wheel has no oneDNN and takes a 12x reference-kernel path for
-convolutions. That measurement is torch, not TensorFlow, so it does not transfer
-directly - but it points away from the host, not towards it, and a Phase 3 that
-assumed the opposite would have been an expensive way to find out.
+| operation | container (linux/arm64) | host (macOS arm64) | |
+|---|---|---|---|
+| first conv (5,1) s3, 150 frames | 3.34 ms | 2.92 ms | host 1.14x |
+| MDConv block 1 (32ch) | 3.50 ms | 2.72 ms | host 1.29x |
+| MDConv block 4 (1024ch) | 8.37 ms | 7.26 ms | host 1.15x |
+| GEMM 1024³ | 20.67 ms | 16.09 ms | host **1.29x** |
+| full train step (fwd+grad+update) | **36.21 ms** | **30.86 ms** | host **1.17x** |
 
-If anyone does revisit this, measure TensorFlow the same way first: a conv-shaped
-step in `docker/Dockerfile.mww.cpu` against the same step in a host TF install. One
-number decides it, and it costs minutes.
+And `threading_options` made **both** sides slower (host 33.90, container 39.80
+with 10 threads): both builds run one CPU per op at these shapes, so the win is
+the BLAS in the GEMM-bound residual, the same Accelerate story as phase 1b's
+matmul — smaller, because mixednet's convolutions are too skinny to feed a GEMM
+kernel, which is why phase 1b's conv prior looked the way it did.
+
+The bigger number is the corpus stage. `tools/bench_tts.py`, the same
+`wyoming-piper` 2.4.3 / `piper-tts` 1.7.0 in both environments, 140 "hey seeree"
+clips:
+
+| | container | host | |
+|---|---|---|---|
+| Piper, sequential | 9.13 clips/s | **21.66 clips/s** | host **2.4x** |
+| Piper, 8 client threads | 9.13 (flat) | 23.4 | still serialises |
+
+Same server code, same model, 2.4x: `piper-tts` runs on onnxruntime, and the
+macOS wheel links Accelerate while the linux/arm64 one does not — the identical
+mechanism to every other number in this document. The corpus stage is the
+longest in a full run (roughly 14 of the container run's 26m06s), so it carries
+most of the end-to-end gain. Measured the same day, full run, host against the
+container's 2026-09-06 numbers on this machine:
+
+| stage | container | host | |
+|---|---|---|---|
+| corpus (4,920 + 984 clips) | ~14 min | **6m12s** | 2.3x |
+| features | ~1 min | 1m22s | about the same |
+| train, 10,000 steps + conversion + ROC | ~11 min | **6m40s** | 1.7x |
+| **total** | **26m06s** | **14m14s** | **1.83x** |
+
+The training stage beat its 1.17x probe, because the conversion and ROC
+calibration that follow it run in the same process and carried the same gap.
+The container route stays correct everywhere else; on this Mac the host route
+is the faster one, measured, not projected.
+
+What it added:
+
+* `train-mww-applesilicon/` — the host uv environment: Python 3.12,
+  `tensorflow==2.21.0` (the version `Dockerfile.mww.cpu` installs from PyPI),
+  `numpy>=2`, `pymicro-features==2.0.2`. A fourth host environment because it
+  cannot share a venv with `train-applesilicon/` (numpy 2 vs numpy<2 — the same
+  split that keeps the two trainer images apart).
+* `scripts/setup-mww-applesilicon-trainer.sh` — clones
+  `OHF-Voice/micro-wake-word` at repo root, pinned to `4665173`, builds the venv.
+  The clone installs **editable `--no-deps`**, and that is a verified failure
+  mode, not a preference: `microwakeword/audio/` has no `__init__.py`, so a
+  non-editable wheel build drops the whole subpackage (`find_packages()`
+  silently skips it) and the features stage dies on `ModuleNotFoundError` two
+  stages in.
+* `scripts/run-mww-training-applesilicon.sh` — the same four stages, on the
+  host, with `PIPER_URL` reaching the host Piper (`./scripts/start-piper-host.sh`
+  on 127.0.0.1:10200; a `piper:PORT` value is the compose-only name and is
+  rewritten, as the oww script does).
+
+Verified on this machine: every import the stages touch; the features-stage
+path against the real corpus (RaggedMmap + augmentation); a 600-step training
+run through quantised streaming TFLite conversion and the ROC, both directly
+and through the run script end to end; and a full run - the 14m14s row above.
+Open: the host-vs-container comparison on any Mac but this one.
+
+One caveat that would change the training-stage conclusion if it ever bites:
+the container side was measured in this Docker Desktop VM, and its CPU share is
+a VM setting, not a constant of the hardware. The TTS gap does not move with
+that — it is a library link, not a schedule.
 
 ### What would make this not worth finishing
 

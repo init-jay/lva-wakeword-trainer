@@ -1,6 +1,6 @@
 ---
 name: train-apple-silicon
-description: Train wake-word models on an Apple Silicon Mac. openWakeWord runs natively on the host (uv venv, in-process Kokoro via MLX on the GPU, Piper TTS from a host server); microWakeWord runs in the multi-arch Docker CPU image. Use when the user wants to train or retrain a model on a Mac, set up the trainer environment, start the host TTS services, hits a failure in the Apple Silicon training scripts, or asks why training on a Mac differs from the CUDA box.
+description: Train wake-word models on an Apple Silicon Mac. openWakeWord runs natively on the host (uv venv, in-process Kokoro via MLX on the GPU, Piper TTS from a host server); microWakeWord runs natively on the host too (uv venv + host Piper, faster than the container) or in the multi-arch Docker CPU image. Use when the user wants to train or retrain a model on a Mac, set up the trainer environment, start the host TTS services, hits a failure in the Apple Silicon training scripts, or asks why training on a Mac differs from the CUDA box.
 ---
 
 # Training on Apple Silicon
@@ -10,7 +10,7 @@ Step 2 of the pipeline. The two targets run on **two different machines**:
 | target | where | why |
 |---|---|---|
 | openWakeWord | **on the host**, the `train-applesilicon/` uv venv | TTS is in-process Kokoro on the GPU — MLX, 25 ms/clip batched, against 88 for the same model behind the fastest server — and the trainer is torch on Accelerate, 6.3× faster steps than the container's wheel, on a model that is `Linear`×7 + one LSTM, so the one thing the macOS wheel lacks (oneDNN) costs it nothing |
-| microWakeWord | **Docker**, `cpu` overlay | measured 26 min here, faster than the RTX 3090, and it stays put: mixednet is convolutional, the one op class the macOS host torch is 12× bad at |
+| microWakeWord | **on the host**, the `train-mww-applesilicon/` uv venv (Docker `cpu` overlay also works) | Full run measured 14m14s on the host against 26m06s in the container (1.8×), same library versions: its corpus is 100% Piper, and the host Piper is 2.4× faster (21.66 vs 9.13 clips/s); the TF train stage is 1.7× faster. `apple-port.md` phase 3 |
 
 **The GPU does exactly one job here: Kokoro.** That is the measured layout,
 not an assumption. In-process MLX is the fastest TTS path this machine has —
@@ -19,8 +19,10 @@ against the same model behind its fastest server configuration, 88 / 229) —
 and it removed the old run-on/plain asymmetry, which is why the second Kokoro
 server (`KOKORO_RUNON_URL`) no longer exists. Everything else is CPU
 *demonstrably*: the torch trainer, because the macOS wheel is the 6.3× measured
-win and MPS for training (`apple-port.md`, phase 2) is still unmeasured;
-MWW's container, because Docker Desktop passes **no Metal device through** —
+win and MPS for training (`apple-port.md`, phase 2) is still unmeasured; and
+the MWW host route, because its two measured gaps — the Piper corpus at 2.4× and
+the TF train step at 1.17× — are both host wins at the same versions (phase 3),
+and neither wants a GPU. Docker Desktop passes **no Metal device through** —
 which is why `docker-compose.mps.yml` is empty, why anything that wants the
 GPU has to run on the host, and why the host route is this skill, not an
 overlay. Two boundaries to keep straight: the *server's* torch-MPS mode loses
@@ -109,11 +111,14 @@ type outside it must unset `VIRTUAL_ENV` or point it at the venv you mean.
   were audited against it. A fresh install resolves 1.8.0, which changed G2P.
   Bump either the image tag or the pin only with a re-audit of `en_US` +
   `en_GB` in `piper.py`.
-- **The MWW container never sees these.** In Docker it reaches the `piper`
-  *compose service* on the compose network (and MWW's corpus comes from Piper
-  only — no Kokoro stage), so `start-piper-host.sh` is irrelevant to it. MWW's
-  container runs Piper CPU-only by design, which is also why it can stay up
-  through training with no GPU-memory dance.
+- **Which Piper a MWW run uses depends on its route.** MWW's corpus is Piper
+  only — there is no Kokoro stage. The **host** route wants `./scripts/start-piper-host.sh`
+  on 127.0.0.1:10200, and `run-mww-training-applesilicon.sh` rewrites a
+  `PIPER_URL=piper:PORT` value (a compose-only name) to `127.0.0.1:PORT` with
+  a notice before it can be wasted. The **Docker** route reaches the `piper`
+  *compose service* on the compose network, where the host server is
+  irrelevant. Either way it runs CPU-only by design, which is why it can stay
+  up through training with no GPU-memory dance.
 
 A full OWW run therefore needs **at most one server** (Piper, and only when
 `--piper-fraction` is nonzero); `--skip-corpus` needs neither.
@@ -208,20 +213,44 @@ One quirk, checked and harmless: `onnx2tf` re-saves the input `.onnx`
 
 ## Running microWakeWord
 
+**On the host** — the default on a Mac, because both measured stages win there
+(full run 14m14s vs 26m06s in the container, 1.8×; `apple-port.md` phase 3):
+
+```bash
+./scripts/setup-mww-applesilicon-trainer.sh   # once per machine; idempotent
+./scripts/start-piper-host.sh                 # in another terminal; the corpus is 100% Piper
+./scripts/run-mww-training-applesilicon.sh "hey seeree"
+```
+
+The setup script pins the `microwakeword/` clone at repo root to one commit of
+the fork, builds `train-mww-applesilicon/.venv` (Python 3.12, tensorflow
+2.21.0 — the version the image installs — numpy 2, which is why this cannot
+share the openWakeWord venv), and verifies the imports. It installs the clone
+**editable `--no-deps`**; a non-editable build is a verified failure, because
+`microwakeword/audio/` has no `__init__.py` and `find_packages()` silently
+drops it from the wheel. The run script preflights a real Piper `describe`
+round trip before spending the hour, checks the shared `data/corpus`/`output`
+directories are writable (the Docker trainers run as root), and verifies the
+clone is still at the pinned commit. Same knobs as the container path:
+`SKIP_CORPUS=1`, `SKIP_FEATURES=1`, `MAX_FAPH=…`. The log lands in the repo
+root as `training-<word>-macos-<stamp>.log`.
+
+**In Docker** — elsewhere, and the reference point for the phase-3 numbers:
+
 ```bash
 COMPOSE_FILE=docker-compose.yml:docker-compose.cpu.yml ./scripts/run-mww-training.sh "hey seeree"
 ```
 
-Same script as the CUDA box, `cpu` overlay swapped in. Four stages (corpus →
-features → train → manifest), then the script **collects** the three shipped
-files, commit-tagged, directly into `output/<word>/mww/`. Give Docker Desktop
-enough RAM first: the 17.28 GB feature array is mmap'd, and running short of
-memory **page-faults rather than erroring** — a Mac that feels like it is
-swapping for hours has hit this. Knobs: `SKIP_BUILD=1` (reuse the image —
-needed after a `docker builder prune`), `SKIP_CORPUS=1` (skip the expensive TTS
-stage), `SKIP_FEATURES=1` (only if the corpus is unchanged), `MAX_FAPH=…`
-(the false-accepts-per-hour budget the manifest cutoff is chosen from).
-The log lands in the repo root as `training-mww-<word>-YYYYMMDD-HHMMSS.log`.
+Same four stages (corpus → features → train → manifest), then the script
+**collects** the three shipped files, commit-tagged, directly into
+`output/<word>/mww/`. Give Docker Desktop enough RAM first: the 17.28 GB
+feature array is mmap'd, and running short of memory **page-faults rather
+than erroring** — a Mac that feels like it is swapping for hours has hit
+this. Knobs: `SKIP_BUILD=1` (reuse the image — needed after a
+`docker builder prune`), `SKIP_CORPUS=1` (skip the expensive TTS stage),
+`SKIP_FEATURES=1` (only if the corpus is unchanged), `MAX_FAPH=…` (the
+false-accepts-per-hour budget the manifest cutoff is chosen from).
+The log lands in the repo root as `training-mww-<word>-<stamp>.log`.
 
 ## What survives a run, and what doesn't
 

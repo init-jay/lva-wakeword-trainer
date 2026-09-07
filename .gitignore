@@ -39,6 +39,12 @@ venv/
 # image makes for itself, with one patched for a different device.
 openwakeword/
 
+# The microWakeWord clone that scripts/setup-mww-applesilicon-trainer.sh makes at the
+# repo root, pinned to one commit of OHF-Voice/micro-wake-word. The venv in
+# train-mww-applesilicon/ installs it editable, so HEAD is state - .dockerignore
+# excludes it for the same reason as openwakeword/.
+microwakeword/
+
 # Python
 __pycache__/
 *.pyc
