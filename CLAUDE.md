@@ -4,8 +4,9 @@ A wake-word training pipeline for [Linux Voice Assistant]. It trains two models 
 one corpus: **openWakeWord** (`.onnx`/`.tflite`, server) and **microWakeWord**
 (`.tflite` + ESPHome `.json`, ESP32).
 
-Three skills carry the detail and trigger on their own — `write-wordlists`,
-`record-samples`, `eval-models`. This file is the orchestration between them.
+Four skills carry the detail and trigger on their own — `write-wordlists`,
+`record-samples`, `train-apple-silicon`, `eval-models`. This file is the
+orchestration between them.
 
 ## "I want a wake word model for X"
 
@@ -22,7 +23,9 @@ each **STOP** until the human has done their part.
 3. **External data**, once per machine: `./scripts/download-external-data.sh [all|oww|mww]`.
    ~43 GB for both. Check `df -h` first.
 4. **Train.** `./scripts/run-oww-training.sh "X"` and/or `./scripts/run-mww-training.sh "X"`.
-   Hours. Ask which target they want before running both.
+   On an Apple Silicon Mac, OWW runs on the host instead — the `train-apple-silicon`
+   skill carries that route, including the tflite-conversion workaround. Hours.
+   Ask which target they want before running both.
 5. **Eval.** Use `eval-models`. Report per speaker and at matched false accepts.
 6. **STOP — preflight.** Also needs their microphone:
    `cd preflight && uv run test_model.py --model ../output/<x>/mww/<tag>.json`
