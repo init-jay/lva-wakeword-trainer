@@ -75,6 +75,8 @@ far.
 │   ├── provenance.py             run tag: the commit AND the audio it trained on
 │   ├── corpus/                   shared by both trainers
 │   │   ├── augment.py
+│   │   ├── kokoro.py             the Kokoro TTS client (both trainers)
+│   │   ├── kokoro_mlx.py         the in-process mlx:// backend for it
 │   │   ├── negatives.py
 │   │   ├── positives.py
 │   │   ├── piper.py

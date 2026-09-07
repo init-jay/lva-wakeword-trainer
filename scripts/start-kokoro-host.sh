@@ -125,6 +125,12 @@ cd "$APP_DIR"
 # installing - so the server starts without uvicorn and dies with
 # "Failed to spawn: `uvicorn`".
 [[ -d .venv ]] || uv venv
+# PIN uv TO THAT VENV. uv 0.9.10 (Homebrew, Nov 2025) no longer auto-discovers
+# the local .venv from this directory - it resolved a DIFFERENT venv of a newer
+# Python, where tiktoken 0.8.0's cp312 wheels do not match, and rebuilt it from
+# the sdist, which needs a Rust compiler. With VIRTUAL_ENV pinned, uv pip sees
+# tiktoken already satisfied and only reinstalls the editable.
+export VIRTUAL_ENV="$PWD/.venv"
 uv pip install -e . --quiet
 
 uv run --no-sync python docker/scripts/download_model.py --output api/src/models/v1_0

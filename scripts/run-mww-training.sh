@@ -143,8 +143,15 @@ sys.exit('piper did not start listening on piper:10200 within 180s')
 
     run "building corpus (log: $LOG)"
     : > "$LOG"
+    # --kokoro-fraction 0 is EXPLICIT, not the module default, on purpose: the
+    # compose mww-trainer service has no KOKORO_URL and no kokoro service
+    # dependency (unlike oww-trainer), so the moment someone wires those in,
+    # this line is where the mix should change - and a silent default change
+    # here would make container corpora drift from each other without a
+    # visible diff. The Apple Silicon route (run-mww-training-applesilicon.sh)
+    # already runs 0.3.
     docker compose run --rm mww-trainer python -m train.mww.corpus \
-        --wake-word "$WAKE_WORD" --piper-url piper:10200 2>&1 | tee -a "$LOG"
+        --wake-word "$WAKE_WORD" --piper-url piper:10200 --kokoro-fraction 0 2>&1 | tee -a "$LOG"
 fi
 
 # --- 2. features -----------------------------------------------------------------

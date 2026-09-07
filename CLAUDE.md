@@ -68,12 +68,12 @@ A Mac can also train both targets entirely outside Docker: `train-applesilicon/`
 is a host uv env (torch, `scripts/setup-applesilicon-trainer.sh`) run with
 `scripts/run-oww-training-applesilicon.sh`, and `train-mww-applesilicon/` (TF,
 `scripts/setup-mww-applesilicon-trainer.sh`) with
-`scripts/run-mww-training-applesilicon.sh` - the mww corpus needs the host Piper
-(`scripts/start-piper-host.sh`) because it is 100% Piper. That script starts no
-tts servers of its own - its corpus calls go to a host uv venv
-(`scripts/start-kokoro-host.sh`, `scripts/start-piper-host.sh`) or a Docker
-service on a reachable port. The mww host route is the measured-faster one on a
-Mac (full run measured 14m14s there against 26m06s in the container, 1.8x). Status, measurements, and the phased plan:
+`scripts/run-mww-training-applesilicon.sh`. Neither script starts tts servers of
+its own - the corpus calls go to a host uv venv (`scripts/start-kokoro-host.sh`,
+`scripts/start-piper-host.sh`) or a Docker service on a reachable port. The mww
+host route is the measured-faster one on a Mac (full run measured 14m14s there
+against 26m06s in the container, 1.8x); its corpus is Piper-majority with a 30%
+Kokoro mix by default (`KOKORO_FRACTION=0` for the all-Piper corpus). Status, measurements, and the phased plan:
 `apple-port.md`.
 
 ## Invariants that are easy to break

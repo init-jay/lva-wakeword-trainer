@@ -367,10 +367,25 @@ timestamps:
 
 | stage | container | host | |
 |---|---|---|---|
-| corpus (4,920 + 984 clips) | ~14 min | **6m12s** | 2.3x |
+| corpus (4,920 + 984 clips, all-Piper) | ~14 min | **6m12s** | 2.3x |
 | features | ~1 min | 1m22s | about the same |
 | train, 10,000 steps + conversion + ROC | ~11 min | **6m40s** | 1.7x |
 | **total** | **26m06s** | **14m14s** | **1.83x** |
+
+The corpus row is the all-Piper mix (`KOKORO_FRACTION=0`). The run script now
+defaults to a 30% Kokoro mix — the mirror of the oWW corpus's 30% Piper
+fraction — because the phrase-alone budget was single-voice-family and the
+notebook's two-engines-beat-one result (run 17) applied untested here; the
+extraction that made it possible (the Kokoro client moved to
+`train/corpus/kokoro.py`, which the oWW trainer now imports) is in the list
+below. First mixed run on this machine, same day (2026-09-07, tag
+`e4da6a3-dirty`): corpus **7m24s** against the all-Piper 6m12s — the mix costs
+about a minute of Kokoro render, and the full run stayed at 14m24s against
+14m14s. The model itself: matched-FA comparison against the same-day all-Piper
+run (`333944a`) put run-on detection at 65% vs 34% at 4/32 (ceilings 93 vs 75)
+while plain detection was a wash (57 vs 55) and the per-speaker spread survived
+(jen 20% vs jay 69%, n=10/35) — diversity bought run-on, not yet generalisation;
+the latter still needs more jen/ryan recordings, which is a human task.
 
 The training stage beat its 1.17x probe, because the conversion and ROC
 calibration that follow it run in the same process and carried the same gap.
@@ -391,10 +406,20 @@ What it added:
   non-editable wheel build drops the whole subpackage (`find_packages()`
   silently skips it) and the features stage dies on `ModuleNotFoundError` two
   stages in.
+* `train/corpus/kokoro.py` — the Kokoro TTS client (server pool, voice probe,
+  single/timed/batched render, batching executor), moved **verbatim** out of
+  `train/oww/train.py` so both trainers share it. `generate_runon_samples`
+  stayed: its cut logic needs the oWW-local `RUNON_SPEEDS`/`RUNON_TAIL_MS`, and
+  mWW has no run-on positives yet — the gap `train/mww/corpus.py` documents.
 * `scripts/run-mww-training-applesilicon.sh` — the same four stages, on the
-  host, with `PIPER_URL` reaching the host Piper (`./scripts/start-piper-host.sh`
-  on 127.0.0.1:10200; a `piper:PORT` value is the compose-only name and is
-  rewritten, as the oww script does).
+  host, with `PIPER_URL` and `KOKORO_URL` reaching the host servers
+  (`./scripts/start-piper-host.sh` on 127.0.0.1:10200; `./scripts/start-kokoro-host.sh`
+  on 127.0.0.1:8880; `piper:PORT` / host.docker.internal values are compose-only
+  names and are rewritten, as the oww script does). `KOKORO_FRACTION` (default
+  0.3) splits the phrase-alone budget between the engines. The Docker script
+  passes `--kokoro-fraction 0` explicitly: the compose mww-trainer has no
+  Kokoro service wired in yet, and a silent default change there would drift
+  container corpora from each other without a visible diff.
 
 Verified on this machine: every import the stages touch; the features-stage
 path against the real corpus (RaggedMmap + augmentation); a 600-step training

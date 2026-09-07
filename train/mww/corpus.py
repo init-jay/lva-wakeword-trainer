@@ -9,9 +9,10 @@ WHAT IS SHARED IS THE CODE, NOT THE OUTPUT. Everything here comes from corpus/ -
 same trimming, the same child-range copies, the same audited Piper voices, the same
 tuned phrase texts and speed grid. Two corpora built by one set of rules.
 
-    python -m train.mww.corpus --wake-word "hey seeree" --piper-url piper:10200
+    python -m train.mww.corpus --wake-word "hey seeree" --piper-url piper:10200 \
+        --kokoro-url http://127.0.0.1:8880 --kokoro-fraction 0.3
 
-THREE DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
+TWO DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
 
 1. REAL RECORDINGS ARE COPIED ONCE, not ten times. openWakeWord's --real-copies 10
    exists because it augments by globbing the directory once, so N copies become N
@@ -20,19 +21,39 @@ THREE DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
    would only bias sampling, and `sampling_weight` in the feature set is the honest
    knob for that. See corpus/real.py.
 
-2. PIPER ONLY, FOR NOW. The Kokoro client still lives inside train.py rather than
-   corpus/, so this cannot render with it yet. That is a known gap and not a
-   preference: run 17 measured two engines beating one on the openWakeWord side by
-   the largest margin since run 10. Closing it means extracting corpus/kokoro.py.
+2. PIPER-MAJORITY, WITH KOKORO AS A SUPPLEMENT. --kokoro-fraction renders that
+   share of the PHRASE-ALONE positive budget with Kokoro instead of Piper. It
+   SUBSTITUTES rather than adds, the same discipline the openWakeWord side applies
+   to its --piper-fraction: the total clip count, the real-clip share of the
+   positive set, and the negative set all stay fixed, so a comparison against an
+   all-Piper run means exactly one thing - where part of the phrase-alone budget
+   came from. Run 17 measured two engines beating one on the openWakeWord side by
+   the largest margin since run 10; this is that lever, with the engines swapped
+   (that corpus is Kokoro-primary with a Piper fraction, this one is the mirror
+   image). The module default is 0.0 (all Piper, the historical behaviour); the
+   Apple Silicon run script defaults to 0.3, mirroring the 30% its oWW sibling
+   already runs. Negatives stay Piper-only on purpose: that is where the
+   per-category signal (extend, hey_other) lives, and mixing a second engine in
+   there would blur attribution of a false accept to an engine. The Kokoro voices
+   get the same exclusions the oWW corpus applies - the per-wake-word
+   MISPRONOUNCING_VOICES and the v0 legacy set, both in corpus/negatives.py - and
+   the shared speed grid, so the two engines differ in timbre, not in speed or
+   text. The mlx:// in-process backend works here too, but it is not installed in
+   this environment (see corpus/kokoro_mlx.py) - from this venv, use the host
+   server: scripts/start-kokoro-host.sh.
 
 3. NO RUN-ON POSITIVES YET. Their cut point comes from Kokoro's word timestamps, and
    Wyoming exposes no equivalent - the fallback estimate measured a median +153 ms
    late, against a RUNON_TAIL_MS of 150-300 ms. On the openWakeWord side run-ons took
    held-out run-on detection from 5% to the 80s, so this is the most valuable gap
    here, and it needs solving properly rather than with the degraded estimate.
+   The client that would solve it (corpus/kokoro.py, with phrase_end_sample) is now
+   importable from here; the constants it needs (RUNON_TAIL_MS) stay
+   openWakeWord-local until this gap is closed.
 """
 
 import argparse
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -43,7 +64,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from train.corpus.augment import (CHILD_STRETCH_FRACTION,  # noqa: E402
                                   add_child_range_copies, trim_directory)
-from train.corpus.negatives import build_negative_phrases  # noqa: E402
+from train.corpus.kokoro import (KokoroPool,  # noqa: E402
+                                 generate_kokoro_samples, probe_kokoro_servers)
+from train.corpus.negatives import (LEGACY_VOICE_MARKER,  # noqa: E402
+                                    MISPRONOUNCING_VOICES, build_negative_phrases)
 from train.corpus.piper import (generate_piper_samples,  # noqa: E402
                                 select_piper_voices)
 from train.corpus.positives import (PLAIN_SPEED_GRID,  # noqa: E402
@@ -61,6 +85,17 @@ def main():
                    help="speakers sampled per multi-speaker voice (default: "
                         "%(default)s). libritts_r alone carries 904.")
     p.add_argument("--piper-languages", default="en_US,en_GB")
+    p.add_argument("--kokoro-url",
+                   default=os.environ.get("KOKORO_URL", "http://localhost:8880"),
+                   help="Kokoro TTS URL, comma-separated for a pool; 'mlx://' is "
+                        "in-process (default: %%(default)s). Used only when "
+                        "--kokoro-fraction > 0.")
+    p.add_argument("--kokoro-fraction", type=float, default=0.0,
+                   help="Share of the PHRASE-ALONE positive budget rendered by "
+                        "Kokoro instead of Piper (default: %%(default)s = all "
+                        "Piper). Substitutes rather than adds - see the module "
+                        "docstring. Piper stays primary: negatives are "
+                        "Piper-only, so the fraction must be < 1.")
     p.add_argument("--samples-per-voice", type=int, default=60,
                    help="phrase-alone clips per voice (default: %(default)s). Lower "
                         "than openWakeWord's 300 because there are ~82 usable Piper "
@@ -118,24 +153,78 @@ def main():
     negatives.mkdir(parents=True, exist_ok=True)
 
     host, _, port = args.piper_url.rpartition(":")
-    print(f"[Piper] {args.piper_url}")
-    voices = select_piper_voices(
-        host, port, args.wake_word,
-        languages=tuple(args.piper_languages.split(",")),
-        max_speakers=args.piper_speakers)
-    if not voices:
-        sys.exit("  no usable Piper voices - nothing to generate")
+    if not 0.0 <= args.kokoro_fraction < 1.0:
+        sys.exit("  --kokoro-fraction must be in [0, 1) - Piper stays primary in "
+                 "this corpus, because the negatives are Piper-only")
+
+    voices = []
+    if args.kokoro_fraction < 1.0:
+        print(f"[Piper] {args.piper_url}")
+        voices = select_piper_voices(
+            host, port, args.wake_word,
+            languages=tuple(args.piper_languages.split(",")),
+            max_speakers=args.piper_speakers)
+        if not voices:
+            sys.exit("  no usable Piper voices - nothing to generate")
+
+    # KOKORO SUPPLEMENTS THE PHRASE-ALONE BUDGET (see the module docstring):
+    # a share of what Piper would have rendered is rendered by it instead.
+    kokoro_voices, kokoro_pool = [], None
+    if args.kokoro_fraction > 0.0:
+        print(f"\n[Kokoro] {args.kokoro_url}")
+        kokoro_pool = KokoroPool(args.kokoro_url.split(","))
+        kokoro_voices = probe_kokoro_servers(kokoro_pool)
+        # The same exclusions the openWakeWord corpus applies, for the same
+        # reason: a voice that says something other than the wake word is a
+        # mislabelled positive regardless of engine, and the v0 legacy set is
+        # older renderings of speakers already in the set. Six of 42 Kokoro
+        # voices did exactly this for "hey seeree" and went unnoticed for
+        # eleven runs - this list is not optional.
+        excluded = set(MISPRONOUNCING_VOICES.get(safe, []))
+        legacy = sorted(v for v in kokoro_voices if LEGACY_VOICE_MARKER in v)
+        if legacy:
+            excluded.update(legacy)
+            print(f"  Skipping {len(legacy)} v0 legacy voice(s) - older "
+                  f"renderings of speakers already in the set, for no measured "
+                  f"gain")
+        mispron = sorted(excluded & set(kokoro_voices))
+        if mispron:
+            print(f"  Excluding {len(mispron)} voice(s) that mispronounce the "
+                  f"wake word: {', '.join(mispron)}")
+        kokoro_voices = [v for v in kokoro_voices if v not in excluded]
+        if not kokoro_voices:
+            sys.exit("  no usable Kokoro voices - re-run with "
+                     "--kokoro-fraction 0 (all Piper)")
+
+    # The split, in TOTAL clips: Piper keeps its per-voice budget scaled down by
+    # the fraction, and the difference is spread over however many Kokoro voices
+    # there are. The two engines do not have the same voice count, so a
+    # per-voice figure would not substitute one-for-one. (The mirror image of
+    # openWakeWord's --piper-fraction arithmetic.)
+    piper_per_voice = args.samples_per_voice
+    kokoro_per_voice = 0
+    if 0.0 < args.kokoro_fraction < 1.0:
+        piper_per_voice = max(1, int(round(args.samples_per_voice
+                                           * (1 - args.kokoro_fraction))))
+        kokoro_total = (args.samples_per_voice - piper_per_voice) * len(voices)
+        kokoro_per_voice = max(1, kokoro_total // len(kokoro_voices))
 
     print(f"\n[Positives] -> {positives}")
+    texts = plain_positive_texts(args.wake_word)
     generate_piper_samples(host, int(port), voices, positives,
-                           args.samples_per_voice,
-                           plain_positive_texts(args.wake_word),
+                           piper_per_voice,
+                           texts,
                            PLAIN_SPEED_GRID, "Piper positives")
+    if kokoro_voices:
+        generate_kokoro_samples(kokoro_pool, kokoro_voices, positives,
+                                kokoro_per_voice,
+                                texts, "Kokoro positives")
 
     # The adversarial negatives - "hey serious", "hey Sienna", and the same sounds
     # inside running speech. These are what the large ambient sets do NOT contain,
     # and `extend` false accepts have been the unsolved problem on the openWakeWord
-    # side since run 6.
+    # side since run 6. Piper-only on purpose: this is where the per-category
+    # signal lives, and a second engine would blur the attribution.
     print(f"\n[Negatives] -> {negatives}")
     phrases = build_negative_phrases(args.wake_word, args.negatives_file)
     generate_piper_samples(host, int(port), voices, negatives,
@@ -164,8 +253,9 @@ def main():
     print("\nNext - FEATURES, not config: the config points at "
           "features/positives, which the next step creates.")
     print(f'  python -m train.mww.features --wake-word "{args.wake_word}"')
-    print("\nOr let the wrapper chain all four stages:")
-    print(f'  ./scripts/run-mww-training.sh "{args.wake_word}"')
+    print("\nOr let a wrapper chain all four stages:")
+    print(f'  ./scripts/run-mww-training.sh "{args.wake_word}"   (Docker)')
+    print(f'  ./scripts/run-mww-training-applesilicon.sh "{args.wake_word}"   (host, Apple Silicon)')
 
 
 if __name__ == "__main__":

@@ -9,9 +9,12 @@ WAVs, separate after it. See `../ARCHITECTURE.md`.
 | module | what it holds |
 |---|---|
 | `augment.py` | silence trimming, and the child-range pitch/formant copies |
+| `kokoro.py` | the Kokoro TTS client (server pool, voice probe, single/timed/batched render), moved verbatim out of `train/oww/train.py` so both trainers can use it; the run-on generator stays in the oWW trainer until mWW has run-on positives |
+| `kokoro_mlx.py` | the in-process `mlx://` backend for the Kokoro client |
 | `negatives.py` | the negative wordlist, and the Kokoro mispronunciation list |
 | `real.py` | real recordings into a corpus, weighted by repetition |
 | `piper.py` | Piper generation over Wyoming, plus Piper voice metadata |
+| `positives.py` | the plain-positive sentence templates and their speed grid, shared by both engines |
 
 These were moved out of `train/oww/train.py` without behaviour change — sixteen tuning
 runs are calibrated against that behaviour. Anything that looks like it
@@ -121,6 +124,5 @@ Leaving a voice out is deliberate rather than lazy: run 12 measured male voices 
 and training on an artefact teaches the artefact. A missing copy costs coverage; a
 wrong one costs correctness.
 
-`train/oww/train.py` prints what fraction of the Piper set has a known sex, and warns when the
-mispronunciation list is empty. It will not stop you — the warning exists because a
+The shared `generate_piper_samples` warns when a selected Piper voice has no entry in `PIPER_VOICE_SEX` — its clips get **no child-range copy** — on both trainer paths, and the mispronunciation exclusions are printed where they are applied (`select_piper_voices` for Piper, `train/mww/corpus.py` for the Kokoro half). They will not stop you — the warning exists because a
 silent run on a mislabelled corpus is the expensive outcome, not a loud one.

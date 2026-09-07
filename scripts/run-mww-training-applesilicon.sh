@@ -21,13 +21,24 @@
 #
 #     ./scripts/setup-mww-applesilicon-trainer.sh                     # once
 #     ./scripts/start-piper-host.sh                                   # in another terminal
+#     ./scripts/start-kokoro-host.sh                                  # another, for the default 30% mix
 #     ./scripts/run-mww-training-applesilicon.sh "hey seeree"
+#
+# KOKORO_FRACTION (default 0.3, or --kokoro-fraction on the command line) is the
+# share of the PHRASE-ALONE positive budget Kokoro renders instead of Piper -
+# substitution, not addition: the total clip count, the real-clip share, and the
+# Piper-only negative set all stay fixed, mirroring the 30% its openWakeWord
+# sibling already runs (engines swapped). 0.3 needs the Kokoro host server above;
+# KOKORO_FRACTION=0 (or --kokoro-fraction 0) runs all-Piper, the historical
+# corpus, and needs only Piper. The module document: train/mww/corpus.py.
 #
 # SKIP_CORPUS=1 / SKIP_FEATURES=1 behave exactly as in run-mww-training.sh.
 #
-# The corpus stage needs a Piper server. This script starts nothing: the host
-# one is scripts/start-piper-host.sh (uv venv, 127.0.0.1:10200). PIPER_URL or
-# --piper-url reach any other one; a piper:PORT value is rewritten to
+# The corpus stage needs a Piper server, and - at the default 30% mix - a Kokoro
+# one too. This script starts nothing: the host servers are
+# scripts/start-piper-host.sh (uv venv, 127.0.0.1:10200) and
+# scripts/start-kokoro-host.sh (uv venv, 127.0.0.1:8880). PIPER_URL / KOKORO_URL
+# or --piper-url reach any other server; a piper:PORT value is rewritten to
 # 127.0.0.1:PORT, because the compose service name resolves to nothing here.
 
 set -euo pipefail
@@ -89,16 +100,52 @@ if [[ "$(git -C "$CLONE" rev-parse HEAD)" != "$MWW_COMMIT" ]]; then
     exit 2
 fi
 
+# KOKORO_FRACTION: the share of the PHRASE-ALONE budget Kokoro renders instead
+# of Piper (see the header). It is consumed HERE, not passed to the training
+# stage, because the corpus and train stages are separate processes and only
+# the corpus takes it. KOKORO_FRACTION on the environment wins over nothing -
+# a command-line --kokoro-fraction wins over the environment, which wins over
+# the 0.3 default, the same precedence the oww script gives its --piper-fraction.
+KOKORO_FRACTION="${KOKORO_FRACTION:-0.3}"
+TRAIN_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --kokoro-fraction)
+            [[ $# -ge 2 ]] || { echo "ERROR: --kokoro-fraction needs a value" >&2; exit 2; }
+            KOKORO_FRACTION="$2"; shift 2 ;;
+        --kokoro-fraction=*)
+            KOKORO_FRACTION="${1#*=}"; shift ;;
+        *)
+            TRAIN_ARGS+=("$1"); shift ;;
+    esac
+done
+if [[ ! "$KOKORO_FRACTION" =~ ^([0-9]+(\.[0-9]+)?|\.[0-9]+)$ ]]; then
+    echo "ERROR: KOKORO_FRACTION='$KOKORO_FRACTION' is not a number." >&2
+    exit 2
+fi
+if awk -v f="$KOKORO_FRACTION" 'BEGIN { exit !(f >= 0.0 && f < 1.0) }'; then
+    : # [0, 1) - 1 is excluded on purpose: the negatives are Piper-only, so Piper
+    # must stay in the corpus (train/mww/corpus.py enforces the same bound).
+else
+    echo "ERROR: KOKORO_FRACTION must be in [0, 1) - got $KOKORO_FRACTION." >&2
+    echo "       (1 is not allowed: the adversarial negatives are Piper-only.)" >&2
+    exit 2
+fi
+# "0" and "0.0" both mean off; normalize so the probes and labels can test one
+# value. 0 = the historical all-Piper corpus, and the only setting that needs
+# no Kokoro server at all.
+if [[ "$KOKORO_FRACTION" == "0" || "$KOKORO_FRACTION" == "0.0" ]]; then
+    KOKORO_FRACTION=""
+fi
+set -- "${TRAIN_ARGS[@]+"${TRAIN_ARGS[@]}"}"
+
 # PIPER_URL
 #
-# Same contract as the oww host script: this pipeline is 100% Piper (there is
-# no Kokoro half of the mWW corpus yet - train/mww/corpus.py documents the gap),
-# so unlike there the probe is unconditional unless SKIP_CORPUS.
-#
-# piper:PORT is a COMPOSE-ONLY name: it resolves inside the compose network
-# and to nothing from a host process. The intent is unambiguous - the same
-# server, reached locally - so rewrite rather than fail. Any other
-# host:port (a Piper on the LAN, a box on the network) passes through.
+# Same contract as the oww host script: piper:PORT is a COMPOSE-ONLY name - it
+# resolves inside the compose network and to nothing from a host process. The
+# intent is unambiguous - the same server, reached locally - so rewrite rather
+# than fail. Any other host:port (a Piper on the LAN, a box on the network)
+# passes through.
 PIPER_PORT_DEFAULT=10200
 if [[ "${PIPER_URL:-}" == piper:* ]]; then
     PIPER_PORT="${PIPER_URL#piper:}"
@@ -113,6 +160,21 @@ elif [[ -z "${PIPER_URL:-}" ]]; then
     export PIPER_URL
 fi
 
+# KOKORO_URL: the same rewrite, for the same reason - host.docker.internal is
+# how a CONTAINER reaches the host, and from the host it is a name that
+# resolves to nothing. mlx:// passes through untouched: it is a URL meaning
+# "in this process" (train/corpus/kokoro_mlx.py), and the probe below is the
+# one that tells you this venv cannot run it.
+KOKORO_URL="${KOKORO_URL:-http://127.0.0.1:8880}"
+if [[ "${KOKORO_URL:-}" == *host.docker.internal* ]]; then
+    KOKORO_URL="${KOKORO_URL//host.docker.internal/127.0.0.1}"
+    export KOKORO_URL
+    echo "=== note: rewrote KOKORO_URL to $KOKORO_URL - host.docker.internal"
+    echo "          only resolves inside a container. For a local server:"
+    echo "          ./scripts/start-kokoro-host.sh"
+fi
+export KOKORO_URL
+
 # THE CONTAINER MAY OWN THESE FILES. Both paths write data/corpus/ and output/,
 # and the trainer images run as root - train/ownership.py hands output/ back
 # afterwards, but data/corpus/ is left as root wrote it. A host run then fails
@@ -126,11 +188,11 @@ for d in "data/corpus/${SAFE_NAME}/mww" "output/${SAFE_NAME}/mww"; do
     fi
 done
 
-# A dead or non-Wyoming Piper fails the corpus stage at clip 1 of thousands,
-# and the log does not say why. A Describe round trip, not a TCP connect: a
-# bound port owned by a dead or non-Wyoming listener passes a connect check
-# and still fails the corpus stage. This asks the question the corpus stage
-# asks.
+# Dead servers fail the corpus stage at clip 1 of thousands, and the log does
+# not say why. Both probes are the round trip the corpus stage actually makes,
+# not a TCP connect: a bound port owned by a dead or foreign listener passes a
+# connect check and still fails the corpus stage. Piper is probed when it will
+# render anything (always, at any fraction in [0,1)); Kokoro when it will.
 if [[ "${SKIP_CORPUS:-}" != "1" ]]; then
     if ! "$ENV_DIR/.venv/bin/python" - "$PIPER_URL" <<'PYEOF'
 import sys
@@ -153,6 +215,42 @@ PYEOF
         echo "  or point PIPER_URL / --piper-url at an existing one." >&2
         exit 1
     fi
+
+    if [[ -n "${KOKORO_FRACTION:-}" ]]; then
+        if ! "$ENV_DIR/.venv/bin/python" - "$KOKORO_URL" <<'PYEOF'
+import sys
+sys.path.insert(0, ".")
+url = sys.argv[1].rstrip("/")
+if url.startswith("mlx://"):
+    # This venv does not install kokoro-mlx (it lives in train-applesilicon/,
+    # because the two trainers are split on numpy); available() says exactly
+    # that, and it is the honest answer rather than a silent HTTP fallback.
+    from train.corpus import kokoro_mlx
+    ok, why = kokoro_mlx.available()
+    if not ok:
+        print(f"  Kokoro (mlx) unavailable: {why}", file=sys.stderr)
+        sys.exit(1)
+    print(f"  Kokoro probe OK: {why}")
+else:
+    import requests
+    try:
+        r = requests.get(f"{url}/v1/audio/voices", timeout=10)
+        r.raise_for_status()
+    except Exception as e:
+        print(f"  Kokoro unreachable: {e}", file=sys.stderr)
+        sys.exit(1)
+    voices = r.json()
+    voices = voices.get("voices", voices) if isinstance(voices, dict) else voices
+    print(f"  Kokoro probe OK: {len(voices)} voices at {url}")
+PYEOF
+        then
+            echo "  No reachable Kokoro at $KOKORO_URL - the corpus stage would fail at" >&2
+            echo "  its first Kokoro render, not now. Start the host server in another" >&2
+            echo "  terminal:  ./scripts/start-kokoro-host.sh" >&2
+            echo "  or run all-Piper:  KOKORO_FRACTION=0  (or --kokoro-fraction 0)" >&2
+            exit 1
+        fi
+    fi
 fi
 
 run() {
@@ -174,14 +272,21 @@ LOG="training-${SAFE_NAME}-macos-${STAMP}.log"
 
 # === 1. corpus ====================================================================
 #
-# The one stage this script reaches differently: PIPER_URL is the host server,
-# never the compose service. generate_piper_samples here is the same code the
-# container runs - the 2.4x comes from the server process, not the client.
+# The one stage this script reaches differently: PIPER_URL and KOKORO_URL are
+# host servers, never compose service names. generate_piper_samples and
+# generate_kokoro_samples here are the same code the container runs - the 2.4x
+# Piper gap comes from the server process, not the client. The mix is the
+# 30% the header documents; the corpus module prints the split it applies.
 if [[ "${SKIP_CORPUS:-}" == "1" ]]; then
     echo
     echo "=== $(date '+%H:%M:%S')  corpus (skipped)"
+elif [[ -n "${KOKORO_FRACTION:-}" ]]; then
+    run "corpus (Piper ${PIPER_URL} + Kokoro ${KOKORO_URL}, fraction ${KOKORO_FRACTION})" \
+        "$ENV_DIR/.venv/bin/python" -m train.mww.corpus \
+            --wake-word "$WAKE_WORD" --piper-url "$PIPER_URL" --piper-speakers 12 \
+            --kokoro-url "$KOKORO_URL" --kokoro-fraction "$KOKORO_FRACTION"
 else
-    run "corpus (Piper ${PIPER_URL})" \
+    run "corpus (Piper ${PIPER_URL}, all-Piper mix)" \
         "$ENV_DIR/.venv/bin/python" -m train.mww.corpus \
             --wake-word "$WAKE_WORD" --piper-url "$PIPER_URL" --piper-speakers 12
 fi
@@ -314,5 +419,8 @@ echo
 echo "    Compare the wall time against the container's 26m06s (this machine, 2026-09-06)"
 echo "    and the per-stage numbers against tools/tf_probe.py and tools/bench_tts.py."
 echo
-echo "    Evaluate:  ./scripts/eval-models.sh   (Docker, unchanged) - confirm the cutoff"
-echo "    against held-out recordings before deploying it."
+echo "    Evaluate (Docker, unchanged):"
+echo "      docker compose run --rm eval python -m eval.eval_model \\"
+echo "          --model $TAGGED_MODEL"
+echo "    Confirm the cutoff against the held-out recordings before deploying it;"
+echo "    the per-speaker rows are the ones that decide it."

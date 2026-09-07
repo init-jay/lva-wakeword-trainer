@@ -111,14 +111,20 @@ type outside it must unset `VIRTUAL_ENV` or point it at the venv you mean.
   were audited against it. A fresh install resolves 1.8.0, which changed G2P.
   Bump either the image tag or the pin only with a re-audit of `en_US` +
   `en_GB` in `piper.py`.
-- **Which Piper a MWW run uses depends on its route.** MWW's corpus is Piper
-  only — there is no Kokoro stage. The **host** route wants `./scripts/start-piper-host.sh`
-  on 127.0.0.1:10200, and `run-mww-training-applesilicon.sh` rewrites a
-  `PIPER_URL=piper:PORT` value (a compose-only name) to `127.0.0.1:PORT` with
-  a notice before it can be wasted. The **Docker** route reaches the `piper`
-  *compose service* on the compose network, where the host server is
-  irrelevant. Either way it runs CPU-only by design, which is why it can stay
-  up through training with no GPU-memory dance.
+- **Which TTS a MWW run uses depends on its route and its mix.** MWW's corpus is
+  Piper-majority with a 30% Kokoro mix by default on the host route (the mirror
+  of OWW's 0.30 Piper fraction; `KOKORO_FRACTION=0` for all-Piper) - and the
+  negatives are Piper-only on both routes, so Piper is always needed. The **host**
+  route wants `./scripts/start-piper-host.sh` on 127.0.0.1:10200 and, at the
+  default mix, `./scripts/start-kokoro-host.sh` on 127.0.0.1:8880, and
+  `run-mww-training-applesilicon.sh` rewrites `piper:PORT` / host.docker.internal
+  values (compose-only names) to 127.0.0.1 equivalents with a notice, then
+  preflights a real round trip to each server it will use. The **Docker** route
+  reaches the `piper` *compose service* on the compose network, where the host
+  servers are irrelevant, and runs all-Piper (`--kokoro-fraction 0` is passed
+  explicitly - the compose mww-trainer has no Kokoro service wired in yet).
+  Either way TTS runs CPU-only by design, which is why the servers can stay up
+  through training with no GPU-memory dance.
 
 A full OWW run therefore needs **at most one server** (Piper, and only when
 `--piper-fraction` is nonzero); `--skip-corpus` needs neither.
@@ -218,9 +224,13 @@ One quirk, checked and harmless: `onnx2tf` re-saves the input `.onnx`
 
 ```bash
 ./scripts/setup-mww-applesilicon-trainer.sh   # once per machine; idempotent
-./scripts/start-piper-host.sh                 # in another terminal; the corpus is 100% Piper
+./scripts/start-piper-host.sh                 # in another terminal
+./scripts/start-kokoro-host.sh                # another, for the default 30% mix
 ./scripts/run-mww-training-applesilicon.sh "hey seeree"
 ```
+
+`KOKORO_FRACTION=0` (or `--kokoro-fraction 0`) runs the historical all-Piper
+corpus and needs only the Piper server.
 
 The setup script pins the `microwakeword/` clone at repo root to one commit of
 the fork, builds `train-mww-applesilicon/.venv` (Python 3.12, tensorflow
@@ -228,8 +238,8 @@ the fork, builds `train-mww-applesilicon/.venv` (Python 3.12, tensorflow
 share the openWakeWord venv), and verifies the imports. It installs the clone
 **editable `--no-deps`**; a non-editable build is a verified failure, because
 `microwakeword/audio/` has no `__init__.py` and `find_packages()` silently
-drops it from the wheel. The run script preflights a real Piper `describe`
-round trip before spending the hour, checks the shared `data/corpus`/`output`
+drops it from the wheel. The run script preflights a real `describe` / voices
+round trip to each TTS server it will use before spending the run, checks the shared `data/corpus`/`output`
 directories are writable (the Docker trainers run as root), and verifies the
 clone is still at the pinned commit. Same knobs as the container path:
 `SKIP_CORPUS=1`, `SKIP_FEATURES=1`, `MAX_FAPH=…`. The log lands in the repo
