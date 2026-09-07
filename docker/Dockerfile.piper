@@ -31,6 +31,14 @@
 # the cautionary tale: a floating dependency makes the artefact a function of WHEN an
 # image was built, and the run tag (<commit>-d<audio hash>) records neither the date
 # nor the version. Bump this deliberately.
+#
+# The freeze goes one level deeper than the tag: the image's own venv
+# (/usr/src/.venv) carries piper-tts 1.7.0 (verified 2026-09-07), while a fresh
+# `pip install piper-tts` today resolves 1.8.0 - a newer G2P, which changes what
+# the voices say. The exclusion lists in train/corpus/piper.py were audited
+# against the 1.7.0 voice set, so bumping this tag and the host counterpart
+# scripts/start-piper-host.sh (same pins, for the same reason) must happen
+# together, with a re-audit.
 FROM rhasspy/wyoming-piper:2.4.3
 
 # Voices are downloaded on demand into --download-dir and get large once a

@@ -122,6 +122,18 @@ MISPRONOUNCING_PIPER_VOICES: dict[str, list[str]] = {
 # THE REAL LESSON IS THE MISMATCH: audit and generation must talk to the SAME Piper
 # service. An audit of a different instance is only accidentally relevant.
 #
+# THE CATALOG GROWS, IN BOTH UNITS AT ONCE. Measured 2026-09-07 against the 2.4.3
+# wheel, identical in the Docker image and the host venv
+# (scripts/start-piper-host.sh): 163 voices in the bundled catalog, against 96 at
+# audit time and the 106 the compose service exposed. With units: 96 and 163 are
+# VOICE counts; 106 was a PAIR count. The default selection (en_US/en_GB, 12-
+# speaker cap) measures 37 voices / 2005 pairs raw / 106 pairs capped - the same
+# 106 the compose-era run saw, so the English selection set has not moved since
+# the audit era's known exposure. The growth is voices in other languages, which
+# the languages filter already excludes. Widening --piper-languages is a new
+# unaudited set until tools/audit_voices.py --tts piper has run against the
+# instance that generates the corpus.
+#
 # TO RECLAIM THEM: audit these ten against the instance that generates the corpus,
 # then move them into MISPRONOUNCING_PIPER_VOICES or delete them from here, and add
 # their F0 to PIPER_VOICE_SEX. Note cori and ljspeech appear at two qualities each,
@@ -486,7 +498,9 @@ def select_piper_voices(host, port, wake_word: str, languages=("en_US", "en_GB")
                              max_speakers=max_speakers)
     except Exception as e:
         print(f"  ERROR: could not reach Piper at {host}:{port}: {e}")
-        print("         Start it with `docker compose up -d piper`.")
+        print("         Start it with `docker compose up -d piper` (in-Docker runs),")
+        print("         or `scripts/start-piper-host.sh` (host runs, Apple Silicon),")
+        print("         or point --piper-url at an already-running server.")
         sys.exit(1)
 
     bad = set(MISPRONOUNCING_PIPER_VOICES.get(safe_name, []))

@@ -60,6 +60,13 @@ mmap'd, and running short of memory page-faults rather than erroring.
 `SKIP_BUILD=1` on either training script reuses the image; needed after a
 `docker builder prune`, since the rebuild is then cold.
 
+A Mac can also train openWakeWord entirely outside Docker: `train-applesilicon/` is
+a host uv env (`scripts/setup-applesilicon-trainer.sh`), run with
+`scripts/run-oww-training-applesilicon.sh`. That script starts no TTS - its corpus
+calls go to a host uv venv (`scripts/start-kokoro-host.sh`,
+`scripts/start-piper-host.sh`) or a Docker service on a reachable port. Status,
+measurements, and the phased plan: `apple-port.md`.
+
 ## Invariants that are easy to break
 
 - **`data/recordings/holdout/` is never trained on.** The guarantee is *positional* —

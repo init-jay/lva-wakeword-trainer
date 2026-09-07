@@ -16,8 +16,11 @@ requires-python = ">=3.11,<3.13"
 #
 # WHAT RUNS WHERE ON A MAC, once this exists:
 #
-#   corpus generation   Docker, unchanged - kokoro-fastapi-cpu and Piper are both
-#                       CPU-only by choice and already run on arm64
+#   corpus generation   external servers the trainer only talks to over the
+#                       network: Kokoro and Piper, each a Docker service or a
+#                       host uv venv (scripts/start-kokoro-host.sh /
+#                       scripts/start-piper-host.sh, the latter pinned to the
+#                       same piper-tts 1.7.0 as docker/Dockerfile.piper)
 #   training            HERE
 #   eval                Docker, unchanged - Dockerfile.eval builds native arm64
 #

@@ -16,11 +16,14 @@
 #   ./scripts/setup-applesilicon-trainer.sh                      # once
 #   ./scripts/run-oww-training-applesilicon.sh "hey seeree" --skip-corpus
 #
-# --skip-corpus IS THE INTENDED WAY TO USE THIS. Generation needs Kokoro, and this
-# script starts nothing - point --kokoro-url at a server yourself if you want a full
-# run (scripts/start-kokoro-host.sh). For the measurement it is the wrong thing to
-# include anyway: TTS is the same work either way and would bury the difference under
-# 49 minutes of noise.
+# --skip-corpus IS THE INTENDED WAY TO USE THIS. Generation needs TTS servers, and
+# this script starts nothing - point --kokoro-url at a server yourself if you want
+# a full run (scripts/start-kokoro-host.sh). --piper-fraction N adds Piper-rendered
+# phrase-alone clips to that corpus; it needs its own server in another terminal,
+# scripts/start-piper-host.sh (the same uv-venv mechanism, on 127.0.0.1:10200 -
+# see PIPER_URL below). For the measurement a full run is the wrong thing to
+# include anyway: TTS is the same work either way and would bury the difference
+# under 49 minutes of noise.
 
 set -euo pipefail
 
@@ -82,6 +85,29 @@ fi
 # Kokoro is external. Unset it so it cannot be read as "something was arranged".
 unset KOKORO_EXTERNAL
 
+# PIPER_URL
+#
+# Same contract as KOKORO_URL: train/oww/train.py's --piper-url defaults to
+# ${PIPER_URL}, so the script exports it only when it has an opinion, and an
+# explicit --piper-url on the command line always wins over both.
+#
+# The container path reaches Piper as piper:10200 on the compose network, but a
+# host process cannot resolve that name - the same dead end host.docker.internal
+# is above, and the fix is the same shape: a local server. The Apple Silicon
+# one is scripts/start-piper-host.sh (uv venv, voices under data/external/piper)
+# on 127.0.0.1:10200. A PIPER_URL that still looks like the compose service
+# name is rewritten with a note; any other value (a reachable host:port, e.g.
+# Piper on the LAN) passes through untouched.
+if [[ "${PIPER_URL:-}" == piper:* ]]; then
+    PIPER_PORT="${PIPER_URL#piper:}"
+    [[ -z "$PIPER_PORT" || ! "$PIPER_PORT" =~ ^[0-9]+$ ]] && PIPER_PORT=10200
+    PIPER_URL="127.0.0.1:${PIPER_PORT}"
+    export PIPER_URL
+    echo "=== note: rewrote PIPER_URL to $PIPER_URL - the compose service name"
+    echo "          only resolves inside the compose network. For a local server:"
+    echo "          ./scripts/start-piper-host.sh"
+fi
+
 # ESPEAK FOR THE IN-PROCESS TTS BACKEND. misaki, which kokoro-mlx phonemises with,
 # loads espeak-ng through a wheel that hardcodes its own build path - so without
 # these it fails at the FIRST CLIP with a /Users/runner/... path, long after the run
@@ -92,18 +118,99 @@ unset KOKORO_EXTERNAL
 export ESPEAK_DATA_PATH="${ESPEAK_DATA_PATH:-/opt/homebrew/share/espeak-ng-data}"
 export PHONEMIZER_ESPEAK_LIBRARY="${PHONEMIZER_ESPEAK_LIBRARY:-/opt/homebrew/lib/libespeak-ng.dylib}"
 
-# Fail before the corpus stage rather than during it. An mlx:// run that cannot
-# phonemise produces nothing usable, and finding that out at clip 1 of 23,760 is
-# still worse than finding it out now.
+# Fail before the corpus stage rather than during it. Both TTS backends are
+# reachable from here as nothing but sockets, so a server that is down or not
+# a TTS server at all would otherwise fail at clip 1 of thousands, and the
+# log would not say why.
+KOKORO_MLX=false
+PIPER_FRACTION=""
+PIPER_URL_ARG=""
+want=""
 for arg in "$@"; do
-    if [[ "$arg" == mlx://* || "$arg" == "mlx" ]]; then
-        if [[ ! -f "$ESPEAK_DATA_PATH/phontab" ]]; then
-            echo "ERROR: --kokoro-url mlx:// needs espeak-ng data at $ESPEAK_DATA_PATH" >&2
-            echo "       brew install espeak-ng" >&2
-            exit 2
-        fi
+    if [[ -n "$want" ]]; then
+        case "$want" in
+            --piper-fraction) PIPER_FRACTION="$arg" ;;
+            --piper-url) PIPER_URL_ARG="$arg" ;;
+        esac
+        want=""
+        continue
     fi
+    case "$arg" in
+        mlx://*|mlx) KOKORO_MLX=true ;;
+        --piper-fraction) want="--piper-fraction" ;;
+        --piper-fraction=*) PIPER_FRACTION="${arg#*=}" ;;
+        --piper-url) want="--piper-url" ;;
+        --piper-url=*) PIPER_URL_ARG="${arg#*=}" ;;
+    esac
 done
+
+if $KOKORO_MLX && [[ ! -f "$ESPEAK_DATA_PATH/phontab" ]]; then
+    echo "ERROR: --kokoro-url mlx:// needs espeak-ng data at $ESPEAK_DATA_PATH" >&2
+    echo "       brew install espeak-ng" >&2
+    exit 2
+fi
+
+# Piper: probe only when it will actually render anything - a nonzero fraction
+# (train.py's default is 0.0, i.e. off) and the corpus stage running at all
+# (--skip-corpus renders nothing, so a dead server is a non-issue there).
+# Normalize the off-cases to empty first. The flag can be passed explicitly as
+# 0 (the default, i.e. off), and the zero-check must gate the probe itself, not
+# just the skip-corpus check below - that was the first draft's bug.
+case "$PIPER_FRACTION" in
+    0|0.0) PIPER_FRACTION="" ;;
+esac
+if [[ -n "$PIPER_FRACTION" ]]; then
+    for arg in "$@"; do
+        [[ "$arg" == "--skip-corpus" ]] && PIPER_FRACTION=""
+    done
+fi
+if [[ -n "$PIPER_FRACTION" ]]; then
+    if [[ -n "$PIPER_URL_ARG" ]]; then
+        export PIPER_URL="$PIPER_URL_ARG"
+    elif [[ -z "${PIPER_URL:-}" ]]; then
+        PIPER_URL="127.0.0.1:10200"
+        export PIPER_URL
+    fi
+    # A Describe round trip, not a TCP connect: a bound port owned by a dead or
+    # non-Wyoming listener passes a connect check and still fails the corpus
+    # stage. This asks the question the corpus stage asks.
+    if ! "$ENV_DIR/.venv/bin/python" - "$PIPER_URL" <<'PYEOF'
+import os, sys
+sys.path.insert(0, os.getcwd())
+from train.corpus.piper import piper_voices
+url = sys.argv[1].rstrip("/")
+host, _, port = url.partition(":")
+port = int(port) if port.isdigit() else 10200
+try:
+    pairs = piper_voices(host, port, languages=("en_US", "en_GB"))
+except Exception as e:
+    print(f"  Piper unreachable: {e}", file=sys.stderr)
+    sys.exit(1)
+print(f"  Piper probe OK: {len(pairs)} (voice, speaker) pairs at {host}:{port}")
+PYEOF
+    then
+        echo "  No reachable Piper at $PIPER_URL - the corpus stage would fail at its" >&2
+        echo "  first phrase-alone render, not now. Start the host server in another" >&2
+        echo "  terminal:  ./scripts/start-piper-host.sh   (it downloads voices on first use)" >&2
+        echo "  or point PIPER_URL / --piper-url at an existing one." >&2
+        exit 1
+    fi
+fi
+
+# THE CLONE'S PATCHES ARE WORKING-TREE EDITS, and only setup-applesilicon-trainer.sh
+# applies them (it runs the scripts in patches/). A working-tree reset in the clone -
+# a bare `git checkout .` did exactly this on 2026-09-07 - silently undoes them, and
+# the failure then surfaces two stages in, after the corpus is already generated. So
+# verify here, before the spend: this is read-only, and the remedy is to re-run
+# setup, which is idempotent and re-applies the same patches. Nothing in this script
+# ever writes to the clone.
+if ! grep -q 'if config.get("piper_sample_generator_path")' openwakeword/openwakeword/train.py; then
+    echo "ERROR: the openWakeWord clone is missing its patches - the working tree was" >&2
+    echo "       probably reset (e.g. a git checkout in openwakeword/). Re-run" >&2
+    echo "       ./scripts/setup-applesilicon-trainer.sh (idempotent) to re-apply" >&2
+    echo "       them, then start this run again." >&2
+    exit 2
+fi
 
 SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
 MODEL="output/${SAFE_NAME}/oww/${SAFE_NAME}.onnx"

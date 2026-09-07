@@ -85,7 +85,9 @@ fi
 #
 # Each patch prints "WARNING: patch target not found" and exits 0 rather than failing
 # if upstream has moved, so re-running after an openWakeWord update is safe but the
-# output is worth reading.
+# output is worth reading. The reverse failure - the patches silently UNdone by a
+# working-tree reset in the clone - is caught by run-oww-training-applesilicon.sh,
+# which checks for the sentinel before launching and sends you back here.
 #
 # Plus one the images do NOT apply: macos-dataloader-fork.py. macOS spawns worker
 # processes where Linux forks, and the training DataLoader wraps a lambda and a
@@ -124,7 +126,14 @@ done
 # the trainer images must never need it - the backend imports it lazily and reports
 # why it is unusable rather than failing at import.
 echo "==> syncing $ENV_DIR"
-( cd "$ENV_DIR" && uv sync --extra mlx --quiet )
+# VIRTUAL_ENV pinned on both uv invocations in this script: `uv sync` is project-anchored
+# and ignores it, but bare `uv pip` resolves the target environment from VIRTUAL_ENV
+# FIRST. On 2026-09-07 a re-run from a shell with another project's venv activated
+# (preflight's, Python 3.14) put the editable install there - leaving this venv without
+# openwakeword, polluting preflight's deliberately minimal dependency set, and surfacing
+# only as a ModuleNotFoundError in the verification below. The pin makes both lines
+# land here regardless of what the invoking shell has activated.
+( cd "$ENV_DIR" && VIRTUAL_ENV="$ENV_DIR/.venv" uv sync --extra mlx --quiet )
 
 # THE SPACY MODEL misaki NEEDS, INSTALLED HERE RATHER THAN ON FIRST USE.
 #
@@ -160,7 +169,12 @@ fi
 # `uv sync` in that directory silently uninstalls openwakeword and the next run dies
 # on `ModuleNotFoundError: No module named 'openwakeword'`. Re-running this script is
 # the supported way to repair that; it is idempotent.
-( cd "$ENV_DIR" && uv pip install --no-deps -e "../$CLONE" --quiet )
+#
+# The VIRTUAL_ENV pin is load-bearing here, not decorative: unlike `uv sync`, `uv pip`
+# resolves its target environment from VIRTUAL_ENV before the project's .venv, so with
+# any other venv activated in the invoking shell the editable install lands in THAT
+# environment (incident of 2026-09-07, see the comment above the sync line).
+( cd "$ENV_DIR" && VIRTUAL_ENV="$ENV_DIR/.venv" uv pip install --no-deps -e "../$CLONE" --quiet )
 
 # --- prove it ----------------------------------------------------------------------
 #

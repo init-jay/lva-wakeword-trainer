@@ -158,14 +158,28 @@ But only the *trainer* has to move. The split:
 
 | Stage | Where it runs on a Mac | Work needed |
 |---|---|---|
-| Corpus generation (Kokoro, Piper) | **Docker, unchanged** | none |
+| Corpus generation (Kokoro, Piper) | Docker service, or a host uv venv - no GPU either way | Kokoro: the 3.7x host win below made the host route worthwhile; Piper: host server verified 2026-09-07 |
 | Training | **host, uv env** | this document |
 | Eval | **Docker, unchanged** | none |
 
-Corpus generation needs no port because neither TTS server wants a GPU here anyway:
-the compose default is `ghcr.io/remsky/kokoro-fastapi-cpu:v0.8.1` and Piper is
-started without `--use-cuda` by choice. Both already run on arm64. That removes the
-largest and slowest stage from the problem entirely.
+Corpus generation needs no *port* because neither TTS server wants a GPU here
+anyway: the compose default is `ghcr.io/remsky/kokoro-fastapi-cpu:v0.8.1` and Piper
+is started without `--use-cuda` by choice. Both already run on arm64. A run is
+agnostic about which of those it is - `--kokoro-url` / `--piper-url` point at
+whatever answers.
+
+What Phase 1b settled is the *where*. The same Kokoro runs 3.7x faster in a host
+uv venv than in a container on this hardware, so the host trainer takes its corpus
+from `scripts/start-kokoro-host.sh` rather than a container. Piper followed the same
+shape on 2026-09-07: `scripts/start-piper-host.sh` is one uv venv pinned to the
+same `wyoming-piper`/`piper-tts` as `docker/Dockerfile.piper`, voices downloading
+on demand next to it. Verified on this Mac that day: describe enumerates the full
+163-voice catalog (2,005 en_US/en_GB pairs), a first render lands in 1.2 s wall, a
+warm one renders 1.55 s of audio in 0.1 s, and an unseen voice downloads and
+renders in 7.2 s including the 63 MB download. Not yet measured: the full corpus
+stage's wall time on the host - the same open bucket as the Kokoro corpus, and the
+number that decides whether the host TTS is the default for openWakeWord runs here.
+Until it is, "it works" is verified and "it is faster end-to-end" is open.
 
 ### Phase 1 — CPU images, in Docker, and measure them
 
