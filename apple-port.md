@@ -177,10 +177,12 @@ same `wyoming-piper`/`piper-tts` as `docker/Dockerfile.piper`, voices downloadin
 on demand next to it. Verified on this Mac that day: describe enumerates the full
 163-voice catalog (2,005 en_US/en_GB pairs), a first render lands in 1.2 s wall, a
 warm one renders 1.55 s of audio in 0.1 s, and an unseen voice downloads and
-renders in 7.2 s including the 63 MB download. Not yet measured: the full corpus
-stage's wall time on the host - the same open bucket as the Kokoro corpus, and the
-number that decides whether the host TTS is the default for openWakeWord runs here.
-Until it is, "it works" is verified and "it is faster end-to-end" is open.
+renders in 7.2 s including the 63 MB download. Measured 2026-09-07, in the
+README's timing table: the Kokoro corpus is 30m29s with the host FastAPI server
+and 19m06s/24m54s in-process (`--kokoro-url mlx://`), and the README's estimate
+now assumes the in-process route because it generates the corpus 1.2-1.6x
+faster; the open remainder is its run-on regression, documented in the README's
+Kokoro section.
 
 ### Phase 1 — CPU images, in Docker, and measure them
 
@@ -357,8 +359,11 @@ Same server code, same model, 2.4x: `piper-tts` runs on onnxruntime, and the
 macOS wheel links Accelerate while the linux/arm64 one does not — the identical
 mechanism to every other number in this document. The corpus stage is the
 longest in a full run (roughly 14 of the container run's 26m06s), so it carries
-most of the end-to-end gain. Measured the same day, full run, host against the
-container's 2026-09-06 numbers on this machine:
+most of the end-to-end gain. Full run on this machine: the host's, 2026-09-07,
+against the container's 2026-09-06 run - a day apart, so per the day rule in
+the README's Kokoro section, read the total as directional and the same-day
+stage probes as the evidence. Container stage times are that run's log
+timestamps:
 
 | stage | container | host | |
 |---|---|---|---|

@@ -73,7 +73,7 @@ commands for each of the three scripts in `scripts/`.
 
 ## Design choices
 
-- **Docker only.** The pipeline is built around containers, so host-native and notebook-based training runs are explicitly unsupported.
+- **Docker by default, host-native on Apple Silicon.** The Docker route is the portable one and is what other machines run. On a Mac, both training targets have first-class host routes (`scripts/*-applesilicon.sh`), and for both of them the host is the measured-faster route there (see below and `apple-port.md`).
 - **A microphone and speaker are required**, for the voice capture and preflight check steps.
 - **macOS is first class**, Linux is second class, and Windows is not supported.
 - **GPU acceleration is optional**, and only applies to the training step.
@@ -93,17 +93,21 @@ Three environments, all measured with `time` on the same wake word:
 |---|---|---|---|
 | Fetch external corpora | download-bound, ~43 GB for both targets | same | same |
 | Record | human time, 20–50 clips per speaker | same | same |
-| Train — microWakeWord | **28m03s** | **26m06s** | n/a, stays in Docker |
-| Train — openWakeWord | **28m59s** | ~2h 15m | **47m56s** |
-| ├ Kokoro corpus | included above | ~49 min | **30m29s** |
+| Train — microWakeWord | **28m03s** | **26m06s** | **14m14s** |
+| ├ Piper corpus | included above | included above | **6m12s** |
+| ├ Features | included above | included above | 1m22s |
+| └ Training, 10,000 steps + TFLite | included above | included above | **6m40s** |
+| Train — openWakeWord | **28m59s** | ~2h 15m | **~37–48m** |
+| ├ Kokoro corpus, `--kokoro-url mlx://` | included above | ~49 min | **~19–25m** |
 | ├ Augmentation + features | included above | ~21 min | ~12m30s |
-| └ Training, 50k steps | ~16 min | **~37 min** | **~4m35s** |
+| └ Training, 50k steps | ~16 min | **~37 min** | **~4m35s–6m** |
 | Eval | minutes | minutes | minutes |
 | Preflight | needs a mic | needs a mic | needs a mic |
 
-The Mac-host openWakeWord row is a single measured run at 22 voices, not a sum of
-stages. An earlier 36-voice run took ~1h15m; most of that difference is corpus size,
-not speed.
+The Mac-host openWakeWord row is the two measured `mlx://` runs at 22 voices
+(37m and 47m43s), not a sum of stages - the ±30% machine-load caveat in the
+Kokoro section below applies. An earlier 36-voice host-server run took ~1h15m;
+most of that difference is corpus size, not speed.
 
 **On Apple Silicon, leaving the container is worth ~7x on the training stage.** 250
 it/s on the host against 26 in the container — same corpus, same commit, same
@@ -119,21 +123,14 @@ point and for every speaker - jay_runon, the largest sample at n=57, went 35% ->
 51%. Two runs is not proof, and this repo has measured 10 points of run-to-run
 variance before, but the direction was consistent everywhere.
 
-**microWakeWord stays in Docker**, and the reason is the interesting part: the host
-advantage is op-dependent, not general. The macOS torch build ships without oneDNN
-and measured **12x SLOWER on conv1d** while winning GEMM 3x. openWakeWord's trainable
-model is `Linear` x7 and one LSTM with no convolutions at all - the half that wins.
-mixednet is convolutional - the half that loses. That probe was torch and mWW trains
-with TensorFlow, so it points away from a host port rather than proving one would
-fail; nobody has measured TF the same way, and at 26m06s there is little to chase.
-Either way there is no blanket "native is faster" here.
+**microWakeWord is also faster on the host on a Mac, and the host is the default route there.** The old reason to leave it in Docker was measured in the wrong library: macOS torch ships without oneDNN and measured **12x slower on conv1d**, and mixednet is the convolutional model — a fair prior, but that probe was torch, and mWW trains with TF 2.21.0. The same probe in TF (`tools/tf_probe.py`) reads 36.21 ms/step in the container against 30.86 on the host, with threading making both worse: at these shapes each build runs one op per thread, and the GEMM-bound rest is exactly where Accelerate pays. The other half of a run, Piper, is the *entire* mWW corpus, and the host Piper server is 2.4x the container's (21.66 vs 9.13 clips/s, same versions; the macOS wheel links Accelerate, the linux/arm64 one does not). The full run follows: 14m14s on the host against 26m06s in the container on the same Mac — a day apart, so treat 1.8x as directional and trust the same-day stage measurements behind it. The Docker route stays correct for every other machine, and on a Mac it is still a working fallback; `apple-port.md` phase 3 carries the full table and the caveats.
 
 Do not read the mww result as "the GPU is pointless" either. It is a claim about one
 25,537-parameter model, too small to fill a 3090, in a run that is mostly not
 training: Piper corpus generation is CPU-only on both machines by choice, since
 `--use-cuda` measured 2.5x *slower*.
 
-### Kokoro TTS: three ways to run it, and why the fastest is not adopted
+### Kokoro TTS: three ways to run it, and the speed/quality tradeoff
 
 Corpus generation is the largest stage, so the TTS engine matters more than the
 trainer. Three configurations, all on the M1 Max, all generating the SAME corpus
@@ -145,9 +142,10 @@ trainer. Three configurations, all on the M1 Max, all generating the SAME corpus
 | **Kokoro-FastAPI on the host** | **30m29s** | 47m56s | **82%** |
 | kokoro-mlx, in-process (`--kokoro-url mlx://`) | **19m06s** / 24m54s | 37m / 47m43s | 51% -> 61% |
 
-**MLX generates the corpus 1.2-1.6x faster and produces a worse corpus, so the host
-server is the default.** The regression is specific to run-ons; plain positives are
-comparable.
+**MLX generates the corpus 1.2-1.6x faster and produces a worse corpus on
+run-on; the timing table above assumes `mlx://`, and the host FastAPI server is
+the alternative when the run-on gap matters.** The regression is specific to
+run-ons; plain positives are comparable.
 
 TWO NUMBERS PER MLX CELL, BECAUSE THE SPREAD IS THE POINT. Identical corpus,
 identical engine, two runs a day apart: TTS 19m06s then 24m54s, training 256 then
