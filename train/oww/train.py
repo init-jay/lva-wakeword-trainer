@@ -23,7 +23,6 @@ import warnings
 from pathlib import Path
 
 import numpy as np
-import requests
 import scipy.io.wavfile
 import yaml
 from tqdm import tqdm
@@ -54,7 +53,6 @@ from train.corpus.piper import (generate_piper_samples,  # noqa: E402
 from train.corpus.positives import (PLAIN_SPEED_GRID, PLAIN_SPEEDS,  # noqa: E402
                                     plain_positive_texts)
 from train.corpus.real import copy_real_samples  # noqa: E402
-from train.corpus import kokoro_mlx  # noqa: E402
 from train import ownership  # noqa: E402
 
 warnings.filterwarnings("ignore", message="Reached EOF prematurely")
@@ -477,7 +475,13 @@ def wait_for_kokoro_shutdown(timeout: int = 120):
         print("  no CUDA - not waiting for Kokoro (nothing holds VRAM here)")
         return
 
-    servers = [("kokoro", 8880), ("kokoro2", 8881)]
+    # The NATIVE FastAPI ports, not the protocol ones (8899/8900): this wait is
+    # about VRAM, and VRAM is held by the in-image FastAPI process, which still
+    # listens on 8880 in BOTH kokoro containers - 8881 is only the host-side
+    # mapping of kokoro2's 8880 ("8881:8880" in docker-compose.yml), and the
+    # names here resolve on the compose network, where both answers come off
+    # 8880. The wrapper in front of it holds nothing worth waiting for.
+    servers = [("kokoro", 8880), ("kokoro2", 8880)]
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         alive = []
@@ -544,14 +548,17 @@ def main():
                              "moved the operating point, it did not improve the "
                              "model. Measured in tuning run 11.")
     parser.add_argument("--layer-size", type=int, default=64, choices=[32, 64, 128], help="Network layer size")
-    parser.add_argument("--kokoro-url", default=os.environ.get("KOKORO_URL", "http://localhost:8880"),
-                        help="Kokoro TTS URL. Comma-separate several to split the work "
-                             "across them: one Kokoro process is single-threaded and "
-                             "saturates one core, so more PROCESSES scale where more "
-                             "client threads do not. (Not on Metal, where two "
-                             "instances share one GPU and measured no faster.)\n"
-                             "mlx:// renders in-process instead - see "
-                             "tts-service/README.md.")
+    parser.add_argument("--kokoro-url", default=os.environ.get("KOKORO_URL", "tcp://127.0.0.1:8899"),
+                        help="Kokoro TTS server(s) as tcp:// protocol URL(s), "
+                             "comma-separated to split the work across them: one "
+                             "Kokoro process is single-threaded and saturates one "
+                             "core, so more PROCESSES scale where more client "
+                             "threads do not. Each URL is a tts-protocol server "
+                             "(tts-service/), which fronts the actual engine - "
+                             "kokoro-mlx on a Mac, Kokoro-FastAPI in Docker. "
+                             "The old http:// and mlx:// forms are rejected: they "
+                             "used to mean different backends with different "
+                             "audio.")
     parser.add_argument("--data-dir", default="data/external",
                         help="Where the third-party downloads live: the ACAV100M "
                         "and validation feature .npy files, audioset_16k, fma, "
@@ -634,8 +641,10 @@ def main():
                              "RUNON_TAIL_MS of 150-300 ms. That is run 14's "
                              "alignment regression waiting to happen.")
     parser.add_argument("--piper-url",
-                        default=os.environ.get("PIPER_URL", "piper:10200"),
-                        help="Wyoming TTS host:port for Piper (default: %(default)s)")
+                        default=os.environ.get("PIPER_URL", "tcp://127.0.0.1:8898"),
+                        help="Piper protocol server, tcp://host:port - the port a "
+                             "Piper engine publishes (in-process on a Mac, wrapped "
+                             "Wyoming in Docker) (default: %(default)s)")
     parser.add_argument("--piper-speakers", type=int, default=12,
                         help="Speakers to sample per multi-speaker Piper voice, "
                              "evenly spaced (default: %(default)s). "
@@ -787,9 +796,8 @@ def main():
         piper_voices = []
         kokoro_plain_train, kokoro_plain_test = plain_train, plain_test
         if args.piper_fraction > 0:
-            host, _, port = args.piper_url.rpartition(":")
             piper_voices = select_piper_voices(
-                host, port, wake_word,
+                args.piper_url, wake_word,
                 languages=tuple(args.piper_languages.split(",")),
                 max_speakers=args.piper_speakers)
             if piper_voices:
@@ -814,14 +822,13 @@ def main():
                                 args.tts_workers, args.tts_batch)
 
         if piper_voices:
-            host, _, port = args.piper_url.rpartition(":")
             print(f"\n[Piper TTS]  {len(piper_voices)} voices, "
                   f"{piper_per_voice_train} phrase-alone each "
                   f"(~{args.piper_fraction:.0%} of the phrase-alone budget)")
-            generate_piper_samples(host, int(port), piper_voices, pos_train,
+            generate_piper_samples(args.piper_url, piper_voices, pos_train,
                                    piper_per_voice_train, positive_texts,
                                    PLAIN_SPEED_GRID, "Piper positive train")
-            generate_piper_samples(host, int(port), piper_voices, pos_test,
+            generate_piper_samples(args.piper_url, piper_voices, pos_test,
                                    piper_per_voice_test, positive_texts,
                                    PLAIN_SPEED_GRID, "Piper positive test")
 

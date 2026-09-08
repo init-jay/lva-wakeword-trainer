@@ -21,7 +21,8 @@ SR = 16000
 def to_int16(audio) -> "np.ndarray":
     """float32 in [-1, 1] -> int16, matching what the HTTP path returns.
 
-    Moved verbatim from corpus/kokoro_mlx.py. The server sends a WAV that scipy
+    Moved verbatim from the old in-repo MLX adapter (now
+tts-service/engines/kokoro_mlx/). The server sends a WAV that scipy
     reads as int16 already; MLX hands back floats, so the scaling happens here.
     Clipped rather than normalised: normalising would make each clip's gain depend
     on its own peak, which is a per-clip volume difference the model could learn
@@ -87,3 +88,31 @@ def time_stretch(x, factor: float, sr: int = 16000,
     covered = weight > 1e-6
     out[covered] /= weight[covered]
     return out[:int(len(x) * factor)]
+
+
+def phrase_end_sample(timestamps, wake_word: str, sr: int = 16000):
+    """Sample index where the wake word ends, or None if the words do not line up.
+
+    Verified rather than assumed: the timestamps are matched against the words of
+    the wake phrase before their times are used. A mismatch (different
+    tokenisation, a normalisation rule splitting a word) would otherwise cut at
+    the wrong place silently, and a wrong cut here is what broke the alignment
+    last time.
+
+    The timestamps are the protocol's word-time dicts (wire.py) - the shape the
+    Kokoro servers return and the one the mlx fork normalises to. The cut point
+    is computed from them on the CLIENT side, which is why this function lives
+    here rather than in any engine: nothing engine-specific about it.
+    """
+    if not timestamps:
+        return None
+
+    strip = str.maketrans("", "", ".,!?;:\"'")
+    expected = [w.translate(strip).lower() for w in wake_word.split()]
+    got = [str(t.get("word", "")).translate(strip).lower()
+           for t in timestamps[:len(expected)]]
+    if got != expected:
+        return None
+
+    end = timestamps[len(expected) - 1].get("end_time")
+    return int(end * sr) if end else None

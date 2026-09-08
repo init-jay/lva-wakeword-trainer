@@ -1,15 +1,19 @@
-"""Kokoro over HTTP (Kokoro-FastAPI): the CPU and CUDA route.
+"""Kokoro over HTTP (Kokoro-FastAPI): the Docker route, CPU and CUDA alike.
 
-Extracted from train/corpus/kokoro.py as a verbatim move, not a rewrite - sixteen
-tuning runs are calibrated against that behaviour and anything that looks like it
-wants tidying probably encodes a measured result (see the function notes). The one
-deliberate exception is documented at the bottom: the 24 kHz -> 16 kHz resample is
-now `resample_poly` instead of `resample`, matching what the piper path already
-did, for the reasons stated there.
+The Kokoro HTTP protocol adapter since the tts-service split (2026-09-08): it
+fronts a running Kokoro-FastAPI process and exposes it on the repo's TTS
+protocol port. It lives in the docker/ build context (not in tts-service/)
+because it exists only where a Kokoro-FastAPI image runs: the compose service
+runs the FastAPI server and this wrapper in one container -
 
-Moved from train/corpus/kokoro.py to tts-service (2026-09-08); that path is now a
-shim re-exporting this module. The pool, probe and batched generator moved to
-tts_service/client.py beside it.
+    python -m kokoro_http_engine --url http://127.0.0.1:8880 --port 8899
+
+(docker/Dockerfile.kokoro, whose CMD starts both). On a Mac this module is
+never run at all: the mlx engine is a separate in-process server
+(tts-service/engines/kokoro_mlx/), and that is why there is no `engines/kokoro`
+project next to it. The URL-facing functions below are what train/corpus/
+kokoro.py used to be before it became a thin re-export of the protocol
+client.
 """
 import base64
 import io
@@ -22,8 +26,7 @@ import requests
 from scipy.io import wavfile
 from scipy.signal import resample_poly
 
-from . import kokoro_mlx
-from ..engine import Engine, split_joined
+from tts_protocol.engine import Engine, split_joined
 
 # Same filter the old module set: the TTS reads below occasionally hit a partial
 # read and urllib3 warns, once per clip.
@@ -55,21 +58,6 @@ def _wav_to_16k_int16(content: bytes) -> np.ndarray:
 
 def get_kokoro_voices(kokoro_url: str) -> list:
     """Get all available English voices from Kokoro."""
-    if kokoro_mlx.is_mlx_url(kokoro_url):
-        ok, why = kokoro_mlx.available()
-        if not ok:
-            print(f"ERROR: {kokoro_url} requested but MLX is not usable: {why}")
-            sys.exit(1)
-        # Loading the model here rather than lazily on the first clip, so a failure
-        # lands before the run prints its plan - the same reason the HTTP path probes
-        # the server up front instead of discovering it is down mid-corpus.
-        english = kokoro_mlx.voices()
-        print(f"Kokoro voices available: {len(english)} (MLX, in-process)")
-        if len(english) < 40:
-            print(f"  NOTE: the HTTP service offers 42 English voices; this offers "
-                  f"{len(english)}. Voice diversity is a corpus lever - see "
-                  f"tts-service/tts_service/engines/kokoro_mlx.py.")
-        return english
     try:
         r = requests.get(f"{kokoro_url}/v1/audio/voices", timeout=5)
         voices = r.json().get("voices", [])
@@ -80,21 +68,14 @@ def get_kokoro_voices(kokoro_url: str) -> list:
         return english
     except Exception as e:
         print(f"ERROR: Cannot connect to Kokoro at {kokoro_url}: {e}")
-        print("Make sure Kokoro is running:")
-        print("  docker compose up -d kokoro kokoro2")
-        print("  # on the training server, for the GPU image:")
-        print("  docker compose -f docker-compose.yml -f docker-compose.cuda.yml \\")
-        print("      up -d kokoro kokoro2")
+        print("Make sure the Kokoro-FastAPI process it fronts is up - the host uv")
+        print("venv (scripts/start-kokoro-host.sh) or the in-image server (docker)")
+        print("- and that this wrapper was pointed at it with --url.")
         sys.exit(1)
 
 
 def kokoro_tts(kokoro_url: str, voice: str, text: str, speed: float):
-    """Render one utterance as 16 kHz int16 audio, or None on failure.
-
-    "mlx://" means in-process rather than over HTTP - see engines/kokoro_mlx.py.
-    """
-    if kokoro_mlx.is_mlx_url(kokoro_url):
-        return kokoro_mlx.render(voice, text, speed)
+    """Render one utterance as 16 kHz int16 audio, or None on failure."""
     try:
         r = requests.post(
             f"{kokoro_url}/v1/audio/speech",
@@ -124,8 +105,6 @@ def kokoro_tts_timed(kokoro_url: str, voice: str, text: str, speed: float):
 
     Returns (None, None) if the endpoint is unavailable, so callers can fall back.
     """
-    if kokoro_mlx.is_mlx_url(kokoro_url):
-        return kokoro_mlx.render_timed(voice, text, speed)
     try:
         r = requests.post(
             f"{kokoro_url}/dev/captioned_speech",
@@ -178,28 +157,6 @@ def kokoro_tts_batch(kokoro_url: str, voice: str, texts: list, speed: float):
     return split_joined(data, timestamps, texts)
 
 
-def phrase_end_sample(timestamps, wake_word: str, sr: int = 16000):
-    """Sample index where the wake word ends, or None if the words do not line up.
-
-    Verified rather than assumed: the timestamps are matched against the words of
-    the wake phrase before their times are used. A mismatch (different tokenisation,
-    a normalisation rule splitting a word) would otherwise cut at the wrong place
-    silently, and a wrong cut here is what broke the alignment last time.
-    """
-    if not timestamps:
-        return None
-
-    strip = str.maketrans("", "", ".,!?;:\"'")
-    expected = [w.translate(strip).lower() for w in wake_word.split()]
-    got = [str(t.get("word", "")).translate(strip).lower()
-           for t in timestamps[:len(expected)]]
-    if got != expected:
-        return None
-
-    end = timestamps[len(expected) - 1].get("end_time")
-    return int(end * sr) if end else None
-
-
 class KokoroHttpEngine(Engine):
     """One Kokoro-FastAPI server as a registered engine: name is "kokoro-http"."""
 
@@ -218,7 +175,9 @@ class KokoroHttpEngine(Engine):
         except Exception as e:
             return False, f"{type(e).__name__}: {e}"
 
-    def voices(self):
+    def voices(self, **kwargs):
+        # The optional catalog arguments (languages/max_speakers) are Piper's;
+        # this catalog has no options, so they are ignored, not rejected.
         return get_kokoro_voices(self.url)
 
     def timed_render(self, voice, text: str, speed: float = 1.0):

@@ -49,6 +49,8 @@ microwakeword/
 __pycache__/
 *.pyc
 *.egg-info/
+# uv build artifacts from tts-service/tts_protocol.
+**/build/
 
 # OS / IDE / archives
 .DS_Store

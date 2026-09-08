@@ -17,15 +17,16 @@ requires-python = ">=3.11,<3.13"
 #
 # WHAT RUNS WHERE ON A MAC, once this exists:
 #
-#   corpus generation   external servers the trainer only talks to over the
-#                       network: Kokoro and Piper, each a Docker service or a
-#                       host uv venv (scripts/start-kokoro-host.sh /
-#                       scripts/start-piper-host.sh, the latter pinned to the
-#                       same piper-tts 1.7.0 as docker/Dockerfile.piper)
+#   corpus generation   the engine uv projects in tts-service/engines/, each its
+#                       own venv and its own protocol port: kokoro_mlx (8900)
+#                       and piper (8898) - in-process, no Docker, no Wyoming
 #   training            HERE
 #   eval                Docker, unchanged - Dockerfile.eval builds native arm64
 #
 # So this environment covers the one stage that could not move, not the pipeline.
+# It speaks to the engines only through the TTS PROTOCOL (tts-protocol below): no
+# engine package, no engine model weight, nothing with a Metal dependency lands in
+# this venv.
 
 dependencies = [
     # Core, matching docker/requirements.txt. numpy<2 is openWakeWord's constraint,
@@ -38,7 +39,13 @@ dependencies = [
     "pyarrow>=8.0.0,<15.0.0",
     "tqdm",
     "pyyaml",
-    "requests",
+
+    # The TTS PROTOCOL client: train/corpus/kokoro.py and piper.py speak it over
+    # raw TCP sockets. Deliberately NO engine dependency here - the engines run
+    # in their own uv projects (tts-service/engines/), which is exactly the split
+    # the Docker images make. (requests is gone for the same reason: the client
+    # needs no HTTP at all.)
+    "tts-protocol",
 
     # PLAIN torch from PyPI, NOT the cu121 index the Dockerfile uses. The macOS arm64
     # wheels carry the MPS backend already; there is no separate "torch-metal" to
@@ -86,10 +93,12 @@ dependencies = [
     # RIRs, AudioSet and FMA in download-external-data.sh - runs INSIDE the trainer
     # container, per that script's own usage lines.
     #
-    # It was copied here with the rest of the image's requirements and then blocked
-    # the mlx extra: datasets 2.14.6 caps huggingface-hub below 1.0 and kokoro-mlx
-    # needs >=1.0. Removing an unused pin is the honest fix; an override would have
-    # left datasets installed and quietly wrong.
+    # It was copied here with the rest of the image's requirements and then broke
+    # the resolution of this venv (datasets 2.14.6 caps huggingface-hub below
+    # 1.0, which collided with the engine stack's floor while the mlx extra
+    # still lived here). Nothing on the host training path imports it, so
+    # removing the unused pin is the honest fix; an override would have left
+    # datasets installed and quietly wrong.
     "deep-phonemizer==0.0.19",
 
     # Feature computation. The CPU package, NOT onnxruntime-gpu - which publishes
@@ -119,31 +128,10 @@ dependencies = [
     "ai-edge-litert",
 ]
 
-[project.optional-dependencies]
-# Kokoro TTS in-process, instead of over HTTP to the container or a host server.
-# ~1.7x on the corpus stage at single-clip, ~2.9x batched - see
-# train/corpus/kokoro_mlx.py for the measurements and the two caveats (28 English
-# voices against the service's 42, and unverified pronunciation).
-#
-# THE FORK, NOT UPSTREAM. Upstream computes the per-phoneme durations that word
-# timestamps are derived from and then discards them; the fork returns them. Without
-# timestamps there is no exact run-on cut point, and the estimate-based fallback
-# measured +153 ms late - the error that left microWakeWord with no run-on positives
-# at all. Nothing else differs between the two.
-#
-# OPTIONAL because it is Apple Silicon only and the trainer images must not need it:
-# train/corpus/kokoro_mlx.py imports it lazily and reports why it is unusable rather
-# than failing at import.
-#
-#     uv sync --extra mlx
-mlx = [
-    "kokoro-mlx",
-]
-
 [tool.uv.sources]
-# Pinned to the fork's main. uv records the resolved commit in uv.lock, so a run is
-# reproducible even though this points at a branch.
-kokoro-mlx = { git = "https://github.com/init-jay/kokoro-mlx", branch = "main" }
+# The protocol package: built from source in the repo (setuptools, stdlib-only),
+# so a path source is the whole story - no index, no engine, no Metal.
+tts-protocol = { path = "../tts-service/tts_protocol" }
 
 [tool.uv]
 package = false

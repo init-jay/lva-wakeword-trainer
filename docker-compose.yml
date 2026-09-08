@@ -18,19 +18,19 @@ services:
   kokoro:
     <<: *kokoro
     ports:
-      - "8880:8880"
+      - "8880:8880"   # the raw OpenAI-compatible API - the audit tool, manual checks
+      - "8899:8899"   # the TTS protocol - what the trainers and eval speak
 
   kokoro2:
     <<: *kokoro
     ports:
       - "8881:8880"
+      - "8900:8899"   # same wrapper, second process; host port kept off 8899
 
   piper:
     <<: *piper
     ports:
-      - "10200:10200"
-    command: ["--uri", "tcp://0.0.0.0:10200", "--data-dir", "/data",
-              "--download-dir", "/data", "--voice", "en_US-lessac-medium"]
+      - "8898:8898"   # the TTS protocol - the image's default command serves it
 
   # The eval step has moved out of this file into eval/docker-compose.yml - its
   # own project, because the base file is the training one and an eval-only
@@ -64,10 +64,19 @@ services:
       # rebuilding a CUDA image. Read-only: the trainers read their source, they
       # never write it.
       - ./train:/app/train:ro
-      # The shared TTS layer (engines + the batch algorithm); imported via
-      # train/corpus/__init__.py's sys.path bootstrap. tts-service/README.md.
+      # The TTS protocol client (train/corpus's sys.path bootstrap finds it at
+      # /app/tts-service/tts_protocol). The trainers carry no engine code - the
+      # engines are the `kokoro` and `piper` services. tts-service/README.md.
       - ./tts-service:/app/tts-service:ro
       - ./scripts:/app/scripts:ro
+    environment:
+      # Named explicitly: inside this container the trainers' loopback defaults
+      # point at nothing. The box's run-mww-training.sh passes --kokoro-fraction 0
+      # (all-Piper, matching the services it starts - only piper), but the module
+      # default is a 30% Kokoro mix, and if anyone raises it these names are what
+      # make `docker compose up -d kokoro` all that is needed to back it.
+      - PIPER_URL=tcp://piper:8898
+      - KOKORO_URL=tcp://kokoro:8899,tcp://kokoro2:8899
     shm_size: "8gb"
 
   oww-trainer:
@@ -86,17 +95,21 @@ services:
       # rebuilding a CUDA image. Read-only: the trainers read their source, they
       # never write it.
       - ./train:/app/train:ro
-      # The shared TTS layer (engines + the batch algorithm); imported via
-      # train/corpus/__init__.py's sys.path bootstrap. tts-service/README.md.
+      # The TTS protocol client - same mount as mww-trainer above.
       - ./tts-service:/app/tts-service:ro
       - ./scripts:/app/scripts:ro
     environment:
-      # Both instances; each is a separate single-threaded process.
-      - KOKORO_URL=http://kokoro:8880,http://kokoro2:8880
-    # Deliberately NOT depends_on piper. Nothing in train.py talks to it yet, and
-    # listing it would start two more GPU services for every `compose run oww-trainer`
-    # - including the conversion and eval one-offs - holding VRAM the training run
-    # wants. Start it explicitly: `docker compose up -d piper`.
+      # Both instances; each is a separate single-threaded process. The
+      # protocol port, not the raw API port: the trainer no longer speaks
+      # OpenAI-compatible HTTP.
+      - KOKORO_URL=tcp://kokoro:8899,tcp://kokoro2:8899
+      # The Piper engine service. train.py's own default (127.0.0.1) would be
+      # the CONTAINER's loopback inside here, so it must be named explicitly.
+      - PIPER_URL=tcp://piper:8898
+    # Deliberately NOT depends_on piper. train.py only needs it when
+    # --piper-fraction > 0, and listing it would start the service for every
+    # `compose run oww-trainer` - including the conversion and eval one-offs.
+    # Start it explicitly: `docker compose up -d piper`.
     depends_on:
       - kokoro
       - kokoro2

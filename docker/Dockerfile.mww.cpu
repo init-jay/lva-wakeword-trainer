@@ -99,8 +99,10 @@ print('visible GPUs:', tf.config.list_physical_devices('GPU') or 'none - expecte
 
 # COPIED so the import check runs at BUILD time; docker-compose mounts train/ and
 # tts-service/ over the copies at runtime. Same split, same reasons, as every other
-# trainer image here. The shared TTS layer lives in tts-service/ at the repo root;
+# trainer image here. The TTS protocol client lives in tts-service/ at the repo root;
 # train/corpus/__init__.py adds it to sys.path, so the import below exercises it.
+# The engines are not in this image - the trainers are protocol clients and the
+# engines are the kokoro/piper compose services.
 COPY train/ ./train/
 COPY tts-service/ ./tts-service/
 

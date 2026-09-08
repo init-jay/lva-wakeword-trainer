@@ -1,26 +1,32 @@
-"""Piper sample generation for the wake-word corpus (policy layer over tts_service).
+"""Piper sample generation for the wake-word corpus (policy layer over tts-protocol).
 
 microWakeWord generates its positives with Piper, so this is the second engine the
 shared corpus layer needs. Deliberately shaped like the Kokoro path in train.py -
 phrase at a spread of speeds across a spread of voices, 16 kHz mono WAVs into a
 directory - so both trainers can consume either engine's output, or both at once.
 
-SPLIT, 2026-09-08: the WIRE PROTOCOL (the Wyoming framing, piper_voices,
-piper_render, and all of the notes that justified how they behave - the speed
-problem, the stochastic rendering, the live-service exercise, the one-server-one-
-request constraint) moved to tts-service/tts_service/engines/piper.py. What stays
-here is wake-word TRAINING POLICY: the exclusion tables, the sex table, voice
-selection, and the corpus generator. A new engine does not get these tables; a new
-wake word does.
+SPLIT, 2026-09-08: the transport (the Wyoming framing, and since this same date
+the in-process variant - see below) moved out of this package. This module speaks
+the repo's TTS PROTOCOL (tts-service/tts_protocol/) as a TCP client: it points at
+a `tcp://` URL (the protocol port a Piper engine publishes) and does not care
+what the server runs behind it. What stays here is wake-word TRAINING POLICY:
+the exclusion tables, the sex table, voice selection, and the corpus generator.
+A new engine does not get these tables; a new wake word does.
 
-The protocol's own justifications travelled with it - THE SPEED PROBLEM (why speed
-is WSOLA, not resampling), PIPER IS STOCHASTIC, the live-service exercise, and the
-one-server-one-request constraint. They live in that module's docstring, because
-the code they explain now lives there.
-
+TWO MACHINES, ONE ENGINE: on a Mac it is the `uv` project
+(`uv run --project tts-service/engines/piper python -m piper_engine`, piper-tts
+1.7.0 loaded directly, no Wyoming at all); on the CUDA box the Docker image
+(docker/Dockerfile.piper) bakes in that SAME project - one code path, one G2P
+pin, both machines render from it. Both speak the identical protocol, so the
+code in this file is the same on both machines - only the URL differs. The
+protocol's own justifications (THE SPEED PROBLEM - why speed is WSOLA, not
+resampling; PIPER IS STOCHASTIC; the one-server-one-request constraint) live in
+that engine's docstring (tts-service/engines/piper), because the code they
+explain lives there.
 """
 
 import sys
+import threading
 import uuid
 from pathlib import Path
 
@@ -28,10 +34,34 @@ import numpy as np
 import scipy.io.wavfile
 from tqdm import tqdm
 
-from tts_service.audio import SR  # noqa: E402  (re-exported name, now defined once)
-from tts_service.engines.piper import piper_render, piper_voices  # noqa: E402, F401
+from tts_protocol.audio import SR  # noqa: E402  (re-exported name, now defined once)
+from tts_protocol.client import TtsClient
 
-# SR = 16000 lives in tts_service.audio; the name stays public from this module.
+# SR = 16000 lives in tts_protocol.audio; the name stays public from this module.
+
+# One TtsClient per tcp:// URL, shared across calls (the client caches the
+# voice catalog itself).
+_CLIENTS = {}
+_CLIENTS_LOCK = threading.Lock()
+
+
+def _client(piper_url: str) -> TtsClient:
+    with _CLIENTS_LOCK:
+        c = _CLIENTS.get(piper_url)
+        if c is None:
+            c = TtsClient(piper_url)
+            _CLIENTS[piper_url] = c
+        return c
+
+
+def _piper_render(piper_url, voice, speaker, text, speed=1.0):
+    """One Piper clip over the protocol. Raises on failure (the PIPER
+    convention: the error envelope names the voice) - the caller reports which
+    (voice, speaker) failed."""
+    v = (voice, speaker) if speaker is not None else voice
+    audio, _ = _client(piper_url).timed_render(v, text, speed)
+    return audio
+
 
 # Voices that mispronounce the wake word, per wake word. THE PIPER EQUIVALENT OF
 # MISPRONOUNCING_VOICES in corpus/negatives.py, AND IT IS NOT OPTIONAL.
@@ -110,8 +140,8 @@ MISPRONOUNCING_PIPER_VOICES: dict[str, list[str]] = {
 # / 106 pairs capped - the same 106 the compose-era run saw, so the English selection
 # set has not moved since the audit era's known exposure. The growth is voices in
 # other languages, which the languages filter already excludes. Widening
-# --piper-languages is a new unaudited set until tools/audit_voices.py --tts piper
-# has run against the instance that generates the corpus.
+# --piper-languages is a new unaudited set until tools/audit_voices.py has
+# run against the instance that generates the corpus.
 #
 # TO RECLAIM THEM: audit these ten against the instance that generates the corpus,
 # then move them into MISPRONOUNCING_PIPER_VOICES or delete them, and add their F0 to
@@ -270,9 +300,12 @@ def voice_sex(voice: str, speaker=None) -> str:
     return PIPER_VOICE_SEX.get(voice, "u")
 
 
-def generate_piper_samples(host, port, voices, output_dir: Path,
+def generate_piper_samples(piper_url: str, voices, output_dir: Path,
                            samples_per_voice: int, texts, speeds, desc="Piper"):
     """Render `samples_per_voice` clips for each voice into `output_dir`.
+
+    `piper_url` is a `tcp://` protocol URL - the port a Piper engine publishes
+    (the in-process server on a Mac, the wrapped Wyoming service in Docker).
 
     Signature and sampling deliberately mirror train.py's generate_kokoro_samples,
     so the two are substitutable clip-for-clip: same per-voice budget, same
@@ -289,17 +322,19 @@ def generate_piper_samples(host, port, voices, output_dir: Path,
     are skipped by the child-range lever rather than mis-shifted - Piper voice names
     carry no sex marker to pick a ratio from. See corpus/augment.py.
 
-    VOICE IS THE OUTER LOOP ON PURPOSE - DO NOT REORDER. wyoming-piper holds exactly
-    one loaded voice in a module-level global and reloads it whenever a request names
-    a different one (handler.py:333-346, `if voice_name != _VOICE_NAME`). Iterating
-    texts or speeds outside voices would rebuild the InferenceSession on every
-    request - under --use-cuda a fresh CUDA session each time, far more expensive
-    than the synthesis itself.
+    VOICE IS THE OUTER LOOP ON PURPOSE - DO NOT REORDER. Every Piper server holds
+    exactly one loaded voice at a time and reloads it when a request names a
+    different one: the Wyoming server in a module-level global (handler.py:333-346,
+    `if voice_name != _VOICE_NAME`), the in-process server in its single kept model.
+    Iterating texts or speeds outside voices would rebuild the InferenceSession on
+    every request - under --use-cuda a fresh CUDA session each time, far more
+    expensive than the synthesis itself.
 
-    The same global is why one server serves strictly one request at a time, and why
-    client concurrency measured as pure queueing (docker-compose.yml). Parallelism
-    has to come from separate instances, each with its own voice - which means
-    sharding a multi-voice corpus BY VOICE across instances, never round-robin.
+    The same one-voice-at-a-time property is why one server serves strictly one
+    request at a time, and why client concurrency measured as pure queueing
+    (docker-compose.yml). Parallelism has to come from separate instances, each
+    with its own voice - which means sharding a multi-voice corpus BY VOICE across
+    instances, never round-robin.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -314,11 +349,11 @@ def generate_piper_samples(host, port, voices, output_dir: Path,
     unknown_sex = set()
     for voice, speaker, text, speed in tqdm(jobs, desc=desc, unit="clip"):
         try:
-            audio = piper_render(host, port, voice, speaker, text, speed)
+            audio = _piper_render(piper_url, voice, speaker, text, speed)
         except Exception as e:
             print(f"  Error rendering {voice}/{speaker} at {speed}x: {e}")
             continue
-        if audio.size < 480:
+        if audio is None or audio.size < 480:
             continue
 
         # piper_p{sex}_{voice}[_{speaker}]_{uuid}.wav
@@ -343,9 +378,10 @@ def generate_piper_samples(host, port, voices, output_dir: Path,
     return written
 
 
-def select_piper_voices(host, port, wake_word: str, languages=("en_US", "en_GB"),
+def select_piper_voices(piper_url: str, wake_word: str, languages=("en_US", "en_GB"),
                         max_speakers: int = 12) -> list:
-    """Enumerate Piper voices, drop the ones that say the wrong thing, report cover.
+    """Enumerate Piper voices from the `tcp://` server, drop the ones that say
+    the wrong thing, report cover.
 
     The exclusion step is the whole point. Six of 42 Kokoro voices mispronounce
     "hey seeree" and that was ~14% of the synthetic corpus mislabelled as positives
@@ -354,13 +390,14 @@ def select_piper_voices(host, port, wake_word: str, languages=("en_US", "en_GB")
     """
     safe_name = wake_word.replace(" ", "_").lower()
     try:
-        found = piper_voices(host, int(port), languages=tuple(languages),
-                             max_speakers=max_speakers)
+        found = _client(piper_url).voices(languages=tuple(languages),
+                                          max_speakers=max_speakers)
     except Exception as e:
-        print(f"  ERROR: could not reach Piper at {host}:{port}: {e}")
-        print("         Start it with `docker compose up -d piper` (in-Docker runs),")
-        print("         or `scripts/start-piper-host.sh` (host runs, Apple Silicon),")
-        print("         or point --piper-url at an already-running server.")
+        print(f"  ERROR: could not reach the Piper protocol server at {piper_url}: {e}")
+        print("         Mac:  `uv run --project tts-service/engines/piper "
+              "python -m piper_engine --port 8898`")
+        print("         Docker: `docker compose up -d piper` (publishes 8898),")
+        print("         then point --piper-url at tcp://127.0.0.1:8898.")
         sys.exit(1)
 
     bad = set(MISPRONOUNCING_PIPER_VOICES.get(safe_name, []))
@@ -371,8 +408,8 @@ def select_piper_voices(host, port, wake_word: str, languages=("en_US", "en_GB")
         print("           Nothing has been excluded, so any voice whose espeak-ng")
         print("           g2p guesses the wake word wrong is contributing")
         print("           MISLABELLED POSITIVES. Six of 42 Kokoro voices did exactly")
-        print("           that (~14% of that corpus). Run audit_voices.py --tts piper,")
-        print("           listen to the shortlist, and fill the list in.")
+        print("           that (~14% of that corpus). Run audit_voices.py --tts",)
+        print("           tcp://<that instance>, listen to the shortlist, and fill the list in.")
 
     # Match both forms. The audit scores SPEAKERS - en_US-l2arctic-medium ran from
     # :ASI at 0% to :PNV at 100% on identical phonemes - so most entries are

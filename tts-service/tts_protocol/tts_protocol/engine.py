@@ -1,22 +1,17 @@
 """What a TTS engine is, and the one batch algorithm the timestamp engines share.
 
 An Engine is a way to turn (voice, text, speed) into 16 kHz mono int16 audio.
-Three are registered in engines/__init__.py - kokoro-mlx, kokoro-http and piper -
-and the registry is open, so a fourth engine is a new module plus one table row,
-not a new caller change.
+The server side of this repo is Engine implementations in tts-service/engines/,
+one uv project per engine; the client side is TtsClient (client.py), which
+also conforms to this interface so the same corpus code drives an in-process
+engine and a remote one identically.
 
-    engine = tts_service.engines_from_spec("kokoro-mlx")[0]   # or a URL, below
-    audio  = engine.render("af_bella", "hey seeree", 1.0)
-    clips  = engine.batch("af_bella", 1.0, ["a", "b", "c"])   # see batch()
-
-The three methods a caller may rely on:
-
-    available()   -> (bool, reason). Never raises. Preflights before a long run.
-    voices(...)   -> the engine's voice catalog (shape is engine-specific: Kokoro
-                     voice ids, (voice, speaker) pairs for Piper).
-    render(...)   -> 16 kHz int16 or None
-    batch(...)    -> one render per text, or one JOINED render split back apart -
-                     see batch() for why that distinction is the whole speed win.
+    engine.available()                          (bool, reason); never raises
+    voices = engine.voices(max_speakers=...)    engine-specific shape: Kokoro
+                                               voice ids, (voice, speaker)
+                                               pairs for Piper
+    audio, ts = engine.timed_render(v, text, s) 16 kHz int16 or None
+    clips   = engine.batch(v, s, ["a", "b"])    see batch()
 
 Two conventions, inherited from the corpus layer they were extracted from:
 
@@ -34,6 +29,13 @@ class Engine:
     # Whether timed_render returns per-word start/end times. This is what makes
     # batch() a real batch rather than a loop - see batch().
     supports_timestamps = False
+
+    # Whether voices() returns (voice, speaker) pairs (Piper) rather than plain
+    # names (Kokoro). The protocol carries the flag (wire.py); a local engine
+    # declares it here so both sides of that wire agree with the process that
+    # never crosses one.
+    speaker_voices = False
+
 
     # How the client generator drives this engine:
     #   "batch"   - join a group of texts into one render and split on word

@@ -14,10 +14,11 @@ convention (kokoro_af_bella_<uuid> -> "af" -> female; Piper clips are named
 piper_p{sex}_... so the same extraction works) - see the function docstring for the
 unknown-sex case it skips.
 
-time_stretch moved to tts-service on 2026-09-08 (tts_service/audio.py) because the
+time_stretch moved to tts-service on 2026-09-08 (tts_protocol/audio.py) because the
 shared piper engine applies speed with it and that layer must not import train/;
 this module re-exports it, so `from train.corpus.augment import time_stretch`
 keeps working everywhere, and the note about scipy-only inside it now lives there.
+(2026-09-09: the monolith became the protocol package; same module, new name.)
 """
 
 from fractions import Fraction
@@ -28,7 +29,7 @@ import scipy.io.wavfile
 from scipy.signal import resample_poly
 from tqdm import tqdm
 
-from tts_service.audio import time_stretch  # noqa: E402  (re-export; see module docstring)
+from tts_protocol.audio import time_stretch  # noqa: E402  (re-export; see module docstring)
 
 # Vocal-tract-length perturbation, per voice sex.
 #

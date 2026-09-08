@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""Generate a synthetic positive corpus for wake-word evaluation, rendering with
-the shared tts-service layer (Kokoro-FastAPI over HTTP, in-process MLX on Apple
-Silicon, or Piper over Wyoming).
+"""Generate a synthetic positive corpus for wake-word evaluation, speaking the repo's
+TTS protocol (tts-service/tts_protocol) to whatever engine the URL points at.
 
 Read the output carefully, because this corpus is not a generalisation test.
 `train.py` generates its positives from every English Kokoro voice at speeds 0.7-1.3,
@@ -41,23 +40,25 @@ grouped by it afterwards.
 
 Examples
 --------
-    # everything, against a Kokoro-FastAPI server on the LAN
+    # everything, against the MLX engine on the Mac (or the Docker kokoro service)
     python -m eval.generate_positives --wake-word "hey seeree" \\
-        --url http://192.168.2.14:8880/v1/audio/speech
+        --url tcp://127.0.0.1:8900
 
-    # in-process Kokoro on Apple Silicon: no server, the MLX model in this process
-    python -m eval.generate_positives --wake-word "hey seeree" --url mlx://
-
-    # Piper instead of Kokoro (the voice list is then the audited selection from
-    # train/corpus/piper.py, so its exclusion tables apply)
+    # Piper instead of Kokoro (protocol port 8898; the voice list is then the
+    # audited selection from train/corpus/piper.py, so its exclusion tables apply)
     python -m eval.generate_positives --wake-word "hey seeree" \\
-        --tts piper --piper-url 127.0.0.1:10200
+        --tts piper --piper-url tcp://127.0.0.1:8898
 
     # just the axis you care about
     python -m eval.generate_positives --wake-word "hey seeree" --sweeps speed
 
     # see what would be produced without calling the server
     python -m eval.generate_positives --wake-word "hey seeree" --dry-run
+
+`--url` accepts ONLY the `tcp://` protocol form, for the reason spelled out in
+generate_negatives.py's docstring: the old `http://...` and `mlx://` forms used
+to mean different backends with different audio. `--dry-run` constructs the
+engine but lists instead of rendering.
 
 Then score with, noting that --positives here OVERRIDES the held-out recordings the
 gates normally run on - this measures the sweeps, not speaker generalisation:
@@ -81,11 +82,13 @@ except ImportError:
     import paths
 
 sys.path.insert(0, str(paths.REPO_ROOT))
-# The shared TTS layer lives in tts-service/ at the repo root; the hyphen in the
-# name means that string is not importable, so its parent goes on sys.path.
-sys.path.insert(0, str(paths.REPO_ROOT / "tts-service"))
+# The TTS protocol package lives at tts-service/tts_protocol/ at the repo root;
+# the hyphens in both directory names mean that string is not importable, so its
+# parent goes on sys.path. The engines are NOT here - they run as separate
+# servers that this script only speaks to over TCP.
+sys.path.insert(0, str(paths.REPO_ROOT / "tts-service" / "tts_protocol"))
 
-import tts_service  # noqa: E402
+from tts_protocol import TtsClient  # noqa: E402
 from train.corpus.piper import select_piper_voices  # noqa: E402
 
 SR = 16000
@@ -206,10 +209,10 @@ def render_jobs(jobs, args):
     Grouped by (voice, speed): a timestamp engine joins the group's distinct texts
     into ONE request and splits it back on word timestamps - the same win the
     corpus generator measures (a short Kokoro request is ~3/4 fixed overhead; see
-    tts-service/tts_service/engines/kokoro_http.py). An engine without word
-    timestamps (Piper) renders per clip, in voice-outer order: its server serves
-    one request at a time, so order is a correctness property, not a preference
-    (tts-service/tts_service/engines/piper.py). Deduplication is by text, so a
+    tts_protocol/engine.py's batch()). An engine without word timestamps (Piper)
+    renders per clip, in voice-outer order: its server serves one request at a
+    time, so order is a correctness property, not a preference
+    (tts-service/engines/piper). Deduplication is by text, so a
     phrase rendered at 1.0 for the voices sweep is not rendered again for the
     level sweep.
     """
@@ -252,15 +255,15 @@ def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--wake-word", required=True, help="The phrase to render")
-    p.add_argument("--url", default="http://localhost:8880/v1/audio/speech",
-                   help="Kokoro engine spec: an OpenAI-compatible server URL (the "
-                        "legacy full /v1/audio/speech endpoint is accepted), or 'mlx://' "
-                        "for in-process MLX (default: %(default)s)")
+    p.add_argument("--url", default="tcp://127.0.0.1:8900",
+                   help="Kokoro protocol server: a tcp:// spec (the MLX engine's"
+                        " default port on a Mac, the Docker kokoro service's 8899 on"
+                        " the box). Only tcp:// is accepted (default: %(default)s)")
     p.add_argument("--tts", default="kokoro", choices=["kokoro", "piper"],
                    help="TTS engine (default: %(default)s)")
-    p.add_argument("--piper-url", default="127.0.0.1:10200",
-                   help="Piper Wyoming server host:port, used with --tts piper "
-                        "(default: %(default)s)")
+    p.add_argument("--piper-url", default="tcp://127.0.0.1:8898",
+                   help="Piper protocol server tcp:// spec, used with --tts piper"
+                        " (default: %(default)s)")
     p.add_argument("--max-speakers", type=int, default=12,
                    help="Piper: cap on speakers per multi-speaker model "
                         "(default: %(default)s)")
@@ -290,8 +293,7 @@ def main():
     # Engine construction is offline (no I/O), so it happens before the dry-run
     # even though voice SELECTION for Piper needs the live catalog.
     if args.tts == "piper":
-        host, _, port = args.piper_url.rpartition(":")
-        args.engine = tts_service.PiperWyomingEngine(host, int(port))
+        args.engine = TtsClient(args.piper_url)
         if args.dry_run:
             args.voices = ["<live Piper catalog>"]
         else:
@@ -299,15 +301,12 @@ def main():
             # of this wake word failed the audit, so the corpus cannot contain
             # mislabelled phrases - the failure mode the Kokoro side spent eleven
             # runs discovering (train/corpus/piper.py).
-            args.voices = select_piper_voices(host, int(port), args.wake_word,
+            args.voices = select_piper_voices(args.piper_url, args.wake_word,
                                               max_speakers=args.max_speakers)
             if not args.voices:
                 sys.exit("ERROR: no usable Piper voices")
     else:
-        url = args.url
-        if url.endswith("/v1/audio/speech"):
-            url = url[: -len("/v1/audio/speech")]
-        args.engine = tts_service.engines_from_spec(url)[0]
+        args.engine = TtsClient(args.url)
         args.voices = VOICES
 
     jobs = plan(args)

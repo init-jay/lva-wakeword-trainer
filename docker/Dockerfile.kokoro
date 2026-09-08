@@ -28,6 +28,57 @@
 ARG KOKORO_IMAGE=ghcr.io/remsky/kokoro-fastapi-cpu:v0.8.1
 FROM ${KOKORO_IMAGE}
 
-# Deliberately empty. Anything added here would apply to the CPU and GPU variants
-# alike and would need testing against both; the server is configured through
-# docker-compose.yml instead.
+# Deliberately no server configuration here: the two things this image owns -
+# what it fronts (the ARG above) and what it exposes (below) - are the whole
+# surface, and the rest is compose's business.
+# THE TTS PROTOCOL WRAPPER, IN THE SAME CONTAINER. The trainers and eval no
+# longer speak this image's OpenAI-compatible API - they speak the repo's TTS
+# protocol over TCP. The wrapper (docker/tts_engines/kokoro_http_engine) is a
+# thin adapter that fronts the in-image FastAPI server, so the one container
+# serves both: 8899 for the protocol, 8880 for anything that still speaks the
+# raw API (the audit tool does).
+#
+# tts-protocol is installed from the repo's own source first, because the
+# wrapper's pyproject deliberately does not depend on it (pip cannot resolve
+# uv-style path sources); both installs are --no-deps because numpy/scipy and
+# requests are already in the base image, and re-resolving them from PyPI
+# here would float exactly the versions the adapters were tested against.
+# If the base image ever moves them, this is where the failure would land -
+# loudly, at build time.
+#
+# The copy dance is not ceremony: the base image runs as appuser (uid 1000)
+# with a read-only root-owned /opt, and its `python` is a uv-managed venv at
+# /app/.venv (the one the entrypoint runs), so these must be installed INTO
+# that venv or the wrapper's module is invisible to it - while setuptools'
+# egg-info step writes into the source tree it is given, which COPY leaves
+# owned by the build host's uid, so the source has to be re-copied into a
+# directory appuser owns first. The _src trees are left in /tmp - appuser
+# cannot unlink root-owned files and /tmp is ephemeral.
+COPY tts-service/tts_protocol/ /tmp/tts_protocol_src/
+COPY docker/tts_engines/ /tmp/tts_engines_src/
+RUN set -eux; \
+    mkdir /tmp/pipsrc; \
+    cp -r /tmp/tts_protocol_src /tmp/pipsrc/tts_protocol; \
+    cp -r /tmp/tts_engines_src /tmp/pipsrc/tts_engines; \
+    /app/.venv/bin/python -m ensurepip --default-pip; \
+    /app/.venv/bin/python -m pip install --no-cache-dir --no-deps \
+        /tmp/pipsrc/tts_protocol /tmp/pipsrc/tts_engines; \
+    rm -rf /tmp/pipsrc
+
+# 8880: the raw OpenAI-compatible API (audit tool, manual checks).
+# 8899: the TTS protocol - what the trainers and eval speak.
+EXPOSE 8880 8899
+
+# The base image's own entrypoint (uvicorn on 8880) runs in the background;
+# the wrapper is the foreground process, so the container's lifecycle follows
+# the port the trainers actually use. The wrapper's serve() fails fast on a
+# dead backend (the protocol's fail-at-startup guarantee), so the command
+# first waits for FastAPI to answer - the same /v1/audio/voices call the
+# wrapper itself makes - instead of racing it at container start.
+CMD ["sh", "-c", "./entrypoint.sh & \
+     for i in $(seq 1 60); do \
+       /app/.venv/bin/python -c \"import urllib.request; \
+       urllib.request.urlopen('http://127.0.0.1:8880/v1/audio/voices', timeout=2)\" 2>/dev/null && break; \
+       sleep 1; done; \
+     exec /app/.venv/bin/python -m kokoro_http_engine \
+          --url http://127.0.0.1:8880 --host 0.0.0.0 --port 8899"]

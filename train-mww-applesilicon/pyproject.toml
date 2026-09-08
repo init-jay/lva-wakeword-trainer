@@ -18,10 +18,15 @@ requires-python = ">=3.12,<3.13"
 # numpy<2. See docker-compose.yml's mww-trainer comment.
 #
 # WHAT RUNS WHERE ON A MAC:
-#   corpus   scripts/start-piper-host.sh (this pipeline is 100% Piper - there is
-#            no Kokoro half to it) - the host Piper measures 2.4x faster than
-#            the compose piper service on this Mac, so the run script rewrites
-#            PIPER_URL to it
+#   corpus   the in-process Piper engine uv project
+#            (tts-service/engines/piper, port 8898) - piper-tts 1.7.0 loaded
+#            directly, no Wyoming process at all - and, when KOKORO_FRACTION > 0,
+#            the in-process kokoro-mlx engine (tts-service/engines/kokoro_mlx,
+#            port 8900). Both speak the TTS protocol, which is all this venv
+#            carries (tts-protocol below); neither engine package nor model
+#            weight lands here. The host Piper measures 2.4x faster than the
+#            compose piper service on this Mac, so the run script points
+#            PIPER_URL at the host engine
 #   features, train, manifest   HERE
 #   eval   Docker, unchanged
 #
@@ -73,7 +78,16 @@ dependencies = [
     # train-applesilicon has neither need.
     "scipy",
     "tqdm",
+
+    # The TTS protocol client: train/corpus/kokoro.py and piper.py speak it over
+    # raw TCP sockets (tts-protocol, path source below). The engines themselves
+    # run in their own uv projects and carry their own dependencies - same split
+    # as the Docker images.
+    "tts-protocol",
 ]
+
+[tool.uv.sources]
+tts-protocol = { path = "../tts-service/tts_protocol" }
 
 [tool.uv]
 package = false

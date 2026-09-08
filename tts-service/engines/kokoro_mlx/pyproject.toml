@@ -1,0 +1,43 @@
+[project]
+name = "tts-engine-kokoro-mlx"
+version = "0.1.0"
+description = "tts-protocol server running Kokoro-82M in-process via MLX (Apple Silicon)"
+# <3.13 to match the fork: it pins numpy <3 and pulls misaki/packse, which are
+# not 3.13-clean (the train-applesilicon environment carries the same bound).
+requires-python = ">=3.11,<3.13"
+
+dependencies = [
+    "tts-protocol",
+    "numpy",
+    "scipy",
+    "kokoro-mlx",
+    # misaki's G2P loads this spacy model at first render, and the fork's own
+    # downloader installs it into whatever venv `uv` happens to pick rather
+    # than this one (measured: it landed in preflight/.venv), so the first clip
+    # of a run fails with an opaque [E050]. Declaring it here puts it in THIS
+    # venv. 3.8.0 is what the fork's downloader fetches.
+    "en-core-web-sm==3.8.0",
+]
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+# The fork of gabrimatic/kokoro-mlx that returns word timestamps - the cut
+# point for the run-on positives comes from them. Pinned to the commit the
+# train-applesilicon environment was measured against: the lock file resolves
+# the fork to init-jay/kokoro-mlx at 422fc319 (the older jayb3rmy spelling of
+# the same account no longer exists upstream). The module docstring carries
+# the measurements.
+kokoro-mlx = { git = "https://github.com/init-jay/kokoro-mlx", rev = "422fc319566f2a667133d468eb958a17d8130045" }
+tts-protocol = { path = "../../tts_protocol" }
+# Not on PyPI: spacy model wheels ship as GitHub release artifacts, which is
+# what the fork's own downloader fetches (and mis-installs, see above).
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["kokoro_mlx_engine"]

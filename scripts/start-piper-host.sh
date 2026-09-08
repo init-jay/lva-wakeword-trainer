@@ -2,12 +2,13 @@
 #
 # Run Piper TTS on the HOST, as a Wyoming server on port 10200.
 #
-# THIS IS THE HOST COUNTERPART TO THE COMPOSE `piper` SERVICE. docker-compose.yml
-# runs rhasspy/wyoming-piper (docker/Dockerfile.piper) as `piper` on port 10200,
-# and the containerized trainers reach it as `piper:10200` on the compose
-# network. A host process - the Apple Silicon trainer,
-# scripts/run-oww-training-applesilicon.sh --piper-fraction N - cannot resolve
-# that name, so this is the same server, natively, on 127.0.0.1:10200.
+# STATUS: this is now a DEBUGGING server, not a training or auditing one. Training
+# corpora are rendered by the in-process engine in tts-service/engines/piper (protocol
+# port 8898), and tools/audit_voices.py and bench_tts.py speak the protocol, not
+# Wyoming - to audit the piper engine, point them at that same 8898 server, since
+# it IS the engine. What this host process is for now is poking at the raw Wyoming
+# protocol directly (and any external consumer that needs one). Keep the pins in
+# lockstep with the in-process engine's pyproject
 #
 # MIRRORS start-kokoro-host.sh ON PURPOSE:
 #   - a uv venv under data/external/ with pinned packages, not a uv project
@@ -17,23 +18,23 @@
 #   - one foreground process in its own terminal; the run script preflights
 #     the port and points here if the server is missing.
 #
-# THE PINS MATCH THE CONTAINER, AND THAT IS NOT COSMETIC.
-# docker/Dockerfile.piper is `FROM rhasspy/wyoming-piper:2.4.3`, and that
-# image carries piper-tts 1.7.0 in its /usr/src/.venv (checked 2026-09-07 by
-# running the image). A fresh install today resolves 1.8.0 - a different G2P
-# release - and the MISPRONOUNCING/UNAUDITED_PIPER_VOICES exclusion lists in
-# train/corpus/piper.py were audited against this voice set and this G2P
-# (piper.py header). Bump both here and in Dockerfile.piper
-# together, the way the Kokoro pins are bumped together.
+# THE PINS MATCH EVERY OTHER PIPER IN THE REPO, AND THAT IS NOT COSMETIC.
+# piper-tts 1.7.0 is what tts-service/engines/piper (the Mac training engine)
+# pins and what docker/Dockerfile.piper pip-installs (checked 2026-09-07, when
+# it was still the rhasspy/wyoming-piper:2.4.3 image's /usr/src/.venv). A fresh
+# install today resolves 1.8.0 - a different G2P release - and the
+# MISPRONOUNCING/UNAUDITED_PIPER_VOICES exclusion lists in train/corpus/piper.py
+# were audited against this voice set and this G2P (piper.py header). Bump all
+# three together: this script, the engine's pyproject, and Dockerfile.piper.
 #
 #   ./scripts/start-piper-host.sh                  # run (foreground)
 #   ./scripts/start-piper-host.sh --venv-only      # (re)build the venv and stop
 #   PIPER_PORT=10300 ./scripts/start-piper-host.sh # a different port
 #
-# The port defaults to 10200, which PIPER_URL and the run script expect. If the
-# compose `piper` service is up on this machine at the same time, its published
-# port collides with this one; pick a different PIPER_PORT and export
-# PIPER_URL=<host>:<port> for the run script.
+# The port defaults to 10200 (the historical Wyoming port; nothing in the repo
+# speaks to it by default any more). If the compose `piper` service is up on
+# this machine at the same time, its published 8898 does not collide, but pick
+# a different PIPER_PORT anyway if you have other listeners around.
 #
 # VOICES. The default voice (en_US-lessac-medium) is fetched during setup,
 # below, and every other voice is fetched by the server on first use into
@@ -51,7 +52,7 @@ PYTHON_VERSION="3.12"
 DEFAULT_VOICE="en_US-lessac-medium"
 PIPER_PORT="${PIPER_PORT:-10200}"
 
-# Match the rhasspy/wyoming-piper:2.4.3 image. Bump together with Dockerfile.piper.
+# Match tts-service/engines/piper and Dockerfile.piper. Bump all three together.
 PIP_VERSIONS=(wyoming-piper==2.4.3 piper-tts==1.7.0)
 
 if [[ ! -x "$VENV_PY" || "${1:-}" == "--venv-only" ]]; then

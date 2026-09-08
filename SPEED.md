@@ -272,7 +272,7 @@ Fixing it recovered run-on recall by +10 to +14 points at every operating point 
 6/32 false accepts upward, which confirms the cut was the mechanism. It did not close
 the gap: 84/61 against the host server's 90/82. Something in the audio itself - bf16
 weights, misaki phonemisation - still costs run-on detection, and that is unexplained.
-See `BUGREPORT-kokoro-mlx.md` and `train/corpus/kokoro_mlx.py`.
+See `BUGREPORT-kokoro-mlx.md` and `tts-service/engines/kokoro_mlx/`.
 
 **What this settled:** voice count is not the problem. The same FastAPI corpus at 22
 voices scored BETTER than an earlier one at 36 (82/65 against 76/56 at 4/32), so the

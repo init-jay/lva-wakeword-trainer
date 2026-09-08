@@ -18,19 +18,20 @@ services:
       dockerfile: docker/Dockerfile.mww.cpu
 
   # PIPER MUST BE OVERRIDDEN TOO, and forgetting it is worse than forgetting a
-  # trainer. docker/Dockerfile.piper builds on nvidia/cuda:12.4.1-cudnn-runtime,
-  # which is linux/amd64 only - so on Apple Silicon it does not fail, it runs the
+  # trainer. docker/Dockerfile.piper used to build on nvidia/cuda:12.4.1-cudnn-runtime,
+  # which is linux/amd64 only - so on Apple Silicon it did not fail, it ran the
   # ENTIRE microWakeWord corpus stage under qemu emulation. A baseline measured that
-  # way times the emulator.
+  # way times the emulator. It now builds on python:3.12-slim, which publishes
+  # linux/amd64 and linux/arm64, so the override it once needed no longer exists -
+  # as with kokoro below, there is nothing left to point it at, which is the point.
   #
   # NEITHER TTS SERVICE NEEDS AN OVERRIDE, and both used to look like they might.
   #
-  # Piper is multi-arch because docker/Dockerfile.piper no longer builds on a CUDA
-  # base at all - `--use-cuda` measured 2.5x SLOWER, so the flag it existed to enable
-  # was one nobody should use. It now sits on rhasspy/wyoming-piper, linux/amd64 and
-  # linux/arm64. Before that change this overlay was incomplete in the worst way: the
-  # trainers ran native while Piper generated the entire microWakeWord corpus under
-  # qemu, which succeeds silently and makes the timing meaningless.
+  # Piper is multi-arch because its image is a plain multi-arch base running the
+  # same in-process engine as the Mac (tts-service/engines/piper), not an
+  # architecture-specific runtime.
   #
   # Kokoro is multi-arch already: ghcr.io/remsky/kokoro-fastapi-cpu:v0.8.1 publishes
-  # linux/arm64 alongside amd64, verified with `docker manifest inspect`.
+  # linux/arm64 alongside amd64, verified with `docker manifest inspect` - and the
+  # protocol wrapper this repo bakes on top of it is pure Python, so it inherits
+  # the base's architectures.

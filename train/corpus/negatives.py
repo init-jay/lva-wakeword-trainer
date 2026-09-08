@@ -94,7 +94,7 @@ af_jadzia is a genuine distinct speaker rather than a v0 duplicate, so it is kep
 here - the filter drops legacy renderings, not voices MLX happens to lack.
 
 kokoro-mlx does not serve them at all, which is why its 28-voice set is not the
-handicap it first appears - see train/corpus/kokoro_mlx.py.
+handicap it first appears - see tts-service/engines/kokoro_mlx/.
 
 --include-legacy-voices puts them back, for reproducing a pre-2026-09 corpus.
 """

@@ -57,7 +57,14 @@ Listen before excluding those.
 
 Usage:
     python audit_voices.py --wake-word "hey seeree" \
-        --kokoro-url http://192.168.2.26:8880 --asr 192.168.2.14:10300
+        --tts tcp://192.168.2.26:8899 --asr 192.168.2.14:10300
+    python audit_voices.py --wake-word "hey seeree" \
+        --tts tcp://127.0.0.1:8898 --asr 192.168.2.14:10300
+
+The TTS server speaks the repo protocol (tts-service/) - the same per-engine
+servers the corpus runs against, so what this audits is exactly what the corpus
+gets. Speaker voices (piper-style) and plain voices (kokoro-style) are both
+handled; the server's catalog answer decides which.
 
     # after: paste the printed block into MISPRONOUNCING_VOICES in train.py
 """
@@ -71,12 +78,14 @@ from collections import Counter
 from pathlib import Path
 
 import numpy as np
-import requests
 import scipy.io.wavfile
-from scipy.signal import resample
 
 SR = 16000
 DEFAULT_SPEEDS = (0.75, 1.0, 1.3)
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tts-service" / "tts_protocol"))
+
+from tts_protocol import TtsClient  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -143,130 +152,67 @@ def transcribe(pcm16, host, port, timeout=120):
 
 
 # --------------------------------------------------------------------------
-# Piper rendering, over Wyoming TTS
+# TTS rendering, over the repo protocol
 #
-# Piper phonemises with espeak-ng, which is per-MODEL and not per-speaker, so every
-# speaker inside one voice shares a pronunciation. That is the opposite of Kokoro,
-# where the six bad voices each guessed differently. In practice it means auditing a
-# 904-speaker model is mostly one decision about the model plus a sweep for speakers
-# whose audio is simply bad - LibriTTS is scraped audiobook read speech and its
-# per-speaker quality is uneven.
+# The catalog answer carries the shape: (voice, speaker) pairs mean a piper-style
+# speaker model, plain names a kokoro-style one. Piper phonemises with
+# espeak-ng, which is per-MODEL and not per-speaker, so every speaker inside one
+# voice shares a pronunciation. That is the opposite of Kokoro, where the six
+# bad voices each guessed differently. In practice it means auditing a
+# 904-speaker model is mostly one decision about the model plus a sweep for
+# speakers whose audio is simply bad - LibriTTS is scraped audiobook read speech
+# and its per-speaker quality is uneven.
 #
-# --piper-speakers caps how many speakers of a multi-speaker voice get sampled, so a
-# first pass over en_US-libritts_r-medium does not mean 904 x len(speeds) renderings.
+# --piper-speakers caps how many speakers of a multi-speaker voice get sampled,
+# so a first pass over en_US-libritts_r-medium does not mean 904 x len(speeds)
+# renderings.
 # --------------------------------------------------------------------------
 
-def piper_info(host, port):
-    sock = socket.create_connection((host, port), timeout=30)
-    try:
-        sock.settimeout(30)
-        _send(sock, "describe")
-        event, _ = _read_event(sock, b"")
-        return event["data"] if event else {}
-    finally:
-        sock.close()
-
-
-def piper_voices(host, port, languages=("en_US", "en_GB"), max_speakers=0):
-    """[(voice, speaker_or_None), ...] for the requested languages."""
+def tts_targets(spec, languages, max_speakers, voice_filter):
+    """[(voice, speaker_or_None), ...] for the server at `spec`."""
+    c = TtsClient(spec)
+    # All speakers come back flat (one (voice, speaker) pair per speaker): the
+    # server's own max_speakers cap takes the FIRST N (speaker ids are
+    # corpus-ordered, not representative), and this tool's whole point is a
+    # representative sample, so spacing is done here, per voice.
+    catalog = c.voices(languages=languages or None)
+    if voice_filter:
+        wanted = set(voice_filter)
+        catalog = [v for v in catalog
+                   if (v if isinstance(v, str) else v[0]) in wanted]
+    if not c.speaker_voices:
+        return [(v, None) for v in catalog]
+    groups = {}
+    for v in catalog:
+        if isinstance(v, (list, tuple)):
+            groups.setdefault(v[0], []).append(v[1] if len(v) > 1 else None)
+        else:
+            groups.setdefault(v, []).append(None)
     out = []
-    for program in piper_info(host, port).get("tts", []):
-        for voice in program.get("voices", []):
-            langs = voice.get("languages") or [voice.get("language")]
-            if languages and not any(str(l).startswith(tuple(languages)) for l in langs):
-                continue
-            speakers = [s.get("name") for s in (voice.get("speakers") or [])]
-            if not speakers:
-                out.append((voice["name"], None))
-                continue
-            if max_speakers and len(speakers) > max_speakers:
-                # Evenly spaced rather than the first N: speaker ids are ordered by
-                # the source corpus, so the head is not a representative sample.
-                idx = np.linspace(0, len(speakers) - 1, max_speakers).astype(int)
-                speakers = [speakers[i] for i in sorted(set(idx))]
-            out.extend((voice["name"], s) for s in speakers)
+    for voice, speakers in groups.items():
+        nicks = [s for s in speakers if s is not None]
+        if max_speakers and len(nicks) > max_speakers:
+            # Evenly spaced rather than the first N: speaker ids are ordered by
+            # the source corpus, so the head is not a representative sample.
+            idx = np.linspace(0, len(nicks) - 1, max_speakers).astype(int)
+            keep = set(nicks[i] for i in sorted(set(idx)))
+            speakers = [s for s in speakers if s is None or s in keep]
+        out.extend((voice, s) for s in speakers)
     return out
 
 
-def piper_render(host, port, voice, speaker, text, speed):
-    """Synthesize via Wyoming TTS. `speed` is applied by resampling afterwards.
+def tts_render(c: TtsClient, voice, speaker, text, speed):
+    """Synthesize over the protocol; `speed` is the engine's own, no resampling.
 
-    Wyoming's synthesize event carries no rate control, so speed is emulated the
-    same way asetrate does - which also moves pitch. That is acceptable here because
-    the point of several speeds is to deny the ASR's language model a comfortable
-    rendering to smooth over, not to model delivery rate faithfully.
+    The old Wyoming path had no rate control and emulated speed by resampling
+    (which also moves pitch - fine, because the point of several speeds is to
+    deny the ASR's language model a comfortable rendering, not to model delivery
+    rate faithfully). The protocol carries speed, so both engines get a real
+    one.
     """
-    sock = socket.create_connection((host, port), timeout=120)
-    try:
-        sock.settimeout(120)
-        v = {"name": voice}
-        if speaker is not None:
-            v["speaker"] = str(speaker)
-        _send(sock, "synthesize", {"text": text, "voice": v})
-        buf, pcm, rate = b"", b"", 22050
-        while True:
-            event, buf, payload = _read_event_payload(sock, buf)
-            if event is None:
-                break
-            if event["type"] in ("audio-start", "audio-chunk"):
-                rate = event["data"].get("rate", rate)
-                pcm += payload
-            elif event["type"] == "audio-stop":
-                break
-    finally:
-        sock.close()
-
-    audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float64)
-    if len(audio) == 0:
-        return np.zeros(0, dtype=np.int16)
-    target = int(len(audio) * SR / rate / speed)
-    audio = resample(audio, max(1, target))
-    return np.clip(audio, -32768, 32767).astype(np.int16)
-
-
-def _read_event_payload(sock, buf):
-    """_read_event, but returning the audio payload rather than discarding it."""
-    while b"\n" not in buf:
-        chunk = sock.recv(65536)
-        if not chunk:
-            return None, buf, b""
-        buf += chunk
-    line, _, buf = buf.partition(b"\n")
-    header = json.loads(line)
-    n = header.get("data_length") or 0
-    while len(buf) < n:
-        buf += sock.recv(65536)
-    data = json.loads(buf[:n]) if n else header.get("data", {})
-    buf = buf[n:]
-    p = header.get("payload_length") or 0
-    while len(buf) < p:
-        buf += sock.recv(65536)
-    return {"type": header.get("type"), "data": data}, buf[p:], buf[:p]
-
-
-# --------------------------------------------------------------------------
-# Kokoro rendering
-# --------------------------------------------------------------------------
-
-def kokoro_voices(url):
-    raw = requests.get(f"{url}/v1/audio/voices", timeout=30).json().get("voices", [])
-    voices = [v["id"] if isinstance(v, dict) else v for v in raw]
-    return sorted(v for v in voices if v.startswith(("af_", "am_", "bf_", "bm_")))
-
-
-def kokoro_render(url, voice, text, speed):
-    r = requests.post(f"{url}/v1/audio/speech",
-                      json={"model": "kokoro", "voice": voice, "input": text,
-                            "speed": speed, "response_format": "wav"}, timeout=120)
-    r.raise_for_status()
-    import io
-    sr, data = scipy.io.wavfile.read(io.BytesIO(r.content))
-    if data.ndim > 1:
-        data = data[:, 0]
-    if sr != SR:
-        data = resample(data.astype(np.float64), int(len(data) * SR / sr))
-        data = np.clip(data, -32768, 32767)
-    return data.astype(np.int16)
+    voice = (voice, speaker) if speaker is not None else voice
+    audio = c.render(voice, text, speed)
+    return audio
 
 
 # --------------------------------------------------------------------------
@@ -286,17 +232,15 @@ def main():
     p = argparse.ArgumentParser(
         description="Screen TTS voices for mispronunciation of the wake word")
     p.add_argument("--wake-word", required=True)
-    p.add_argument("--tts", choices=("kokoro", "piper"), default="kokoro",
-                   help="Which engine to audit (default: %(default)s)")
-    p.add_argument("--kokoro-url", default="http://localhost:8880")
-    p.add_argument("--piper", default="localhost:10200",
-                   help="Wyoming TTS service for --tts piper (default: %(default)s)")
+    p.add_argument("--tts", required=True,
+                   help="tcp:// URL of the TTS protocol server to audit "
+                        "(the one the corpus runs against)")
     p.add_argument("--piper-speakers", type=int, default=12,
-                   help="Speakers to sample per multi-speaker Piper voice, evenly "
+                   help="Speakers to sample per multi-speaker voice, evenly "
                         "spaced. 0 audits every one - 904 for libritts_r "
                         "(default: %(default)s)")
     p.add_argument("--languages", default="en_US,en_GB",
-                   help="Piper language prefixes to include (default: %(default)s)")
+                   help="Language prefixes to include (default: %(default)s)")
     p.add_argument("--asr", default="localhost:10300",
                    help="Wyoming ASR service, host:port (default: %(default)s)")
     p.add_argument("--repeats", type=int, default=2,
@@ -307,7 +251,8 @@ def main():
                    help="Comma-separated render speeds. More speeds catch more "
                         "marginal voices; 1.0 alone misses them (default: %(default)s)")
     p.add_argument("--voices", default="",
-                   help="Comma-separated subset to audit (default: all English)")
+                   help="Comma-separated subset of voice names to audit "
+                        "(default: all matching --languages)")
     p.add_argument("--out-dir", default="voice_audit",
                    help="Where to write clips for the ear check (default: %(default)s)")
     args = p.parse_args()
@@ -316,28 +261,16 @@ def main():
     port = int(port or 10300)
     speeds = [float(s) for s in args.speeds.split(",") if s.strip()]
 
-    if args.tts == "piper":
-        p_host, _, p_port = args.piper.partition(":")
-        p_port = int(p_port or 10200)
-        langs = tuple(l.strip() for l in args.languages.split(",") if l.strip())
-        if args.voices:
-            # "voice:speaker" or bare "voice"
-            targets = []
-            for spec in args.voices.split(","):
-                name, _, spk = spec.strip().partition(":")
-                targets.append((name, spk or None))
-        else:
-            targets = piper_voices(p_host, p_port, langs, args.piper_speakers)
-        render = lambda name, spk, speed: piper_render(
-            p_host, p_port, name, spk, args.wake_word, speed)
-        source = f"piper {p_host}:{p_port}"
-    else:
-        names = ([v.strip() for v in args.voices.split(",") if v.strip()]
-                 or kokoro_voices(args.kokoro_url))
-        targets = [(n, None) for n in names]
-        render = lambda name, spk, speed: kokoro_render(
-            args.kokoro_url, name, args.wake_word, speed)
-        source = f"kokoro {args.kokoro_url}"
+    langs = tuple(l.strip() for l in args.languages.split(",") if l.strip())
+    filters = ([v.strip() for v in args.voices.split(",") if v.strip()])
+    try:
+        client = TtsClient(args.tts)
+        targets = tts_targets(args.tts, langs, args.piper_speakers, filters)
+    except Exception as e:
+        print(f"cannot audit: {type(e).__name__}: {e}")
+        return 1
+    engine = client.server_engine or "tts"
+    source = f"{args.tts} (engine={engine})"
 
     if not targets:
         print("No voices found.")
@@ -358,70 +291,63 @@ def main():
         for speed in speeds:
           for rep in range(reps):
             try:
-                audio = render(name, speaker, speed)
+                audio = tts_render(client, name, speaker, args.wake_word, speed)
             except Exception as e:
-                print(f"  {voice} @ {speed}: render failed ({e})")
-                continue
+                print(f"[{i}/{len(targets)}] {voice} @ {speed}x r{rep}: "
+                      f"render failed ({type(e).__name__})")
+                audio = np.zeros(0, dtype=np.int16)
             if len(audio) == 0:
                 continue
             text = transcribe(audio, host, port)
-            rows.append((speed, text, len(audio) / (SR / 1000)))
-            safe = voice.replace(":", "-").replace("/", "-")
-            suffix = f"{speed}" if reps == 1 else f"{speed}_{rep}"
-            scipy.io.wavfile.write(str(out / f"{safe}_{suffix}.wav"), SR, audio)
+            rows.append((speed, text))
+            wav_path = out / f"{_wav_name(voice)}_{speed}_{rep:02d}.wav"
+            scipy.io.wavfile.write(str(wav_path), SR, audio)
+            print(f"[{i}/{len(targets)}] {voice} @ {speed}x r{rep}: {text!r}")
         results[voice] = rows
-        print(f"\r  {i}/{len(targets)} {voice:34s}", end="", flush=True)
-    print("\r" + " " * 60 + "\r", end="")
 
-    # Consensus is the most common final token across every rendering. It is what
-    # the ASR reliably hears for a correct pronunciation - "siri" for "hey seeree" -
-    # not the wake word itself, which it will never spell right.
-    tokens = [final_token(t) for rows in results.values() for _, t, _ in rows]
-    tokens = [t for t in tokens if t]
-    if not tokens:
-        print("ASR returned nothing for any voice - is the service reachable?")
+    if not results:
+        print("Nothing was rendered.")
         return 1
-    consensus, n_consensus = Counter(tokens).most_common(1)[0]
-    print(f'Consensus final token: "{consensus}" '
-          f"({n_consensus}/{len(tokens)} renderings)\n")
 
-    durations = [d for rows in results.values() for _, _, d in rows]
-    median_ms = float(np.median(durations))
-
-    scored = []
+    # Consensus over final tokens, weighted by speed x repeats.
+    token_votes = Counter()
     for voice, rows in results.items():
-        if not rows:
-            continue
-        hits = sum(1 for _, t, _ in rows if final_token(t) == consensus)
-        scored.append((hits / len(rows), voice, rows))
-    scored.sort(key=lambda r: (r[0], r[1]))
+        for _, text in rows:
+            tok = final_token(text)
+            if tok:
+                token_votes[tok] += 1
+    consensus, consensus_count = token_votes.most_common(1)[0]
+    total = sum(token_votes.values())
 
-    width = max(16, min(34, max(len(v) for v in results)))
-    print(f"{'voice':{width}s} {'agree':>6s} {'dur':>7s}  transcripts")
-    print("-" * (width + 78))
-    suspect = []
-    for frac, voice, rows in scored:
-        dur = np.median([d for _, _, d in rows])
-        texts = " | ".join(t or "(silence)" for _, t, _ in rows)
-        mark = "" if frac == 1.0 else ("  <-- BAD" if frac < 0.5 else "  <-- CHECK")
-        if frac < 1.0:
-            suspect.append(voice)
-        print(f"{voice:{width}s} {frac*100:5.0f}% {dur:6.0f}ms  {texts[:58]:58s}{mark}")
+    print("\nConsensus final token: %r  (%d/%d renderings)" %
+          (consensus, consensus_count, total))
+    print()
 
-    print(f"\nmedian duration {median_ms:.0f}ms. Clips written to {out}/")
-    if suspect:
-        print(f"\n{len(suspect)} voice(s) to check BY EAR - this is a screen, not a "
-              f"verdict.\nListen to {out}/<voice>_*.wav, then paste the ones that are "
-              f"genuinely wrong:\n")
-        safe = args.wake_word.replace(" ", "_").lower()
-        print(f'    "{safe}": [')
-        print("        " + ", ".join(f'"{v}"' for v in sorted(suspect)) + ",")
-        print("    ],")
+    bad = []
+    for voice in sorted(results):
+        toks = Counter(final_token(t) for _, t in results[voice])
+        n = sum(toks.values())
+        hits = toks.get(consensus, 0)
+        pct = 100.0 * hits / n if n else 0.0
+        other = ", ".join(f"{t!r}x{c}" for t, c in toks.most_common(3)
+                          if t != consensus)
+        flag = "OK  " if pct == 100.0 else "FLAG"
+        print(f"  {flag} {voice:35s} {pct:5.1f}%   {other}")
+        if pct < 100.0:
+            bad.append(voice)
+
+    if bad:
+        print("\nPaste into train/corpus/piper.py (MISPRONOUNCING_VOICES):")
+        print("    " + ",\n    ".join(repr(v) for v in bad))
     else:
-        print("\nEvery voice matched consensus at every speed. Still worth spot-"
-              "checking a few by ear before trusting a new engine.")
+        print("\nNo mispronouncing voices found.")
+
     return 0
 
 
+def _wav_name(voice):
+    return re.sub(r"[^A-Za-z0-9._-]", "_", voice)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main() or 0)

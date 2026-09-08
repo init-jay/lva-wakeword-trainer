@@ -1,0 +1,33 @@
+[project]
+name = "tts-engine-piper"
+version = "0.1.0"
+description = "tts-protocol engine: in-process piper-tts (no Wyoming), for the Mac/host route"
+requires-python = ">=3.11"
+
+# piper-tts is PINNED, not ranged: the Wyoming host venv
+# (scripts/start-piper-host.sh) and the Docker image install 1.7.0, and
+# 1.8.0's G2P path differs from 1.7.0's - an unversioned mix across the
+# fleet would be a distribution shift in the trained audio, not a dependency
+# bump. onnxruntime is pinned to the version 1.7.0 actually resolves on this
+# machine (the host venv), so the inference runtime matches what was measured.
+# (piper-phonemize comes in as piper-tts's own dependency - same G2P stack.)
+dependencies = [
+    "tts-protocol",
+    "numpy",
+    "scipy",
+    "piper-tts==1.7.0",
+    "onnxruntime==1.29.0",
+]
+
+[project.scripts]
+piper-engine = "piper_engine.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["piper_engine"]
+
+[tool.uv.sources]
+tts-protocol = { path = "../../tts_protocol" }

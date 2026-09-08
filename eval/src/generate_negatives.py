@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""Generate a targeted negative corpus for wake-word evaluation, rendering with
-the shared tts-service layer (Kokoro-FastAPI over HTTP, in-process MLX on Apple
-Silicon, or Piper over Wyoming).
+"""Generate a targeted negative corpus for wake-word evaluation, speaking the repo's
+TTS protocol (tts-service/tts_protocol) to whatever engine the URL points at.
 
 A hundred random sentences would mostly measure nothing: a wake-word model that is
 already quiet on ordinary speech scores zero on all of them. The useful negatives are
@@ -33,26 +32,29 @@ diverged: that copy keeps its phrases inline and has no wordlists package.
 
 Examples
 --------
-    # from inside the eval container, against kokoro on the host
+    # from inside the eval container, against the MLX engine on the Mac host
     python -m eval.generate_negatives \\
-        --url http://host.docker.internal:8880/v1/audio/speech
+        --url tcp://host.docker.internal:8900
 
-    # against a Kokoro-FastAPI server elsewhere on the LAN
-    python -m eval.generate_negatives \\
-        --url http://192.168.2.14:8880/v1/audio/speech
+    # against the Docker kokoro service on the training box (protocol port 8899)
+    python -m eval.generate_negatives --url tcp://kokoro:8899
 
-    # in-process Kokoro on Apple Silicon: no server, the MLX model in this process
-    python -m eval.generate_negatives --url mlx://
-
-    # Piper instead of Kokoro (Wyoming server; the voice list is then the audited
-    # selection from train/corpus/piper.py, so its exclusion tables apply)
-    python -m eval.generate_negatives --tts piper --piper-url 127.0.0.1:10200
+    # Piper instead of Kokoro (protocol port 8898; the voice list is then the
+    # audited selection from train/corpus/piper.py, so its exclusion tables apply)
+    python -m eval.generate_negatives --tts piper --piper-url tcp://127.0.0.1:8898
 
     # see what would be produced without calling the server
     python -m eval.generate_negatives --dry-run
 
     # top up one category after editing its wordlist
     python -m eval.generate_negatives --categories extend
+
+`--url` accepts ONLY the `tcp://` protocol form: the old `http://...` server URL
+and `mlx://` forms are rejected at the probe with an explanation, because they
+used to mean different backends with different audio and a silent misread rendered
+a whole corpus from the wrong one. The engines that publish a protocol port are
+listed in tts-service/README.md (the MLX engine on 8900, the Docker kokoro on
+8899, Piper on 8898).
 
 Then score a model against the result with `eval_model.py --negatives ...`, reading
 the output per category rather than pooled — the corpus is adversarial by
@@ -87,16 +89,18 @@ except ImportError:
 
 if paths is not None:
     sys.path.insert(0, str(paths.REPO_ROOT))
-    # The shared TTS layer lives in tts-service/ at the repo root; the hyphen in
-    # the name means that string is not importable, so its parent goes on sys.path.
-    sys.path.insert(0, str(paths.REPO_ROOT / "tts-service"))
+    # The TTS protocol package lives at tts-service/tts_protocol/ at the repo
+    # root; the hyphens in both directory names mean that string is not
+    # importable, so its parent goes on sys.path. The engines are NOT here -
+    # they run as separate servers that this script only speaks to over TCP.
+    sys.path.insert(0, str(paths.REPO_ROOT / "tts-service" / "tts_protocol"))
     import wordlists  # noqa: E402
-    import tts_service  # noqa: E402
+    from tts_protocol import TtsClient  # noqa: E402
     from train.corpus.piper import select_piper_voices  # noqa: E402
     DEFAULT_OUT = str(paths.NEGATIVES_DIR)
 else:
     wordlists = None  # type: ignore
-    tts_service = None
+    TtsClient = None  # type: ignore
     select_piper_voices = None
     DEFAULT_OUT = "negatives_tts"
 
@@ -143,32 +147,27 @@ def synth(index, category, text, args):
 
 
 def make_engine(args):
+    # One engine here: a ~100-clip eval corpus has no business driving the pool
+    # machinery, which exists to keep a whole server farm busy on a 5000-clip
+    # corpus. The URL is a protocol spec - see the module docstring for why
+    # only tcp:// is accepted.
     if args.tts == "piper":
-        host, _, port = args.piper_url.rpartition(":")
-        return tts_service.PiperWyomingEngine(host, int(port))
-    # --url is an engine spec: an OpenAI-compatible server URL (a full
-    # /v1/audio/speech endpoint from old invocations still works), or "mlx://"
-    # for the in-process MLX backend. One engine here: a ~100-clip eval corpus
-    # has no business driving the pool machinery, which exists to keep a whole
-    # server farm busy on a 5000-clip corpus.
-    url = args.url
-    if url.endswith("/v1/audio/speech"):
-        url = url[: -len("/v1/audio/speech")]
-    return tts_service.engines_from_spec(url)[0]
+        return TtsClient(args.piper_url)
+    return TtsClient(args.url)
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--url", default="http://localhost:8880/v1/audio/speech",
-                   help="Kokoro engine spec: an OpenAI-compatible server URL (the "
-                        "legacy full /v1/audio/speech endpoint is accepted), or 'mlx://' "
-                        "for in-process MLX (default: %(default)s)")
+    p.add_argument("--url", default="tcp://127.0.0.1:8900",
+                   help="Kokoro protocol server: a tcp:// spec (the MLX engine's"
+                        " default port on a Mac, the Docker kokoro service's 8899 on"
+                        " the box). Only tcp:// is accepted (default: %(default)s)")
     p.add_argument("--tts", default="kokoro", choices=["kokoro", "piper"],
                    help="TTS engine (default: %(default)s)")
-    p.add_argument("--piper-url", default="127.0.0.1:10200",
-                   help="Piper Wyoming server host:port, used with --tts piper "
-                        "(default: %(default)s)")
+    p.add_argument("--piper-url", default="tcp://127.0.0.1:8898",
+                   help="Piper protocol server tcp:// spec, used with --tts piper"
+                        " (default: %(default)s)")
     p.add_argument("--max-speakers", type=int, default=12,
                    help="Piper: cap on speakers per multi-speaker model "
                         "(default: %(default)s)")
@@ -215,18 +214,17 @@ def main():
               f"(nothing written; drop --dry-run to generate)")
         return
 
-    if wordlists is None or tts_service is None:
+    if wordlists is None or TtsClient is None:
         sys.exit("ERROR: this copy of the script has no repo layout to import the "
                  "TTS layer from - run it from the lva-wakeword-trainer checkout")
 
     args.engine = make_engine(args)
     if args.tts == "piper":
-        host, _, port = args.piper_url.rpartition(":")
         # The trainer's audited selection: drops the voices whose pronunciation of
         # this wake word failed the audit, so the eval corpus cannot contain
         # mislabelled phrases - the failure mode the Kokoro side spent eleven runs
         # discovering (train/corpus/piper.py).
-        args.voices = select_piper_voices(host, int(port), args.wake_word,
+        args.voices = select_piper_voices(args.piper_url, args.wake_word,
                                           max_speakers=args.max_speakers)
         if not args.voices:
             sys.exit("ERROR: no usable Piper voices")

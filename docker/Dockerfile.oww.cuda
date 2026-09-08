@@ -107,9 +107,11 @@ RUN python3 -c "import tensorflow as tf; print('tensorflow', tf.__version__)" \
     && command -v onnx2tf
 
 # The whole train/ package: train.corpus is shared, train.oww is this trainer.
-# And the shared TTS layer beside it: train/corpus/__init__.py adds tts-service/ to
-# sys.path, so importing anything from train.corpus exercises it - including the
-# import check below.
+# And the TTS protocol client beside it: train/corpus/__init__.py adds
+# tts-service/tts_protocol/ to sys.path, so importing anything from train.corpus
+# exercises it - including the import check below. The engines are NOT here - the
+# trainers are protocol clients, and the engines live in the kokoro/piper compose
+# services (tts-service/README.md).
 COPY train/ ./train/
 COPY tts-service/ ./tts-service/
 
@@ -127,7 +129,7 @@ COPY tts-service/ ./tts-service/
 #                 Dockerfile.eval already calls out.
 
 # Fail the build rather than a training run if the package does not import.
-# train.corpus.kokoro is what pulls in the tts-service layer (train/corpus/__init__.py
+# train.corpus.kokoro is what pulls in the protocol client (train/corpus/__init__.py
 # adds it to sys.path), so this single line checks that copy too.
 RUN python3 -c "import train.corpus.augment, train.corpus.negatives, \
                        train.corpus.real, train.corpus.piper, \

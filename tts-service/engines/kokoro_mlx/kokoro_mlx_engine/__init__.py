@@ -1,8 +1,8 @@
 """Kokoro TTS in-process on Apple Silicon, via MLX.
 
 THE SAME MODEL AS THE KOKORO SERVICE, A DIFFERENT RUNTIME. docker-compose runs
-Kokoro-82M behind Kokoro-FastAPI and the trainer talks to it over HTTP; this renders
-the same model through MLX in the calling process itself. Measured on an M1 Max at
+Kokoro-82M behind Kokoro-FastAPI and the trainer talks to it over HTTP; this
+server renders the same model through MLX in its own process instead. Measured on an M1 Max at
 16 kHz, against that server on its fastest configuration (host CPU, batched):
 
                      Kokoro-FastAPI      MLX single    MLX batch of 10
@@ -46,33 +46,27 @@ timestamps account for it, so cuts are unaffected, and corpus/augment.py's trimm
 removes it later. Only code that mixes a pre-trim timestamp with post-trim audio
 would be wrong, and nothing does that today.
 
-Moved from train/corpus/kokoro_mlx.py to tts-service (2026-09-08); that path is now
-a shim re-exporting this module.
+The in-process Kokoro server since the tts-service split (2026-09-08): its own uv
+project and venv, Apple Silicon only. The trainer speaks its protocol port like any
+other - it has no idea this one never leaves the Mac:
+
+    uv run --project tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine \
+        --port 8900
 """
 import sys
 import threading
 
 import numpy as np
 
-from ..engine import Engine
-from ..audio import to_int16
+from tts_protocol.engine import Engine
+from tts_protocol.audio import to_int16
 
 # 16 kHz because that is what the corpus is: train.py writes every clip at 16000 and
 # both trainers read it. Asking the model for it directly avoids a resample.
 SAMPLE_RATE = 16000
 
-# The URL scheme that selects this backend. The trainers thread a Kokoro URL through
-# every call site, so rather than restructure that, "mlx://" is a URL that happens to
-# mean "in this process" - KokoroPool, generate_kokoro_samples and
-# generate_runon_samples then need no changes at all.
-URL_SCHEME = "mlx://"
-
 _tts = None
 _lock = threading.Lock()
-
-
-def is_mlx_url(url: str) -> bool:
-    return isinstance(url, str) and url.startswith("mlx")
 
 
 def available() -> tuple:
@@ -82,8 +76,8 @@ def available() -> tuple:
     try:
         import kokoro_mlx  # noqa: F401
     except ImportError as e:
-        return False, (f"kokoro-mlx not installed ({e}). It lives in the "
-                       "train-applesilicon/ host environment, not the trainer images.")
+        return False, (f"kokoro-mlx not installed ({e}). It is a dependency of "
+                       "this uv project: tts-service/engines/kokoro_mlx")
     return True, ""
 
 
@@ -142,7 +136,7 @@ def render_timed(voice: str, text: str, speed: float):
 
 
 class KokoroMlxEngine(Engine):
-    """The in-process backend as a registered engine: name is "kokoro-mlx"."""
+    """The in-process backend as a protocol server: name is "kokoro-mlx"."""
 
     name = "kokoro-mlx"
     supports_timestamps = True
@@ -151,7 +145,7 @@ class KokoroMlxEngine(Engine):
     def available(self):
         return available()
 
-    def voices(self):
+    def voices(self, **kwargs):
         # Loading the model here rather than lazily on the first clip, so a failure
         # lands before the run prints its plan - the same reason the HTTP path probes
         # the server up front instead of discovering it is down mid-corpus.
@@ -160,7 +154,7 @@ class KokoroMlxEngine(Engine):
         if len(english) < 40:
             print(f"  NOTE: the HTTP service offers 42 English voices; this offers "
                   f"{len(english)}. Voice diversity is a corpus lever - see "
-                  f"tts-service/tts_service/engines/kokoro_mlx.py.")
+                  f"tts-service/engines/kokoro_mlx/.")
         return english
 
     def timed_render(self, voice, text: str, speed: float = 1.0):

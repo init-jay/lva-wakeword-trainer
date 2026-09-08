@@ -31,24 +31,37 @@ ls ../data/corpus/eval/negatives_tts/    # the adversarial corpus
 If the negatives are missing, `eval_model.py` and `compare_models.py` both exit before
 scoring anything — 100 utterances across 6 categories, so it is not a long run.
 
-Generation is self-contained — the `kokoro` service defaults to the CPU image, which
-publishes linux/arm64, so it runs natively on the same Mac as the eval image. Measured
-on an M-series Mac: ready in ~5 s, ~1 s per clip, the whole 100-clip corpus in under
-two minutes.
+Generation is self-contained — it speaks the TTS protocol to whichever Kokoro
+engine you point it at. On a Mac that is the mlx engine (a uv project, not
+Docker — see `tts-service/README.md`); on the training box it is the `kokoro`
+compose service (CPU image, or the CUDA overlay).
 
-The eval project cannot reach `kokoro` by service name — different project, different
-network — so it goes through kokoro's published port via `host.docker.internal`
-(`eval/docker-compose.yml` maps the name to `host-gateway`, which Linux needs):
+The eval project cannot reach the Mac's mlx engine by a name it owns — the
+engine is a HOST process — so it goes through the host's published port via
+`host.docker.internal` (`eval/docker-compose.yml` maps that name to
+`host-gateway`, which Linux needs):
+
+```bash
+# the mlx engine, in another terminal on the Mac
+uv run --project tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900
+
+# from eval/
+docker compose run --rm eval python -m eval.generate_negatives \
+    --url tcp://host.docker.internal:8900
+docker compose run --rm eval python -m eval.generate_positives \
+    --url tcp://host.docker.internal:8900 --wake-word "hey seeree"
+```
+
+On the training box, `docker compose up -d kokoro` instead (with the GPU
+overlay for the faster image — same command otherwise, and the two render the
+same voices, so the corpora are interchangeable), and the URL is its compose
+name:
 
 ```bash
 # from the repo root
 docker compose up -d kokoro
-
 # from eval/
-docker compose run --rm eval python -m eval.generate_negatives \
-    --url http://host.docker.internal:8880/v1/audio/speech
-cd ..
-docker compose stop kokoro
+docker compose run --rm eval python -m eval.generate_negatives --url tcp://kokoro:8899
 ```
 
 If the image pull hangs at "Pulling fs layer" with no bytes moving, it is the

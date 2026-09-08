@@ -99,11 +99,18 @@ import microwakeword.model_train_eval  # noqa: F401
 import tensorboard                 # noqa: F401
 import ai_edge_litert              # noqa: F401
 print("  microwakeword + dependencies import OK")
+import sys
+sys.path.insert(0, ".")
+import train.corpus  # noqa: F401  (sys.path bootstrap for tts_protocol)
+from tts_protocol import TtsClient  # noqa: F401
+TtsClient("tcp://127.0.0.1:8898")   # the URL policy the run script relies on
+print("  tts-protocol OK")
 PY
 
 echo
 echo "==> ready. Train with:"
 echo "      ./scripts/run-mww-training-applesilicon.sh \"hey seeree\""
 echo
-echo "    The corpus stage needs a Piper server; start one in another terminal:"
-echo "      ./scripts/start-piper-host.sh"
+echo "    The corpus stage needs the engines running; start them in other terminals:"
+echo "      uv run --project tts-service/engines/piper python -m piper_engine --port 8898"
+echo "      uv run --project tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900   # only for the 30% Kokoro mix"

@@ -4,15 +4,15 @@
 #
 #
 #     ./scripts/setup-mww-applesilicon-trainer.sh                     # once
-#     ./scripts/start-piper-host.sh                                   # in another terminal
-#     ./scripts/start-kokoro-host.sh                                  # another, for the default 30% mix
+#     uv run --project tts-service/engines/piper python -m piper_engine --port 8898   # another terminal
+#     uv run --project tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900  # another, for the default 30% mix
 #     ./scripts/run-mww-training-applesilicon.sh "hey seeree"
 #
 # KOKORO_FRACTION (default 0.3, or --kokoro-fraction on the command line) is the
 # share of the PHRASE-ALONE positive budget Kokoro renders instead of Piper -
 # substitution, not addition: the total clip count, the real-clip share, and the
 # Piper-only negative set all stay fixed, mirroring the 30% its openWakeWord
-# sibling already runs (engines swapped). 0.3 needs the Kokoro host server above;
+# sibling already runs (engines swapped). 0.3 needs the Kokoro engine above;
 # KOKORO_FRACTION=0 (or --kokoro-fraction 0) runs all-Piper, the historical corpus,
 # and needs only Piper. The module document: train/mww/corpus.py.
 #
@@ -34,12 +34,14 @@
 #
 # SKIP_CORPUS=1 / SKIP_FEATURES=1 behave exactly as in run-mww-training.sh.
 #
-# The corpus stage needs a Piper server, and - at the default 30% mix - a Kokoro
-# one too. This script starts nothing: the host servers are
-# scripts/start-piper-host.sh (uv venv, 127.0.0.1:10200) and
-# scripts/start-kokoro-host.sh (uv venv, 127.0.0.1:8880). PIPER_URL / KOKORO_URL
-# or --piper-url reach any other server; a piper:PORT value is rewritten to
-# 127.0.0.1:PORT, because the compose service name resolves to nothing here.
+# The corpus stage needs a Piper engine, and - at the default 30% mix - a Kokoro
+# one too. This script starts nothing: the engines are the uv projects in
+# tts-service/engines/ (commands above) - in-process piper-tts on 8898 and
+# in-process kokoro-mlx on 8900, both speaking the TTS protocol. PIPER_URL /
+# KOKORO_URL or --piper-url / --kokoro-url reach any other tcp:// server; a bare
+# host:port value is coerced to tcp:// (the protocol client accepts only that
+# form), because the old raw forms used to mean different backends with
+# different audio.
 
 set -euo pipefail
 
@@ -163,38 +165,43 @@ set -- "${TRAIN_ARGS[@]+"${TRAIN_ARGS[@]}"}"
 
 # PIPER_URL
 #
-# Same contract as the oww host script: piper:PORT is a COMPOSE-ONLY name - it
-# resolves inside the compose network and to nothing from a host process. The
-# intent is unambiguous - the same server, reached locally - so rewrite rather
-# than fail. Any other host:port (a Piper on the LAN, a box on the network)
-# passes through.
-PIPER_PORT_DEFAULT=10200
+# Same contract as the oww host script: this is the protocol URL of the
+# in-process Piper engine (tts-service/engines/piper, port 8898). The old
+# piper:PORT compose form is rewritten - the compose service name resolves to
+# nothing from a host process - and any bare host:port is coerced to tcp://,
+# the only form the protocol client accepts.
+PIPER_PORT_DEFAULT=8898
 if [[ "${PIPER_URL:-}" == piper:* ]]; then
     PIPER_PORT="${PIPER_URL#piper:}"
     [[ -z "$PIPER_PORT" || ! "$PIPER_PORT" =~ ^[0-9]+$ ]] && PIPER_PORT=$PIPER_PORT_DEFAULT
     PIPER_URL="127.0.0.1:${PIPER_PORT}"
-    export PIPER_URL
     echo "=== note: rewrote PIPER_URL to $PIPER_URL - the compose service name"
-    echo "          only resolves inside the compose network. For a local server:"
-    echo "          ./scripts/start-piper-host.sh"
-elif [[ -z "${PIPER_URL:-}" ]]; then
+    echo "          only resolves inside the compose network. For a local engine:"
+    echo "          uv run --project tts-service/engines/piper python -m piper_engine --port $PIPER_PORT"
+fi
+if [[ -z "${PIPER_URL:-}" ]]; then
     PIPER_URL="127.0.0.1:${PIPER_PORT_DEFAULT}"
-    export PIPER_URL
 fi
+[[ "${PIPER_URL}" != tcp://* ]] && PIPER_URL="tcp://${PIPER_URL}"
+export PIPER_URL
 
-# KOKORO_URL: the same rewrite, for the same reason - host.docker.internal is
-# how a CONTAINER reaches the host, and from the host it is a name that
-# resolves to nothing. mlx:// passes through untouched: it is a URL meaning
-# "in this process" (train/corpus/kokoro_mlx.py), and the probe below is the
-# one that tells you this venv cannot run it.
-KOKORO_URL="${KOKORO_URL:-http://127.0.0.1:8880}"
-if [[ "${KOKORO_URL:-}" == *host.docker.internal* ]]; then
+# KOKORO_URL: same treatment. The Mac's Kokoro is the in-process kokoro-mlx
+# engine (tts-service/engines/kokoro_mlx, port 8900); the old http:// form (the
+# Kokoro-FastAPI host server) and the old mlx:// form both mean the same thing
+# now - a protocol server that runs MLX in-process - so both are coerced.
+KOKORO_URL="${KOKORO_URL:-tcp://127.0.0.1:8900}"
+if [[ "${KOKORO_URL}" == *host.docker.internal* ]]; then
     KOKORO_URL="${KOKORO_URL//host.docker.internal/127.0.0.1}"
-    export KOKORO_URL
     echo "=== note: rewrote KOKORO_URL to $KOKORO_URL - host.docker.internal"
-    echo "          only resolves inside a container. For a local server:"
-    echo "          ./scripts/start-kokoro-host.sh"
+    echo "          only resolves inside a container."
 fi
+if [[ "${KOKORO_URL}" == http://* || "${KOKORO_URL}" == mlx://* ]]; then
+    KOKORO_URL="tcp://${KOKORO_URL#*//}"
+    echo "=== note: rewrote KOKORO_URL to $KOKORO_URL - the protocol client"
+    echo "          speaks only tcp://, and the Mac's Kokoro is the mlx engine"
+    echo "          (uv run --project tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900)"
+fi
+[[ "${KOKORO_URL}" != tcp://* ]] && KOKORO_URL="tcp://${KOKORO_URL}"
 export KOKORO_URL
 
 # THE CONTAINER MAY OWN THESE FILES. Both paths write data/corpus/ and output/,
@@ -218,22 +225,21 @@ if [[ "${SKIP_CORPUS:-}" != "1" ]]; then
     if ! "$ENV_DIR/.venv/bin/python" - "$PIPER_URL" <<'PYEOF'
 import sys
 sys.path.insert(0, ".")
-from train.corpus.piper import piper_voices
-url = sys.argv[1].rstrip("/")
-host, _, port = url.partition(":")
-port = int(port) if port.isdigit() else 10200
+import train.corpus  # noqa: F401  (sys.path bootstrap for tts_protocol)
+from tts_protocol.client import TtsClient
+url = sys.argv[1]
 try:
-    pairs = piper_voices(host, port, languages=("en_US", "en_GB"))
+    pairs = TtsClient(url).voices(languages=["en_US", "en_GB"], max_speakers=0)
 except Exception as e:
     print(f"  Piper unreachable: {e}", file=sys.stderr)
     sys.exit(1)
-print(f"  Piper probe OK: {len(pairs)} (voice, speaker) pairs at {host}:{port}")
+print(f"  Piper probe OK: {len(pairs)} (voice, speaker) pairs at {url}")
 PYEOF
     then
         echo "  No reachable Piper at $PIPER_URL - the corpus stage would fail at its" >&2
-        echo "  first render, not now. Start the host server in another terminal:" >&2
-        echo "  ./scripts/start-piper-host.sh   (it downloads voices on first use)" >&2
-        echo "  or point PIPER_URL / --piper-url at an existing one." >&2
+        echo "  first render, not now. Start the engine in another terminal:" >&2
+        echo "  uv run --project tts-service/engines/piper python -m piper_engine --port 8898" >&2
+        echo "  (it uses the voices under data/external/piper) or point PIPER_URL / --piper-url at an existing one." >&2
         exit 1
     fi
 
@@ -241,33 +247,24 @@ PYEOF
         if ! "$ENV_DIR/.venv/bin/python" - "$KOKORO_URL" <<'PYEOF'
 import sys
 sys.path.insert(0, ".")
-url = sys.argv[1].rstrip("/")
-if url.startswith("mlx://"):
-    # This venv does not install kokoro-mlx (it lives in train-applesilicon/,
-    # because the two trainers are split on numpy); available() says exactly
-    # that, and it is the honest answer rather than a silent HTTP fallback.
-    from train.corpus import kokoro_mlx
-    ok, why = kokoro_mlx.available()
-    if not ok:
-        print(f"  Kokoro (mlx) unavailable: {why}", file=sys.stderr)
-        sys.exit(1)
-    print(f"  Kokoro probe OK: {why}")
-else:
-    import requests
-    try:
-        r = requests.get(f"{url}/v1/audio/voices", timeout=10)
-        r.raise_for_status()
-    except Exception as e:
-        print(f"  Kokoro unreachable: {e}", file=sys.stderr)
-        sys.exit(1)
-    voices = r.json()
-    voices = voices.get("voices", voices) if isinstance(voices, dict) else voices
-    print(f"  Kokoro probe OK: {len(voices)} voices at {url}")
+import train.corpus  # noqa: F401  (sys.path bootstrap for tts_protocol)
+from tts_protocol.client import TtsClient
+url = sys.argv[1]
+try:
+    c = TtsClient(url)
+    voices = c.voices()
+    msg = c._request({"op": "voices"})
+except Exception as e:
+    print(f"  Kokoro unreachable: {e}", file=sys.stderr)
+    sys.exit(1)
+engine = msg.get("engine", "?")
+ts = "word timestamps yes" if c.supports_timestamps else "word timestamps NO"
+print(f"  Kokoro probe OK: engine={engine}, {len(voices)} voices, {ts} at {url}")
 PYEOF
         then
             echo "  No reachable Kokoro at $KOKORO_URL - the corpus stage would fail at" >&2
-            echo "  its first Kokoro render, not now. Start the host server in another" >&2
-            echo "  terminal:  ./scripts/start-kokoro-host.sh" >&2
+            echo "  its first Kokoro render, not now. Start the engine in another" >&2
+            echo "  terminal:  uv run --project tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900" >&2
             echo "  or run all-Piper:  KOKORO_FRACTION=0  (or --kokoro-fraction 0)" >&2
             exit 1
         fi

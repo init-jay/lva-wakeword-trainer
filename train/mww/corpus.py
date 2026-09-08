@@ -9,8 +9,9 @@ WHAT IS SHARED IS THE CODE, NOT THE OUTPUT. Everything here comes from corpus/ -
 same trimming, the same child-range copies, the same audited Piper voices, the same
 tuned phrase texts and speed grid. Two corpora built by one set of rules.
 
-    python -m train.mww.corpus --wake-word "hey seeree" --piper-url piper:10200 \
-        --kokoro-url http://127.0.0.1:8880 --kokoro-fraction 0.3
+    python -m train.mww.corpus --wake-word "hey seeree" \
+        --piper-url tcp://127.0.0.1:8898 \
+        --kokoro-url tcp://127.0.0.1:8900 --kokoro-fraction 0.3
 
 DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
 
@@ -36,10 +37,10 @@ DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
    second engine would blur attribution of a false accept to an engine. The Kokoro
    voices get the same exclusions the oWW corpus applies (MISPRONOUNCING_VOICES and
    the v0 legacy set, corpus/negatives.py) and the shared speed grid, so the two
-   engines differ in timbre, not in speed or text. The mlx:// in-process backend
-   works here too but is not installed in this environment (see
-   corpus/kokoro_mlx.py) - from this venv, use the host server:
-   scripts/start-kokoro-host.sh.
+   engines differ in timbre, not in speed or text. Both URLs are tcp://
+   tts-protocol servers (tts-service/): on a Mac that is the in-process
+   kokoro-mlx engine (`uv run --project tts-service/engines/kokoro_mlx
+   python -m kokoro_mlx_engine`), in Docker the wrapped Kokoro-FastAPI service.
 
 3. NO RUN-ON POSITIVES YET. Their cut point comes from Kokoro's word timestamps, and
    Wyoming exposes no equivalent - the fallback estimate measured a median +153 ms
@@ -112,16 +113,16 @@ def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--wake-word", default="hey seeree")
-    p.add_argument("--piper-url", default="piper:10200",
-                   help="Wyoming TTS host:port (default: %(default)s)")
+    p.add_argument("--piper-url", default=os.environ.get("PIPER_URL", "tcp://127.0.0.1:8898"),
+                   help="Piper protocol server, tcp://host:port (default: %%(default)s)")
     p.add_argument("--piper-speakers", type=int, default=12,
                    help="speakers sampled per multi-speaker voice (default: "
                         "%(default)s). libritts_r alone carries 904.")
     p.add_argument("--piper-languages", default="en_US,en_GB")
     p.add_argument("--kokoro-url",
-                   default=os.environ.get("KOKORO_URL", "http://localhost:8880"),
-                   help="Kokoro TTS URL, comma-separated for a pool; 'mlx://' is "
-                        "in-process (default: %%(default)s). Used only when "
+                   default=os.environ.get("KOKORO_URL", "tcp://127.0.0.1:8899"),
+                   help="Kokoro protocol server(s), tcp:// URLs, comma-separated "
+                        "for a pool (default: %%(default)s). Used only when "
                         "--kokoro-fraction > 0.")
     p.add_argument("--kokoro-fraction", type=float, default=0.0,
                    help="Share of the PHRASE-ALONE positive budget rendered by "
@@ -185,7 +186,6 @@ def main():
     positives.mkdir(parents=True, exist_ok=True)
     negatives.mkdir(parents=True, exist_ok=True)
 
-    host, _, port = args.piper_url.rpartition(":")
     if not 0.0 <= args.kokoro_fraction < 1.0:
         sys.exit("  --kokoro-fraction must be in [0, 1) - Piper stays primary in "
                  "this corpus, because the negatives are Piper-only")
@@ -194,7 +194,7 @@ def main():
     if args.kokoro_fraction < 1.0:
         print(f"[Piper] {args.piper_url}")
         voices = select_piper_voices(
-            host, port, args.wake_word,
+            args.piper_url, args.wake_word,
             languages=tuple(args.piper_languages.split(",")),
             max_speakers=args.piper_speakers)
         if not voices:
@@ -244,7 +244,7 @@ def main():
 
     print(f"\n[Positives] -> {positives}")
     texts = plain_positive_texts(args.wake_word)
-    generate_piper_samples(host, int(port), voices, positives,
+    generate_piper_samples(args.piper_url, voices, positives,
                            piper_per_voice,
                            texts,
                            PLAIN_SPEED_GRID, "Piper positives")
@@ -260,7 +260,7 @@ def main():
     # signal lives, and a second engine would blur the attribution.
     print(f"\n[Negatives] -> {negatives}")
     phrases = build_negative_phrases(args.wake_word, args.negatives_file)
-    generate_piper_samples(host, int(port), voices, negatives,
+    generate_piper_samples(args.piper_url, voices, negatives,
                            args.negatives_per_voice, phrases,
                            PLAIN_SPEED_GRID, "Piper negatives")
 

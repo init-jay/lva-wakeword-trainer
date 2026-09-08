@@ -258,9 +258,10 @@ RUN python3 -c "import tensorflow as tf; print('tensorflow', tf.__version__)" \
 
 # COPY for the build-time import check; docker-compose bind-mounts train/ and
 # tts-service/ over the copies at runtime. Same split as Dockerfile.oww.cuda, and
-# the same reasons. The shared TTS layer has its own directory at the repo root
+# the same reasons. The TTS protocol client has its own directory at the repo root
 # (see tts-service/README.md); train/corpus/__init__.py adds it to sys.path, so
-# the import below exercises it.
+# the import below exercises it. The engines are not in this image - the trainers
+# are protocol clients and the engines are the kokoro/piper compose services.
 COPY train/ ./train/
 COPY tts-service/ ./tts-service/
 

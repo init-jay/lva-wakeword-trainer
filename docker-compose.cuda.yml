@@ -22,22 +22,6 @@
 # KOKORO AND BOTH TRAINERS TAKE THEIR DEVICES FROM HERE. One place to look, and one
 # thing to add on a CUDA host - rather than kokoro being conditional while the two
 # trainers hardcoded a device the base file then demanded everywhere.
-#
-# PIPER IS HERE TOO, THOUGH IT DOES NOT CURRENTLY USE THE DEVICE. It is started
-# without `--use-cuda`, so it holds no CUDA context and the reservation is inert. It
-# is kept so the A/B that docker/Dockerfile.piper asks for stays a two-line change
-# rather than a compose edit - and keeping it HERE rather than in the base file is
-# what lets `docker compose up piper` work on a machine with no GPU, which is where
-# the microWakeWord corpus would otherwise be ungeneratable.
-#
-# The trade that buys: `docker compose up oww-trainer` without CUDA now
-# STARTS instead of refusing, and fails later inside CUDA init. That is a worse error
-# message than "no such device", and it is accepted deliberately - the alternative was
-# a base file that could not be parsed usefully on the Mac, which is where the eval
-# and record steps live.
-#
-# There is no Apple Silicon variant of this overlay: Docker Desktop passes no
-# Metal device through, so a containerised GPU path does not exist (SPEED.md).
 services:
   kokoro:
     build:
@@ -87,6 +71,7 @@ services:
   # PIPER IS DELIBERATELY ABSENT FROM THIS FILE. It used to carry an inert
   # reservation, kept so that enabling `--use-cuda` was a two-line change. That A/B
   # has since been run and lost - 2.5x SLOWER - so docker/Dockerfile.piper no longer
-  # builds on a CUDA base and there is no device for a reservation to hand it.
+  # builds on a CUDA base (it now runs in-process piper-tts on a plain CPU base)
+  # and there is no device for a reservation to hand it.
   # Adding one back would only make `docker compose up piper` fail on a non-NVIDIA
   # host for nothing.

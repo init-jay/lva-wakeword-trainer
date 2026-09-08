@@ -1,134 +1,131 @@
 # tts-service
 
-The shared TTS layer of this repo: one package, four engines, one interface, one
-TCP service.
+The TTS **protocol** of this repo, and the engines that speak it.
+
+Two kinds of code live here:
+
+  * **`tts_protocol/`** - the protocol itself: a tiny package (pure stdlib
+    plus the shared audio code) that defines the wire format and the client.
+    Training and eval components depend on *this*, and on nothing else in the
+    repo's TTS stack.
+  * **`engines/`** - one uv project per engine, each an independent server that
+    implements the protocol. The engines are NOT part of the protocol package
+    and are NOT installed into the trainers: each runs in its own venv (or its
+    own Docker image, for the CUDA box) because their dependency sets conflict
+    with each other and with the trainers' (see below).
 
 Everything that renders text into 16 kHz mono int16 clips for this repo goes
-through here:
+through the protocol:
 
-  * the two trainers' corpus stages (`train/corpus/` are now thin shims that
-    re-export it; `train/oww/train.py` and `train/mww/corpus.py` are untouched)
+  * the two trainers' corpus stages (`train/corpus/kokoro.py`,
+    `train/corpus/piper.py`)
   * the eval corpus generators (`eval/src/generate_negatives.py`,
-    `eval/src/generate_positives.py`)
+    `generate_positives.py`)
   * the CLI below, for checking a machine or an engine in five seconds
+
+## The protocol
+
+One TCP port per engine process. One JSON line per direction. One exchange per
+connection (a per-request socket, no sessions, no pooling). Audio travels as
+base64 WAV. The full contract, including the exact envelope shapes, is the
+docstring of `tts_protocol/wire.py` - that document is the spec; this README
+explains the shape of the system around it.
+
+The client (`tts_protocol/client.py`, `TtsClient`) implements the `Engine`
+interface (`tts_protocol/engine.py`), so the corpus generators program against
+the interface and never name an engine class:
+
+```
+TtsClient("tcp://127.0.0.1:8900")     # one engine
+TtsClient("tcp://box-a:8900,box-b:8900")   # a pool; the client load-balances
+```
+
+**`tcp://` is the only spec the client accepts.** Old raw forms (`http://...`,
+a bare `host:port`, `mlx://`) are rejected at construction with an explanation.
+That is deliberate: this code used to read the same string as three different
+backends (HTTP service, raw Wyoming socket, in-process mlx), and a silent
+misread once rendered a whole corpus from the wrong engine. A `tcp://` URL
+cannot be misread.
+
+Batching is the client's job, not the server's: `Engine.batch` joins a list of
+texts into one utterance (`". ".join(t.rstrip(".") for t in texts) + "."`),
+renders it once, and splits it back apart on the word timestamps. The join is
+byte-identical to what the old in-process `kokoro_tts_batch` produced, so the
+rendered audio of a batched corpus is what the 16 calibrated runs trained on.
+
+Two capabilities ride on the `voices` reply, so a probe needs no test render:
+`timestamps` (does the engine return word timestamps - run-on cuts depend on
+this) and `speaker` (does it have the multi-speaker `(voice, speaker)` pairs).
+The `engine` name is reported too, so a misconfigured port tells you what it
+actually is.
 
 ## The engines
 
-| engine | what it is | where it runs | client spec |
-|---|---|---|---|
-| `kokoro-mlx` | Kokoro in-process via the mlx fork (word timestamps) | Apple Silicon host, `uv` venv | `kokoro-mlx` or `mlx://` |
-| `kokoro-http` | Kokoro-FastAPI (OpenAI-compatible API) | any box, Docker (CPU or CUDA overlay) or bare host | `http://kokoro:8880` (comma-separated for a pool) |
-| `piper` | Wyoming Piper (serial, one voice resident) | any box, Docker (multi-arch, no GPU needed) | `piper://127.0.0.1:10200`, or bare `host:port` |
-| `tts-service` | any of the above, behind a TCP port | wherever the server is run | `tcp://host:8899` (comma-separated for a pool) |
+| engine | what it is | where it runs | protocol port | client spec |
+|---|---|---|---|---|
+| `engines/kokoro_mlx` | Kokoro-82M in-process via the mlx fork (word timestamps) | **Apple Silicon host** (the MLX runtime), `uv` project | 8900 | `tcp://<mac>:8900` |
+| `engines/piper` | Piper in-process via piper-tts 1.7.0 (serial, one voice resident) | **Apple Silicon host AND Docker** - the SAME code in both | 8898 | `tcp://<box>:8898` |
+| `docker/tts_engines/kokoro_http` | Kokoro-FastAPI behind a protocol wrapper | **Docker** (CPU or CUDA), FastAPI on 8880 in the same container | 8899 | `tcp://<box>:8899` |
 
-A **spec** is what every caller passes - never a class. `engines_from_spec`
-(`tts_service/engines/__init__.py`) is the registry: a fourth engine is a new
-`engines/` module plus one dispatch row, and nothing upstream changes. The
-`tcp://` row is how a *new machine* shows up: it runs the one server below in
-front of whatever model it has, and this side points at the port.
+**Apple Silicon launch mode is the two uv projects.** No Docker, no Wyoming
+process: the trainer's host run talks to `kokoro_mlx` (8900) and `piper` (8898)
+over loopback. On a Mac the non-MLX Kokoro is not used at all - the mlx engine
+is strictly better there (its own module document carries the measurements) -
+which is why there is no non-MLX Kokoro project under `tts-service/engines/`
+and the HTTP adapter lives in `docker/tts_engines/`.
 
-The engines' failure conventions are the ones the corpus layer has always had
-(`tts_service/engine.py`): Kokoro returns `None` on a transient render miss (the
-generator retries that clip alone); Piper raises, because its caller reports
-*which* voice failed. The service carries both over the wire: a null clip is the
-Kokoro convention, an error envelope is the Piper one.
+**The CUDA box runs the two Docker images.** The piper image hosts the exact
+same in-process engine as the Mac's project (`docker/Dockerfile.piper` bakes in
+`tts-service/engines/piper`), so the two machines render from one audited code
+path; the kokoro image runs FastAPI and its wrapper in one container
+(compose's CMD starts both), which is the only place the HTTP adapter ever
+runs. The trainers point at `tcp://kokoro:8899` / `tcp://piper:8898` on the
+compose network.
 
-## The service
+### Why the engines are separate processes
 
-```
-python -m tts_service.server --engine <spec> [--host 127.0.0.1] [--port 8899]
-```
+Three reasons, and each one is load-bearing:
 
-The server hosts ONE engine (any spec in the table, including another service's
-`tcp://` - not that that is useful) and answers the one-line protocol in
-`tts_service/protocol.py`: one JSON line per direction, one exchange per
-connection, audio as base64 wav. That is deliberately not HTTP: there is one
-verb per `op` field, the reply is always one line, and the only real
-requirement - a 2 MB payload - is met by a newline. The server takes every
-engine call under one lock, because every engine it hosts is effectively
-single-threaded (`server.py` says which measurements settle that).
+  1. **Dependencies conflict.** kokoro-mlx drags torch (+ the MLX runtime) and
+     misaki; piper-tts drags onnxruntime; the Kokoro-FastAPI image drags torch
+     CPU; the trainers need torch 2.5.1 (oww) or tensorflow (mww) - and
+     oww's numpy 1.x and mww's numpy 2.x do not share an environment (the
+     `train-applesilicon` / `train-mww-applesilicon` split exists for that).
+     One process cannot hold all of these, so the engines are processes.
+  2. **Isolation is a feature.** The trainer images therefore carry no TTS
+     engine dependency at all; the worst a broken TTS stack can do is fail a
+     corpus render, not corrupt a training environment.
+  3. **Ports are per-engine**, so a dead or slow engine is visible and
+     replaceable without touching the others, and the probes in the run
+     scripts ask each engine the question its stage asks.
 
-### Launching it, per machine
-
-Apple Silicon host (in-process MLX - no other process needed; the measured
-faster route for mww on a Mac, see SPEED.md):
-
-    cd tts-service
-    uv run --extra mlx python -m tts_service.server --engine kokoro-mlx --host 0.0.0.0 --port 8899
-
-Any Docker box, in front of the compose TTS services (the trainer images copy
-and bind-mount `tts-service/` - see `docker-compose.yml`):
-
-    # Kokoro-FastAPI behind it (CPU or CUDA overlay)
-    docker compose run --rm oww-trainer bash -c \
-        "cd /app/tts-service && exec python -m tts_service.server --engine http://kokoro:8880 --host 0.0.0.0 --port 8899"
-    # Piper behind it
-    docker compose run --rm mww-trainer bash -c \
-        "cd /app/tts-service && exec python -m tts_service.server --engine piper:10200 --host 0.0.0.0 --port 8899"
-
-Then any client on a reachable network uses `tcp://<that-host>:8899`. Comma-
-separate several for a pool: `tcp://a:8899,tcp://b:8898` round-robins exactly
-the way the old `KOKORO_URL=http://kokoro:8880,http://kokoro2:8880` did.
+The engines' failure conventions survive the wire unchanged: Kokoro returns a
+null clip on a transient render miss (the generator retries that clip alone);
+Piper raises, because its caller reports *which* voice failed.
 
 ## The CLI
 
-    # what an engine offers
-    python -m tts_service --tts kokoro-mlx --list-voices
-    python -m tts_service --tts tcp://127.0.0.1:8899 --list-voices
+Check an engine in five seconds - any of the ports above, from anywhere:
 
-    # render: one clip to a file, or a batch into a directory
-    python -m tts_service --tts kokoro-mlx --voice af_bella -o hey.wav "hey seeree"
-    python -m tts_service --tts tcp://127.0.0.1:8899 --voice af_bella --batch 5 --out-dir out/ \
-        "hey seeree" "hey serious" "hey series" "hey Sarah" "hey Cindy"
+```
+uv run --project tts-service/tts_protocol python -m tts_protocol \
+    --server tcp://127.0.0.1:8900 --list-voices
+uv run --project tts-service/tts_protocol python -m tts_protocol \
+    --server tcp://127.0.0.1:8898 --voice en_US-lessac-medium \
+    --speaker 1 --speed 1.2 -o /tmp/test.wav
+uv run --project tts-service/tts_protocol python -m tts_protocol \
+    --server tcp://127.0.0.1:8900 --voice af_heart --batch \
+    "hey seeree" "hey seeree, can you hear me" --out-dir /tmp/batch
+```
 
-    # Piper takes (voice, speaker) pairs
-    python -m tts_service --tts 127.0.0.1:10200 --voice en_US-libritts_r-medium --speaker 12 -o s12.wav "hey seeree"
+The package's own venv (`tts_protocol/.venv`) has exactly the protocol - no
+engine - so a failure to start one is unambiguously the engine's, never a
+dependency accident on the client side.
 
-A run prints one line per clip and a measured ms/clip summary - the same number
-the corpus generator's bar shows - so a slow machine says so before an hour is
-spent on a corpus.
+## Versioning
 
-## Measured, 2026-09-08 (Apple Silicon Mac, M-series; Docker Desktop)
-
-| path | shape | ms/clip end to end |
-|---|---|---|
-| `kokoro-mlx` in-process | 88 short clips, serial | 101 |
-| `kokoro-mlx` in-process | 88 short clips, batch 10 | 102 (no gain - see below) |
-| `kokoro-mlx` in-process | 88 long clips (1.5-2.3 s), serial | 134 |
-| `kokoro-mlx` in-process | 88 long clips, batch 10 | 103 (1.3x) |
-| `tcp://` -> service hosting `kokoro-mlx` | 5 short clips, batch 5 | 37 |
-| `tcp://` -> service hosting `piper` (10200) | single, 0.73 s @1.2x | 36 |
-| `tcp://` -> service hosting `piper` | 3 clips, batch 3 (2.8 s total) | 33 |
-| `piper` direct (10200) | single, 0.77 s @1.2x, cold connection | 711 |
-| `kokoro-http` (8880, CPU image) | single, 0.97 s | 375 |
-| `kokoro-http` (8880) | 5 short clips, batch 5 | 109 |
-
-First call on a cold MLX process pays the model load (~6 s with a warm Hugging
-Face cache; the 122-file fetch itself is <1 s). Piper's direct-connection number
-includes the first connection and the WSOLA stretch; the via-service numbers are
-warm.
-
-**Why batch 10 did not beat serial for short MLX clips** (the one counterintuitive
-row): the join/split algorithm saves *request* overhead - on the HTTP server that
-is ~3/4 of a short request (see `tts_service/engine.py`, Engine.batch), and
-batching measures 3.3-5x there. The in-process fork has almost no per-request
-overhead to save, so for sub-second phrases joining buys nothing; the gain
-appears when the joined text is long enough that the model's per-phoneme cost
-dominates (the 1.3x row). The batch machinery is kept engine-agnostic because
-the same code is the whole win over HTTP and costs nothing in-process.
-
-## Layout
-
-    tts_service/
-      engine.py       the Engine interface + split_joined (the batch algorithm)
-      audio.py        16 kHz helpers: to_int16, time_stretch (WSOLA)
-      protocol.py     the service's one-line wire format
-      server.py       python -m tts_service.server - hosts one engine behind TCP
-      client.py       KokoroPool, probe_kokoro_servers, run_jobs, Client
-                      (the calibrated corpus generator - see the file's header)
-      engines/        kokoro_mlx, kokoro_http, piper, tcp + the spec registry
-      __main__.py     the CLI
-
-Callers that used to import the old locations keep working through the shims:
-`train/corpus/kokoro.py`, `train/corpus/kokoro_mlx.py`, `train/corpus/piper.py`,
-`train/corpus/augment.py` (time_stretch now lives in `audio.py`).
+The protocol is deliberately simple enough that its two sides (client in the
+trainers, server in the engines) are pinned in this repo; both sides move in
+one commit. The envelopes carry no version field because a mismatch fails
+loudly and fast (an unknown `op`, a missing key) rather than silently - one
+exchange per connection means there is no session state to desynchronize.
