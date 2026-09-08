@@ -814,12 +814,15 @@ def main():
         print("\n[Kokoro TTS]")
         print(f"  Per voice: {kokoro_plain_train} phrase-alone, {runon_train} run-on "
               f"({args.runon_fraction:.0%})")
+        # workers/batch by KEYWORD: this signature has a `speeds` parameter between
+        # desc and workers, and positional args once fell into it (workers-as-speeds
+        # died with "'int' object is not iterable" on the first corpus run, 2026-09-09).
         generate_kokoro_samples(pool, kokoro_voices, pos_train,
                                 kokoro_plain_train, positive_texts, "Kokoro positive train",
-                                args.tts_workers, args.tts_batch)
+                                workers=args.tts_workers, batch=args.tts_batch)
         generate_kokoro_samples(pool, kokoro_voices, pos_test,
                                 kokoro_plain_test, positive_texts, "Kokoro positive test",
-                                args.tts_workers, args.tts_batch)
+                                workers=args.tts_workers, batch=args.tts_batch)
 
         if piper_voices:
             print(f"\n[Piper TTS]  {len(piper_voices)} voices, "
@@ -877,10 +880,10 @@ def main():
         print("\n[Kokoro TTS]")
         generate_kokoro_samples(pool, kokoro_voices, neg_train,
                                 args.samples_per_voice, negative_phrases,
-                                "Kokoro negative train", args.tts_workers, args.tts_batch)
+                                "Kokoro negative train", workers=args.tts_workers, batch=args.tts_batch)
         generate_kokoro_samples(pool, kokoro_voices, neg_test,
                                 args.samples_per_voice // 10, negative_phrases,
-                                "Kokoro negative test", args.tts_workers, args.tts_batch)
+                                "Kokoro negative test", workers=args.tts_workers, batch=args.tts_batch)
 
     # === COUNT SAMPLES ===
     n_pos_train = len(list(pos_train.glob("*.wav")))

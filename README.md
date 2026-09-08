@@ -83,8 +83,8 @@ you what to expect.
 |---|---|---|
 | Fetch external corpora | download-bound, ~43 GB for both targets | same |
 | Record | human time, 20–50 clips per speaker | same |
-| Train — microWakeWord (corpus, features, 10k steps, TFLite, manifest) | **28m03s** | **14m14s** |
-| Train — openWakeWord (corpus, augmentation, features, 50k steps, TFLite) | **28m59s** | **~37–48m** |
+| Train — microWakeWord (corpus, features, 10k steps, TFLite, manifest) | **~30m** | **~15m** |
+| Train — openWakeWord (corpus, augmentation, features, 50k steps, TFLite) | **~30m** | **~35m** |
 | Eval | minutes | minutes |
 | Preflight | needs a mic | needs a mic |
 

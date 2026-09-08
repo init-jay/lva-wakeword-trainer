@@ -242,12 +242,17 @@ def probe_kokoro_servers(urls, max_speakers: int = 4,
     return common
 
 
-def run_jobs(job_func, jobs, workers: int = 2, desc: str = "kokoro"):
+def run_jobs(jobs, job_func, desc: str = "kokoro", workers: int = 2,
+             weights=None):
     """Run a list of independent jobs with a thread pool, in order of
     completion, with a progress bar.
 
     `jobs` is an iterable of opaque job arguments; `job_func(job)` is called
-    for each. Exceptions inside `job_func` are caught and reported - one bad
+    for each. If `job_func` returns an int it is treated as the number of
+    items the job produced and the sum is returned - callers report
+    "N/M written" from it. `weights` (same order as jobs) scales the
+    progress bar per job, so a job covering 20 clips advances it 20 rather
+    than 1. Exceptions inside `job_func` are caught and reported - one bad
     voice must not abort the whole corpus run. The pool is deliberately
     small: each Kokoro request already occupies the whole GPU/CPU for the
     duration of the render, so extra workers just queue at the server side
@@ -256,21 +261,29 @@ def run_jobs(job_func, jobs, workers: int = 2, desc: str = "kokoro"):
     """
     jobs = list(jobs)
     if not jobs:
-        return
-    ok, failed = 0, 0
+        return 0
+    weights = list(weights) if weights is not None else [1] * len(jobs)
+    if len(weights) != len(jobs):
+        raise ValueError(f"run_jobs: {len(weights)} weights for {len(jobs)} jobs")
+    ok, failed, produced = 0, 0, 0
     with cf.ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = {ex.submit(job_func, j): j for j in jobs}
-        for fut in tqdm(cf.as_completed(futs), total=len(futs), desc=desc):
-            j = futs[fut]
-            try:
-                fut.result()
-                ok += 1
-            except Exception as e:
-                failed += 1
-                print(f"[{desc}] job {j!r} failed: {type(e).__name__}: {e}")
+        futs = {ex.submit(job_func, j): (j, w) for j, w in zip(jobs, weights)}
+        with tqdm(total=sum(weights), desc=desc) as bar:
+            for fut in cf.as_completed(futs):
+                j, w = futs[fut]
+                try:
+                    r = fut.result()
+                    ok += 1
+                    if isinstance(r, int):
+                        produced += r
+                except Exception as e:
+                    failed += 1
+                    print(f"[{desc}] job {j!r} failed: {type(e).__name__}: {e}")
+                bar.update(w)
     if failed:
         print(f"[{desc}] {failed}/{len(jobs)} job(s) failed; "
               f"{ok} succeeded.")
+    return produced
 
 
 # ---------------------------------------------------------------------------
@@ -344,7 +357,7 @@ def generate_kokoro_samples(pool: KokoroPool, voices, output_dir: Path,
                 name = f"{uuid.uuid4().hex}.wav"
                 scipy.io.wavfile.write(output_dir / name, SR, audio)
 
-    run_jobs(_job, jobs, workers=workers, desc=desc)
+    run_jobs(jobs, _job, desc=desc, workers=workers)
 
     print(f"[{desc}] rendered {sum(counts.values())} clips across "
           f"{len(counts)} voices:")

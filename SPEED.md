@@ -24,17 +24,24 @@ Three environments, all measured with `time` on the same wake word:
 | ├ TTS corpus (Piper + Kokoro) | included above | included above | **6m12s** (all-Piper) |
 | ├ Features | included above | included above | 1m22s |
 | └ Training, 10,000 steps + TFLite | included above | included above | **6m40s** |
-| Train — openWakeWord | **28m59s** | ~2h 15m | **~37–48m** |
-| ├ Kokoro corpus, `--kokoro-url mlx://` | included above | ~49 min | **~19–25m** |
-| ├ Augmentation + features | included above | ~21 min | ~12m30s |
+| Train — openWakeWord | **28m59s** | ~2h 15m | **~34–48m** |
+| ├ Kokoro corpus, protocol server (`tcp://`; `mlx://` before the refactor) | included above | ~49 min | **~18–25m** |
+| ├ Augmentation + features | included above | ~21 min | **~11–12m30s** |
 | └ Training, 50k steps | ~16 min | **~37 min** | **~4m35s–6m** |
 | Eval | minutes | minutes | minutes |
 | Preflight | needs a mic | needs a mic | needs a mic |
 
-The Mac-host openWakeWord row is the two measured `mlx://` runs at 22 voices
-(37m and 47m43s), not a sum of stages - the ±30% machine-load caveat in the
-Kokoro section below applies. An earlier 36-voice host-server run took ~1h15m;
-most of that difference is corpus size, not speed.
+The Mac-host openWakeWord row is three measured 22-voice runs: the two
+in-process `mlx://` runs (37m and 47m43s) and, after the protocol refactor,
+the same engine behind a TTS protocol server — 34m37s on 2026-09-09
+(`training-hey_seeree-macos-20260909-073922.log`): corpus + trim 17m45s, then
+augmentation + features + 50k steps in the remaining 16m48s, the training
+loop itself ~6m from feature completion (08:08) to model write (08:13:55);
+its run-on clips were cut at the engine's word timestamps with zero
+estimate fallbacks, and the model is not yet evaluated. Not a sum of stages
+- the ±30% machine-load caveat in the Kokoro section below applies. An
+earlier 36-voice host-server run took ~1h15m; most of that difference is
+corpus size, not speed.
 
 Figures for whole scripts are full runs at defaults - `run-mww-training.sh` covers
 corpus, features, training and manifest; `run-oww-training.sh` covers TTS generation,
@@ -231,7 +238,13 @@ trainer. Three configurations, all on the M1 Max, all generating the SAME corpus
 |---|---|---|---|
 | Kokoro-FastAPI in Docker | ~2h (est.) | not run | not run |
 | **Kokoro-FastAPI on the host** | **30m29s** | 47m56s | **82%** |
-| kokoro-mlx, in-process (`--kokoro-url mlx://`) | **19m06s** / 24m54s | 37m / 47m43s | 51% -> 61% |
+| kokoro-mlx, in-process (`mlx://` at the time; `tcp://` since the refactor) | **19m06s** / 24m54s | 37m / 47m43s | 51% -> 61% |
+
+The 09-09 protocol-server run (34m37s, the full-table note above) is not a row
+here: it generated a different, larger corpus (15,317 positives / 7,260
+negatives), so it would break the same-corpus premise of this table. It does
+settle one thing for it - the `tcp://` transport costs nothing measurable
+against in-process on the same engine and machine.
 
 The in-container row is an estimate; the measured form of the same comparison came
 sideways during the Apple Silicon port: chasing Kokoro throughput turned up the same
@@ -245,8 +258,10 @@ serialised stage, not compute, so the accelerator was mostly idle, and "it
 initialised" and "it helped" are different claims.
 
 **MLX generates the corpus 1.2-1.6x faster and produces a worse corpus on
-run-on; the timing table above assumes `mlx://`, and the host FastAPI server is
-the alternative when the run-on gap matters.** The regression is specific to
+run-on; the timing table above assumes the MLX engine (in-process `mlx://`
+at the time of those measurements, the `tcp://` protocol server since the
+refactor), and the host FastAPI server is the alternative when the run-on
+gap matters.** The regression is specific to
 run-ons; plain positives are comparable.
 
 TWO NUMBERS PER MLX CELL, BECAUSE THE SPREAD IS THE POINT. Identical corpus,

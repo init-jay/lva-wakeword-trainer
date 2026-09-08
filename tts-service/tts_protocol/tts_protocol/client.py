@@ -151,7 +151,13 @@ class TtsClient(Engine):
         return wav_audio(b64_decode(msg["clip"])), msg.get("timestamps")
 
     def batch(self, voice, speed: float, texts: list):
-        # Inherited from Engine: join, one render, split on word timestamps -
-        # or a per-clip loop when the server declared no timestamps (Piper).
-        # See Engine.batch for the measurement this exists for.
+        # The capability flag comes from the catalog (voices()). A client built
+        # for this call alone - the corpus's _client cache is a DIFFERENT object
+        # from the one the run-start probe fetched the catalog through - has not
+        # fetched it, and with the class default (False) Engine.batch would take
+        # the no-timestamps loop and every cut that needs word times degrades to
+        # the estimate fallback (measured 2026-09-09: 100% of run-on clips fell
+        # back that way). Fetch lazily: one cheap exchange, cached for life.
+        if self._catalog is None:
+            self.voices()
         return Engine.batch(self, voice, speed, texts)
