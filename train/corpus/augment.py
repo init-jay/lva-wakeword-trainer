@@ -13,6 +13,11 @@ NOTE ON PIPER CLIPS: add_child_range_copies reads the voice's sex from the filen
 convention (kokoro_af_bella_<uuid> -> "af" -> female; Piper clips are named
 piper_p{sex}_... so the same extraction works) - see the function docstring for the
 unknown-sex case it skips.
+
+time_stretch moved to tts-service on 2026-09-08 (tts_service/audio.py) because the
+shared piper engine applies speed with it and that layer must not import train/;
+this module re-exports it, so `from train.corpus.augment import time_stretch`
+keeps working everywhere, and the note about scipy-only inside it now lives there.
 """
 
 from fractions import Fraction
@@ -22,6 +27,8 @@ import numpy as np
 import scipy.io.wavfile
 from scipy.signal import resample_poly
 from tqdm import tqdm
+
+from tts_service.audio import time_stretch  # noqa: E402  (re-export; see module docstring)
 
 # Vocal-tract-length perturbation, per voice sex.
 #
@@ -50,58 +57,6 @@ CHILD_STRETCH = {"f": (1.20, 1.35), "m": (1.15, 1.30)}
 # real-clip density drives the result, so buying child coverage by spending adult
 # coverage is not a win.
 CHILD_STRETCH_FRACTION = 0.5
-
-
-def time_stretch(x: np.ndarray, factor: float, sr: int = 16000,
-                 frame_ms: float = 30.0, seek_ms: float = 7.0) -> np.ndarray:
-    """Lengthen `x` by `factor` without moving pitch (WSOLA overlap-add).
-
-    Plain overlap-add at a fixed hop cuts frames at arbitrary phase and the
-    reassembled periods fight each other, which on a voiced phrase sounds like
-    added roughness. WSOLA slides each analysis frame within +/-`seek_ms` to the
-    offset that best correlates with what naturally followed the previous frame,
-    so consecutive frames stay in phase.
-
-    scipy only, deliberately: the trainer image has no ffmpeg (Dockerfile:7) and
-    torchaudio is not importable from the eval tools, so anything relying on either
-    could not be checked outside the container.
-    """
-    if abs(factor - 1.0) < 1e-3 or len(x) < int(sr * frame_ms / 1000) * 2:
-        return x.astype(np.float64)
-
-    x = x.astype(np.float64)
-    N = int(sr * frame_ms / 1000)
-    hop_in = N // 4
-    hop_out = max(1, int(round(hop_in * factor)))
-    seek = int(sr * seek_ms / 1000)
-    win = np.hanning(N + 1)[:N]
-
-    out = np.zeros(int(len(x) * factor) + 2 * N)
-    weight = np.zeros_like(out)
-    tail = None
-    i = 0
-    while True:
-        want = i * hop_in
-        offset = 0
-        if tail is not None:
-            lo, hi = max(0, want - seek), min(len(x) - N, want + seek)
-            if hi > lo:
-                seg = x[lo:hi + len(tail)]
-                if len(seg) >= len(tail):
-                    offset = lo + int(np.argmax(np.correlate(seg, tail, "valid"))) - want
-        start = want + offset
-        dest = i * hop_out
-        if start < 0 or start + N > len(x) or dest + N > len(out):
-            break
-        out[dest:dest + N] += x[start:start + N] * win
-        weight[dest:dest + N] += win
-        nxt = start + hop_out
-        tail = x[nxt:nxt + N // 2] if nxt + N // 2 <= len(x) else None
-        i += 1
-
-    covered = weight > 1e-6
-    out[covered] /= weight[covered]
-    return out[:int(len(x) * factor)]
 
 
 def vocal_tract_shift(data: np.ndarray, ratio: float, sr: int = 16000) -> np.ndarray:

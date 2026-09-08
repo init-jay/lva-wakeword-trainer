@@ -107,8 +107,13 @@ print('ai-edge-litert OK')"
 # COPIED so the import check below runs at BUILD time - a package that does not
 # import should fail the build, not a run. docker-compose then mounts this same
 # directory over the top, so editing a trainer does not mean rebuilding a CUDA image:
-# the copy is what the build verified, the mount is what actually runs.
+# the copy is what the build verified, the mount is what actually runs. The shared
+# TTS layer rides along the same way: tts-service/ is copied here and mounted over
+# it in docker-compose.yml, and train/corpus/__init__.py adds it to sys.path, so
+# the import check below exercises it.
 COPY train/ ./train/
+COPY tts-service/ ./tts-service/
 
 RUN python3 -c "import train.corpus.augment, train.corpus.negatives, \
-                       train.corpus.real, train.corpus.piper"
+                       train.corpus.real, train.corpus.piper, \
+                       train.corpus.kokoro"

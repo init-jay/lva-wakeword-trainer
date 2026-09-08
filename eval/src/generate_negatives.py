@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Generate a targeted negative corpus for wake-word evaluation, using an
-OpenAI-compatible TTS server (tested against Kokoro-FastAPI).
+"""Generate a targeted negative corpus for wake-word evaluation, rendering with
+the shared tts-service layer (Kokoro-FastAPI over HTTP, in-process MLX on Apple
+Silicon, or Piper over Wyoming).
 
 A hundred random sentences would mostly measure nothing: a wake-word model that is
 already quiet on ordinary speech scores zero on all of them. The useful negatives are
@@ -40,6 +41,13 @@ Examples
     python -m eval.generate_negatives \\
         --url http://192.168.2.14:8880/v1/audio/speech
 
+    # in-process Kokoro on Apple Silicon: no server, the MLX model in this process
+    python -m eval.generate_negatives --url mlx://
+
+    # Piper instead of Kokoro (Wyoming server; the voice list is then the audited
+    # selection from train/corpus/piper.py, so its exclusion tables apply)
+    python -m eval.generate_negatives --tts piper --piper-url 127.0.0.1:10200
+
     # see what would be produced without calling the server
     python -m eval.generate_negatives --dry-run
 
@@ -57,15 +65,11 @@ three transfer unchanged.
 
 import argparse
 import concurrent.futures as cf
-import json
 import sys
-import urllib.request
-import warnings
 from pathlib import Path
 
 import numpy as np
 from scipy.io import wavfile
-from scipy.signal import resample_poly
 
 # Runnable as `python eval/src/generate_negatives.py` as well as `python -m
 # eval.generate_negatives`. The module form has the `eval` package importable;
@@ -83,9 +87,17 @@ except ImportError:
 
 if paths is not None:
     sys.path.insert(0, str(paths.REPO_ROOT))
+    # The shared TTS layer lives in tts-service/ at the repo root; the hyphen in
+    # the name means that string is not importable, so its parent goes on sys.path.
+    sys.path.insert(0, str(paths.REPO_ROOT / "tts-service"))
     import wordlists  # noqa: E402
+    import tts_service  # noqa: E402
+    from train.corpus.piper import select_piper_voices  # noqa: E402
     DEFAULT_OUT = str(paths.NEGATIVES_DIR)
 else:
+    wordlists = None  # type: ignore
+    tts_service = None
+    select_piper_voices = None
     DEFAULT_OUT = "negatives_tts"
 
 SR = 16000  # openWakeWord operates on 16 kHz mono audio
@@ -106,50 +118,64 @@ def build_corpus(categories, phrases):
 def synth(index, category, text, args):
     """Render one utterance and write it as a 16 kHz mono 16-bit WAV."""
     rng = np.random.default_rng(index)
-    voice = VOICES[index % len(VOICES)]
+    voice = args.voices[index % len(args.voices)]
     speed = round(float(rng.uniform(*args.speed_range)), 3)
 
-    payload = json.dumps({"model": args.model, "input": text, "voice": voice,
-                          "response_format": "wav", "speed": speed}).encode()
-    request = urllib.request.Request(args.url, data=payload, headers={
-        "Authorization": f"Bearer {args.api_key}", "Content-Type": "application/json"})
-
+    # The engine returns 16 kHz int16 for both Kokoro and Piper, so the old
+    # decode-resample step is gone; the retry stays - both engines fail transiently.
+    # Piper raises on transport errors; Kokoro returns None. Same shape, one loop.
+    audio, err = None, ""
     for attempt in range(args.retries):
         try:
-            with urllib.request.urlopen(request, timeout=args.timeout) as response:
-                raw = response.read()
-            break
+            audio = args.engine.render(voice, text, speed)
         except Exception as exc:                                     # noqa: BLE001
-            if attempt == args.retries - 1:
-                return None, f"FAIL {category}_{index:03d}: {type(exc).__name__}: {exc}"
-
-    scratch = Path(args.out) / f".raw_{index:03d}.wav"
-    scratch.write_bytes(raw)
-    with warnings.catch_warnings():
-        # Streaming servers emit a placeholder RIFF length; the data itself is fine.
-        warnings.simplefilter("ignore", wavfile.WavFileWarning)
-        sr, data = wavfile.read(scratch)
-    scratch.unlink()
-
-    if data.ndim > 1:
-        data = data.mean(axis=1)
-    if sr != SR:
-        data = resample_poly(data.astype(np.float32), SR, sr)
-    data = np.clip(data, -32768, 32767).astype(np.int16)
+            err = f"{type(exc).__name__}: {exc}"
+        else:
+            if audio is not None:
+                break
+    if audio is None:
+        return None, (f"FAIL {category}_{index:03d}: {args.engine.name}"
+                      f"{': ' + err if err else ''}")
 
     name = f"{category}_{index:03d}_{voice}.wav"
-    wavfile.write(Path(args.out) / name, SR, data)
-    return name, f"{name:<34} {len(data)/SR:5.2f}s  speed={speed:<5} {text[:44]}"
+    wavfile.write(Path(args.out) / name, SR, audio)
+    return name, f"{name:<34} {len(audio)/SR:5.2f}s  speed={speed:<5} {text[:44]}"
+
+
+def make_engine(args):
+    if args.tts == "piper":
+        host, _, port = args.piper_url.rpartition(":")
+        return tts_service.PiperWyomingEngine(host, int(port))
+    # --url is an engine spec: an OpenAI-compatible server URL (a full
+    # /v1/audio/speech endpoint from old invocations still works), or "mlx://"
+    # for the in-process MLX backend. One engine here: a ~100-clip eval corpus
+    # has no business driving the pool machinery, which exists to keep a whole
+    # server farm busy on a 5000-clip corpus.
+    url = args.url
+    if url.endswith("/v1/audio/speech"):
+        url = url[: -len("/v1/audio/speech")]
+    return tts_service.engines_from_spec(url)[0]
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--url", default="http://localhost:8880/v1/audio/speech",
-                   help="OpenAI-compatible speech endpoint (default: %(default)s)")
+                   help="Kokoro engine spec: an OpenAI-compatible server URL (the "
+                        "legacy full /v1/audio/speech endpoint is accepted), or 'mlx://' "
+                        "for in-process MLX (default: %(default)s)")
+    p.add_argument("--tts", default="kokoro", choices=["kokoro", "piper"],
+                   help="TTS engine (default: %(default)s)")
+    p.add_argument("--piper-url", default="127.0.0.1:10200",
+                   help="Piper Wyoming server host:port, used with --tts piper "
+                        "(default: %(default)s)")
+    p.add_argument("--max-speakers", type=int, default=12,
+                   help="Piper: cap on speakers per multi-speaker model "
+                        "(default: %(default)s)")
     p.add_argument("--api-key", default="not-needed",
-                   help="bearer token; Kokoro-FastAPI ignores it (default: %(default)s)")
-    p.add_argument("--model", default="kokoro", help="TTS model name")
+                   help="ignored; kept so old invocations keep working (the engine "
+                        "owns the request shape now)")
+    p.add_argument("--model", default="kokoro", help="ignored; see --api-key")
     p.add_argument("--out", default=DEFAULT_OUT,
                    help="output directory for the WAVs (default: %(default)s, where "
                         "the eval tools look for them)")
@@ -164,7 +190,9 @@ def main():
                    help="parallel requests; keep modest, the server is doing the work")
     p.add_argument("--speed-range", type=float, nargs=2, default=(0.88, 1.18),
                    metavar=("MIN", "MAX"), help="speaking-rate jitter")
-    p.add_argument("--timeout", type=float, default=120)
+    p.add_argument("--timeout", type=float, default=120,
+                   help="accepted for old invocations; the engine owns its request "
+                        "timeout now (tts-service)")
     p.add_argument("--retries", type=int, default=3)
     p.add_argument("--dry-run", action="store_true",
                    help="list what would be generated without calling the server")
@@ -180,16 +208,36 @@ def main():
 
     corpus = build_corpus(args.categories, phrases)
     if args.dry_run:
+        shown = VOICES if args.tts != "piper" else ["<from live Piper catalog>"]
         for i, (category, text) in enumerate(corpus):
-            print(f"  {category}_{i:03d}_{VOICES[i % len(VOICES)]:<12} {text}")
+            print(f"  {category}_{i:03d}_{shown[i % len(shown)]:<34} {text}")
         print(f"\n{len(corpus)} utterances across {len(args.categories)} categories "
               f"(nothing written; drop --dry-run to generate)")
         return
 
+    if wordlists is None or tts_service is None:
+        sys.exit("ERROR: this copy of the script has no repo layout to import the "
+                 "TTS layer from - run it from the lva-wakeword-trainer checkout")
+
+    args.engine = make_engine(args)
+    if args.tts == "piper":
+        host, _, port = args.piper_url.rpartition(":")
+        # The trainer's audited selection: drops the voices whose pronunciation of
+        # this wake word failed the audit, so the eval corpus cannot contain
+        # mislabelled phrases - the failure mode the Kokoro side spent eleven runs
+        # discovering (train/corpus/piper.py).
+        args.voices = select_piper_voices(host, int(port), args.wake_word,
+                                          max_speakers=args.max_speakers)
+        if not args.voices:
+            sys.exit("ERROR: no usable Piper voices")
+    else:
+        args.voices = VOICES
+
     out = Path(args.out).expanduser()
     out.mkdir(parents=True, exist_ok=True)
     args.out = out
-    print(f"generating {len(corpus)} negatives -> {out}")
+    print(f"generating {len(corpus)} negatives -> {out} "
+          f"({args.engine.name}, {len(args.voices)} voices)")
 
     written, failures = 0, []
     with cf.ThreadPoolExecutor(max_workers=args.workers) as pool:

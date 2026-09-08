@@ -97,9 +97,13 @@ print('ai-edge-litert OK')" \
 import tensorflow as tf; \
 print('visible GPUs:', tf.config.list_physical_devices('GPU') or 'none - expected, this is the CPU image')"
 
-# COPIED so the import check runs at BUILD time; docker-compose mounts train/ over
-# the top at runtime. Same split, same reasons, as every other trainer image here.
+# COPIED so the import check runs at BUILD time; docker-compose mounts train/ and
+# tts-service/ over the copies at runtime. Same split, same reasons, as every other
+# trainer image here. The shared TTS layer lives in tts-service/ at the repo root;
+# train/corpus/__init__.py adds it to sys.path, so the import below exercises it.
 COPY train/ ./train/
+COPY tts-service/ ./tts-service/
 
 RUN python3 -c "import train.corpus.augment, train.corpus.negatives, \
-                       train.corpus.real, train.corpus.piper"
+                       train.corpus.real, train.corpus.piper, \
+                       train.corpus.kokoro"

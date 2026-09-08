@@ -107,7 +107,11 @@ RUN python3 -c "import tensorflow as tf; print('tensorflow', tf.__version__)" \
     && command -v onnx2tf
 
 # The whole train/ package: train.corpus is shared, train.oww is this trainer.
+# And the shared TTS layer beside it: train/corpus/__init__.py adds tts-service/ to
+# sys.path, so importing anything from train.corpus exercises it - including the
+# import check below.
 COPY train/ ./train/
+COPY tts-service/ ./tts-service/
 
 # scripts/ IS NOT COPIED - docker-compose bind-mounts it, as it does train/ over the
 # copy above. The two are treated differently on purpose:
@@ -123,5 +127,8 @@ COPY train/ ./train/
 #                 Dockerfile.eval already calls out.
 
 # Fail the build rather than a training run if the package does not import.
+# train.corpus.kokoro is what pulls in the tts-service layer (train/corpus/__init__.py
+# adds it to sys.path), so this single line checks that copy too.
 RUN python3 -c "import train.corpus.augment, train.corpus.negatives, \
-                       train.corpus.real, train.corpus.piper"
+                       train.corpus.real, train.corpus.piper, \
+                       train.corpus.kokoro"

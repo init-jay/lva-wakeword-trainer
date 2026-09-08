@@ -75,11 +75,11 @@ far.
 │   ├── provenance.py             run tag: the commit AND the audio it trained on
 │   ├── corpus/                   shared by both trainers
 │   │   ├── augment.py
-│   │   ├── kokoro.py             the Kokoro TTS client (both trainers)
-│   │   ├── kokoro_mlx.py         the in-process mlx:// backend for it
+│   │   ├── kokoro.py             shim → tts-service (both trainers import through it)
+│   │   ├── kokoro_mlx.py         shim → tts-service
 │   │   ├── negatives.py
 │   │   ├── positives.py
-│   │   ├── piper.py
+│   │   ├── piper.py              Piper voice policy + generator (the engine is in tts-service)
 │   │   └── real.py
 │   ├── oww/
 │   │   ├── train.py
@@ -90,6 +90,9 @@ far.
 │       ├── config.py
 │       ├── train.py
 │       └── manifest.py
+├── tts-service/                  the shared TTS layer: engine registry, the batch
+│                                 algorithm, and the TCP service (README.md there);
+│                                 the corpus modules above are shims onto it
 ├── eval/                         3 · eval model - self-contained: everything the step needs
 │   ├── docker-compose.yml        its own compose project, out of the base training file
 │   ├── Dockerfile                CPU only, native on Apple Silicon

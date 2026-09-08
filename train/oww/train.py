@@ -551,7 +551,7 @@ def main():
                              "client threads do not. (Not on Metal, where two "
                              "instances share one GPU and measured no faster.)\n"
                              "mlx:// renders in-process instead - see "
-                             "corpus/kokoro_mlx.py.")
+                             "tts-service/README.md.")
     parser.add_argument("--data-dir", default="data/external",
                         help="Where the third-party downloads live: the ACAV100M "
                         "and validation feature .npy files, audioset_16k, fma, "

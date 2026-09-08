@@ -1,13 +1,19 @@
-"""Engine-agnostic corpus construction, shared by both trainers.
+"""TTS corpus generation for wakeword training data.
 
-Everything in here operates on 16 kHz mono WAVs and knows nothing about how those
-clips will later be turned into features. That is the seam between openWakeWord
-(melspectrogram -> embedding model -> 96-dim embeddings, 2000 ms window) and
-microWakeWord (40 features per 10 ms into a streaming MixConv net, 1500 ms clip):
-everything up to a directory of WAVs is shared, everything after it is not.
+Generates synthetic positive and negative samples using Kokoro TTS.
+These synthetic voices complement the real recordings in data/recordings/
+to give the model a wider range of speaker characteristics.
 
-See ARCHITECTURE.md. The modules here were moved out of train.py without behaviour
-change - sixteen tuning runs are calibrated against that behaviour, so this package is
-code motion, not cleanup. Anything that looks like it wants tidying probably encodes
-a measured result; check the tuning log before changing it.
+Import bootstrap: the shared TTS layer lives in tts-service/ at the repo root.
+The hyphen in the directory name means it cannot be imported by that name, so its
+parent is added to sys.path here and every module below imports the engines,
+the batch algorithm and the pool from tts_service. The hyphen itself is
+deliberate: tts-service is a self-contained layer with its own venv story and
+README, not a module of train/.
 """
+import sys
+from pathlib import Path
+
+_TTS_DIR = str(Path(__file__).resolve().parents[2] / "tts-service")
+if _TTS_DIR not in sys.path:
+    sys.path.insert(0, _TTS_DIR)

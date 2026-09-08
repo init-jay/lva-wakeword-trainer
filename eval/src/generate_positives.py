@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Generate a synthetic positive corpus for wake-word evaluation, using an
-OpenAI-compatible TTS server (tested against Kokoro-FastAPI).
+"""Generate a synthetic positive corpus for wake-word evaluation, rendering with
+the shared tts-service layer (Kokoro-FastAPI over HTTP, in-process MLX on Apple
+Silicon, or Piper over Wyoming).
 
 Read the output carefully, because this corpus is not a generalisation test.
 `train.py` generates its positives from every English Kokoro voice at speeds 0.7-1.3,
@@ -44,6 +45,14 @@ Examples
     python -m eval.generate_positives --wake-word "hey seeree" \\
         --url http://192.168.2.14:8880/v1/audio/speech
 
+    # in-process Kokoro on Apple Silicon: no server, the MLX model in this process
+    python -m eval.generate_positives --wake-word "hey seeree" --url mlx://
+
+    # Piper instead of Kokoro (the voice list is then the audited selection from
+    # train/corpus/piper.py, so its exclusion tables apply)
+    python -m eval.generate_positives --wake-word "hey seeree" \\
+        --tts piper --piper-url 127.0.0.1:10200
+
     # just the axis you care about
     python -m eval.generate_positives --wake-word "hey seeree" --sweeps speed
 
@@ -57,15 +66,11 @@ gates normally run on - this measures the sweeps, not speaker generalisation:
 
 import argparse
 import concurrent.futures as cf
-import json
 import sys
-import urllib.request
-import warnings
 from pathlib import Path
 
 import numpy as np
 from scipy.io import wavfile
-from scipy.signal import resample_poly
 
 # Runnable as `python eval/src/generate_positives.py` as well as `python -m
 # eval.generate_positives`: the module form has the `eval` package importable,
@@ -74,6 +79,14 @@ try:
     from eval import paths
 except ImportError:
     import paths
+
+sys.path.insert(0, str(paths.REPO_ROOT))
+# The shared TTS layer lives in tts-service/ at the repo root; the hyphen in the
+# name means that string is not importable, so its parent goes on sys.path.
+sys.path.insert(0, str(paths.REPO_ROOT / "tts-service"))
+
+import tts_service  # noqa: E402
+from train.corpus.piper import select_piper_voices  # noqa: E402
 
 SR = 16000
 FULL_SCALE = 32768.0
@@ -102,36 +115,31 @@ COMMANDS = [
 ]
 
 
-def synth(text, voice, speed, args):
-    """Render one utterance as 16 kHz mono 16-bit PCM."""
-    payload = json.dumps({"model": args.model, "input": text, "voice": voice,
-                          "response_format": "wav", "speed": round(float(speed), 3)}).encode()
-    request = urllib.request.Request(args.url, data=payload, headers={
-        "Authorization": f"Bearer {args.api_key}", "Content-Type": "application/json"})
+def vtag(voice):
+    """Filename-safe tag for a voice: the id itself for Kokoro, voice_speaker for
+    Piper multi-speaker models (the same convention the corpus naming uses)."""
+    if isinstance(voice, tuple):
+        return f"{voice[0]}_{voice[1]}" if voice[1] is not None else voice[0]
+    return voice
 
-    raw = None
+
+def synth(text, voice, speed, args):
+    """Render one utterance as 16 kHz mono 16-bit PCM.
+
+    The engine returns 16 kHz int16 for both Kokoro and Piper, so the old
+    decode-resample step is gone; the retry stays. Piper raises on transport
+    failure, Kokoro returns None - same loop, one shape.
+    """
+    audio, error = None, ""
     for attempt in range(args.retries):
         try:
-            with urllib.request.urlopen(request, timeout=args.timeout) as response:
-                raw = response.read()
-            break
+            audio = args.engine.render(voice, text, round(float(speed), 3))
         except Exception as exc:                                     # noqa: BLE001
-            if attempt == args.retries - 1:
-                return None, f"{type(exc).__name__}: {exc}"
-
-    scratch = Path(args.out) / f".raw_{voice}_{speed}.wav"
-    scratch.write_bytes(raw)
-    with warnings.catch_warnings():
-        # Streaming servers emit a placeholder RIFF length; the data itself is fine.
-        warnings.simplefilter("ignore", wavfile.WavFileWarning)
-        sr, data = wavfile.read(scratch)
-    scratch.unlink()
-
-    if data.ndim > 1:
-        data = data.mean(axis=1)
-    if sr != SR:
-        data = resample_poly(data.astype(np.float32), SR, sr)
-    return np.clip(data, -32768, 32767).astype(np.int16), None
+            error = f"{type(exc).__name__}: {exc}"
+        else:
+            if audio is not None:
+                break
+    return audio, error
 
 
 def set_level(data, target_dbfs):
@@ -159,23 +167,24 @@ def plan(args):
     recover the swept variable from the first two fields.
     """
     phrase = args.wake_word
+    voices = args.voices
     jobs = []
     if "voices" in args.sweeps:
-        for voice in VOICES:
-            jobs.append((f"voices_1.00_{voice}.wav", voice, 1.0, None, phrase))
+        for voice in voices:
+            jobs.append((f"voices_1.00_{vtag(voice)}.wav", voice, 1.0, None, phrase))
     if "speed" in args.sweeps:
         for speed in SPEEDS:
-            for voice in VOICES[:args.voices_per_step]:
-                jobs.append((f"speed_{speed:.2f}_{voice}.wav", voice, speed, None, phrase))
+            for voice in voices[:args.voices_per_step]:
+                jobs.append((f"speed_{speed:.2f}_{vtag(voice)}.wav", voice, speed, None, phrase))
     if "level" in args.sweeps:
         for dbfs in LEVELS_DBFS:
-            for voice in VOICES[:args.voices_per_step]:
-                jobs.append((f"level_{dbfs:+03d}_{voice}.wav", voice, 1.0,
+            for voice in voices[:args.voices_per_step]:
+                jobs.append((f"level_{dbfs:+03d}_{vtag(voice)}.wav", voice, 1.0,
                              ("level", dbfs), phrase))
     if "noise" in args.sweeps:
         for snr in SNRS_DB:
-            for voice in VOICES[:args.voices_per_step]:
-                jobs.append((f"noise_{snr:02d}_{voice}.wav", voice, 1.0,
+            for voice in voices[:args.voices_per_step]:
+                jobs.append((f"noise_{snr:02d}_{vtag(voice)}.wav", voice, 1.0,
                              ("noise", snr), phrase))
     if "command" in args.sweeps:
         # The comma is the whole difference between the two variants: the TTS reads
@@ -184,18 +193,48 @@ def plan(args):
         for variant, template in (("run", "{phrase} {command}"),
                                   ("pause", "{phrase}, {command}")):
             for i, command in enumerate(COMMANDS):
-                for voice in VOICES[:args.voices_per_step]:
+                for voice in voices[:args.voices_per_step]:
                     text = template.format(phrase=phrase, command=command)
-                    jobs.append((f"cmd_{variant}_{i:02d}_{voice}.wav", voice, 1.0,
+                    jobs.append((f"cmd_{variant}_{i:02d}_{vtag(voice)}.wav", voice, 1.0,
                                  None, text))
     return jobs
 
 
-def produce(job, args, rng):
+def render_jobs(jobs, args):
+    """{(voice, speed, text): audio} for every distinct utterance the jobs need.
+
+    Grouped by (voice, speed): a timestamp engine joins the group's distinct texts
+    into ONE request and splits it back on word timestamps - the same win the
+    corpus generator measures (a short Kokoro request is ~3/4 fixed overhead; see
+    tts-service/tts_service/engines/kokoro_http.py). An engine without word
+    timestamps (Piper) renders per clip, in voice-outer order: its server serves
+    one request at a time, so order is a correctness property, not a preference
+    (tts-service/tts_service/engines/piper.py). Deduplication is by text, so a
+    phrase rendered at 1.0 for the voices sweep is not rendered again for the
+    level sweep.
+    """
+    groups = {}
+    for _filename, voice, speed, _post, text in jobs:
+        groups.setdefault((voice, speed), []).append(text)
+
+    results = {}
+    for (voice, speed), texts in groups.items():
+        unique = list(dict.fromkeys(texts))
+        if args.engine.supports_timestamps and len(unique) > 1:
+            rendered = args.engine.batch(voice, speed, unique)
+        else:
+            rendered = [(args.engine.render(voice, t, speed), None) for t in unique]
+        for text, (audio, _ts) in zip(unique, rendered):
+            if audio is not None:
+                results[(voice, speed, text)] = audio
+    return results
+
+
+def produce(job, args, rng, rendered):
     filename, voice, speed, post, text = job
-    data, error = synth(text, voice, speed, args)
+    data = rendered.get((voice, speed, text))
     if data is None:
-        return None, f"FAIL {filename}: {error}"
+        return None, f"FAIL {filename}: {args.engine.name} returned no audio"
 
     if post and post[0] == "level":
         data = set_level(data, post[1])
@@ -214,10 +253,21 @@ def main():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--wake-word", required=True, help="The phrase to render")
     p.add_argument("--url", default="http://localhost:8880/v1/audio/speech",
-                   help="OpenAI-compatible speech endpoint (default: %(default)s)")
+                   help="Kokoro engine spec: an OpenAI-compatible server URL (the "
+                        "legacy full /v1/audio/speech endpoint is accepted), or 'mlx://' "
+                        "for in-process MLX (default: %(default)s)")
+    p.add_argument("--tts", default="kokoro", choices=["kokoro", "piper"],
+                   help="TTS engine (default: %(default)s)")
+    p.add_argument("--piper-url", default="127.0.0.1:10200",
+                   help="Piper Wyoming server host:port, used with --tts piper "
+                        "(default: %(default)s)")
+    p.add_argument("--max-speakers", type=int, default=12,
+                   help="Piper: cap on speakers per multi-speaker model "
+                        "(default: %(default)s)")
     p.add_argument("--api-key", default="not-needed",
-                   help="bearer token; Kokoro-FastAPI ignores it")
-    p.add_argument("--model", default="kokoro", help="TTS model name")
+                   help="ignored; kept so old invocations keep working (the engine "
+                        "owns the request shape now)")
+    p.add_argument("--model", default="kokoro", help="ignored; see --api-key")
     p.add_argument("--out", default=str(paths.POSITIVES_DIR),
                    help="output directory (default: %(default)s)")
     p.add_argument("--sweeps", nargs="+",
@@ -229,17 +279,42 @@ def main():
                         "(default: %(default)s)")
     p.add_argument("--workers", type=int, default=4,
                    help="parallel requests; keep modest, the server does the work")
-    p.add_argument("--timeout", type=float, default=120)
+    p.add_argument("--timeout", type=float, default=120,
+                   help="accepted for old invocations; the engine owns its request "
+                        "timeout now (tts-service)")
     p.add_argument("--retries", type=int, default=3)
     p.add_argument("--dry-run", action="store_true",
                    help="list what would be generated without calling the server")
     args = p.parse_args()
 
+    # Engine construction is offline (no I/O), so it happens before the dry-run
+    # even though voice SELECTION for Piper needs the live catalog.
+    if args.tts == "piper":
+        host, _, port = args.piper_url.rpartition(":")
+        args.engine = tts_service.PiperWyomingEngine(host, int(port))
+        if args.dry_run:
+            args.voices = ["<live Piper catalog>"]
+        else:
+            # The trainer's audited selection: drops the voices whose pronunciation
+            # of this wake word failed the audit, so the corpus cannot contain
+            # mislabelled phrases - the failure mode the Kokoro side spent eleven
+            # runs discovering (train/corpus/piper.py).
+            args.voices = select_piper_voices(host, int(port), args.wake_word,
+                                              max_speakers=args.max_speakers)
+            if not args.voices:
+                sys.exit("ERROR: no usable Piper voices")
+    else:
+        url = args.url
+        if url.endswith("/v1/audio/speech"):
+            url = url[: -len("/v1/audio/speech")]
+        args.engine = tts_service.engines_from_spec(url)[0]
+        args.voices = VOICES
+
     jobs = plan(args)
     if args.dry_run:
         for filename, voice, speed, post, text in jobs:
             note = f"  {post[0]}={post[1]}" if post else ""
-            print(f"  {filename:<34}{voice:<12} speed={speed:.2f}{note}   \"{text}\"")
+            print(f"  {filename:<44}{vtag(voice):<16} speed={speed:.2f}{note}   \"{text}\"")
         print(f"\n{len(jobs)} clips across {len(args.sweeps)} sweep(s) "
               "(nothing written; drop --dry-run to generate)")
         return
@@ -247,12 +322,18 @@ def main():
     out = Path(args.out).expanduser()
     out.mkdir(parents=True, exist_ok=True)
     args.out = out
-    print(f'generating {len(jobs)} positives for "{args.wake_word}" -> {out}')
+    print(f'generating {len(jobs)} positives for "{args.wake_word}" -> {out} '
+          f"({args.engine.name}, {len(args.voices)} voices)")
+
+    # Render first, in engine order (voice-outer for Piper), then post-process in
+    # parallel as before - the sweeps differ only in post-processing, so one
+    # rendering per distinct (voice, speed, text) serves them all.
+    rendered = render_jobs(jobs, args)
 
     rng = np.random.default_rng(0)
     written, failures = 0, []
     with cf.ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = [pool.submit(produce, job, args, rng) for job in jobs]
+        futures = [pool.submit(produce, job, args, rng, rendered) for job in jobs]
         for future in cf.as_completed(futures):
             filename, line = future.result()
             if filename is None:

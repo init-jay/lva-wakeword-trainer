@@ -256,9 +256,14 @@ RUN python3 -c "import tensorflow as tf; print('tensorflow', tf.__version__)" \
     && python3 -c "import onnx2tf" \
     && command -v onnx2tf
 
-# COPY for the build-time import check; docker-compose bind-mounts train/ over it at
-# runtime. Same split as Dockerfile.oww.cuda, and the same reasons.
+# COPY for the build-time import check; docker-compose bind-mounts train/ and
+# tts-service/ over the copies at runtime. Same split as Dockerfile.oww.cuda, and
+# the same reasons. The shared TTS layer has its own directory at the repo root
+# (see tts-service/README.md); train/corpus/__init__.py adds it to sys.path, so
+# the import below exercises it.
 COPY train/ ./train/
+COPY tts-service/ ./tts-service/
 
 RUN python3 -c "import train.corpus.augment, train.corpus.negatives, \
-                       train.corpus.real, train.corpus.piper"
+                       train.corpus.real, train.corpus.piper, \
+                       train.corpus.kokoro"
