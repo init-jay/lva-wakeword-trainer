@@ -7,7 +7,8 @@ requires-python = ">=3.11,<3.13"
 # THE THIRD HOST ENVIRONMENT, after record/ and preflight/, and for a different
 # reason than either of those. They run on the host because they need a MICROPHONE.
 # This one runs on the host because Docker Desktop does not pass the Metal device
-# through, so a containerised "MPS" build silently gets CPU. See apple-port.md.
+# through, so a containerised "MPS" build silently gets CPU; the Metal question is
+# closed, not pending - docker-compose.mps.yml says why.
 #
 # WHY IT IS NOT AT train/host/. `COPY train/ ./train/` in both trainer Dockerfiles
 # would sweep a .venv into the images, and a macOS torch install is several GB. The
@@ -91,10 +92,9 @@ dependencies = [
     # left datasets installed and quietly wrong.
     "deep-phonemizer==0.0.19",
 
-    # Feature computation. The CPU package, NOT onnxruntime-gpu - which publishes no
-    # macOS wheel at all. This is the one that carries CoreMLExecutionProvider, so
-    # the phase 2 change is a provider name in patches/feature-device-selection.py
-    # rather than a different package.
+    # Feature computation. The CPU package, NOT onnxruntime-gpu - which publishes
+    # no macOS wheel at all. (It does carry CoreMLExecutionProvider, had the
+    # CoreML route ever been pursued - it was abandoned; SPEED.md.)
     "onnxruntime>=1.19,<2",
 
     # ONNX -> tflite conversion, so a host run produces the same two artefacts a
@@ -104,7 +104,7 @@ dependencies = [
     # tensorflow-metal IS DELIBERATELY ABSENT and is not an oversight: its newest
     # release (1.2.0, 2025-01-31) predates TensorFlow 2.21.0 (2026-03-06) by five
     # minor versions, and it declares no TensorFlow dependency to check against.
-    # Conversion is CPU work anyway. apple-port.md has the full finding.
+    # Conversion is CPU work anyway.
     #
     # onnx, sng4onnx and psutil are onnx2tf's undeclared imports. They are listed
     # for the same reason docker/requirements.txt lists them: removing them on the

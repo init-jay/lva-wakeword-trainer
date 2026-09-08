@@ -15,13 +15,12 @@
 # Metal device through, so a torch build that asks for `mps` inside a container
 # finds nothing and falls back to CPU without saying so. Reaching Metal means
 # leaving Docker entirely - a host environment like record/ and preflight/ have.
-# docker-compose.mps.yml is the placeholder for that conversation and stays empty;
-# apple-port.md carries the reasoning and the phased plan.
+# docker-compose.mps.yml is the signpost for that question and stays empty; it says why.
 #
 # WHAT TO EXPECT. Unmeasured on Apple Silicon at the time of writing - that
 # measurement is the point of these images. The CUDA figures to compare against, on
-# an RTX 3090 / 20 GB / 4 cores, are oww 28m59s and mww 28m02s end to end. Read
-# apple-port.md before concluding a slow run means "CPU is hopeless": the two things
+# an RTX 3090 / 20 GB / 4 cores, are oww 28m59s and mww 28m02s end to end (SPEED.md).
+# Before concluding a slow run means "CPU is hopeless": the two things
 # CUDA actually bought were multi-threaded feature computation and not swapping,
 # and the second one is a memory setting on a Mac, not a hardware limit.
 #

@@ -16,8 +16,7 @@
 # predates TensorFlow 2.21.0 (2026-03-06) by five minor versions, and it declares no
 # TensorFlow dependency at all to check against - `requires_dist` lists only wheel
 # and six, because it is a PluggableDevice plugin. Even if it paired, Docker Desktop
-# passes no Metal device through. Both roads end in CPU. apple-port.md has the
-# working.
+# passes no Metal device through. Both roads end in CPU.
 #
 # WHY THAT IS TOLERABLE HERE MORE THAN ANYWHERE ELSE IN THE PIPELINE. The measured
 # CPU baseline is ~46 s per 500 steps on a 25,537-parameter model - about 15 minutes

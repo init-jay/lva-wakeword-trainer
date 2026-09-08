@@ -11,7 +11,7 @@
 # `mps` inside a container finds no device and falls back to CPU - silently, which
 # is worse than failing. So a containerised Apple Silicon trainer is a CPU trainer
 # by construction, and the only way to reach Metal is a host environment outside
-# Docker entirely. apple-port.md carries the full reasoning.
+# Docker entirely.
 #
 # WHY CPU IS A REASONABLE TARGET ANYWAY. The two things the CUDA path actually
 # bought were measured, and neither was raw compute:
@@ -28,8 +28,8 @@
 #
 # Neither is a claim that this is as fast as a 3090. It is a claim about which of
 # the 3090's advantages were real. Measure before believing either way; the run
-# scripts print wall time and apple-port.md records the CUDA figures to beat
-# (oww 28m59s, mww 28m02s).
+# scripts print wall time; the CUDA figures to beat are in SPEED.md (oww 28m59s,
+# mww 28m02s).
 #
 FROM python:3.12-slim
 

@@ -18,12 +18,13 @@
 #   in Docker      CPU, via docker-compose.cpu.yml      <- exists, use this
 #   outside Docker Metal, or just a faster CPU torch    <- train-applesilicon/
 #
-# train-applesilicon/ carries a resolved pyproject.toml and uv.lock for that second
-# route. It is not wired to anything yet, but it is no longer only about Metal: the
+# train-applesilicon/ is that second route (scripts/setup-applesilicon-trainer.sh),
+# and it is no longer only about Metal: the
 # macOS wheels link Accelerate, which measured 6.3x the container's torch on a
-# GEMM-shaped train step with no GPU involved at all. apple-port.md phase 1b has the
-# numbers, and phase 2 the Metal question - including that tensorflow-metal cannot
-# pair with TensorFlow 2.21.0, so microWakeWord has no Metal story either way.
+# GEMM-shaped train step with no GPU involved at all; SPEED.md has the numbers. The
+# Metal question is closed, not pending: no device reaches a container, and
+# tensorflow-metal cannot pair with TensorFlow 2.21.0, so microWakeWord has no
+# Metal story either way.
 #
 # Kept as a file rather than deleted so that the question "is there an Apple Silicon
 # GPU path?" is answerable from `ls`, and answered "no, and here is where to go

@@ -11,7 +11,7 @@ requires-python = ">=3.12,<3.13"
 # THE FOURTH HOST ENVIRONMENT, after record/, preflight/ and train-applesilicon/,
 # and the reason is the same as train-applesilicon's: Docker Desktop passes no
 # Metal device through, and the container's TF is measured slower on this
-# hardware than the macOS wheel at the same version (apple-port.md, phase 3).
+# hardware than the macOS wheel at the same version (SPEED.md).
 #
 # A SEPARATE ENVIRONMENT FROM train-applesilicon, for the same reason the two
 # trainer images cannot share one: mWW requires numpy>=2, openWakeWord pins
@@ -32,8 +32,9 @@ dependencies = [
     # Pinned to the SAME version Dockerfile.mww.cpu installs from PyPI. This
     # environment exists to answer one question - macOS wheel against
     # linux/arm64 wheel - and a different version on either side contaminates
-    # the answer the way it did for torch in phase 1b. 2.21.0 publishes
-    # macosx_12_0_arm64 wheels for cp310-cp313; this venv is 3.12.
+    # the answer, which is why the torch comparison ran the same 2.5.1 on both
+    # sides (SPEED.md). 2.21.0 publishes macosx_12_0_arm64 wheels for
+    # cp310-cp313; this venv is 3.12.
     "tensorflow==2.21.0",
 
     # mWW's hard constraint, and the one that splits this environment from

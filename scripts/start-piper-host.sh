@@ -23,7 +23,7 @@
 # running the image). A fresh install today resolves 1.8.0 - a different G2P
 # release - and the MISPRONOUNCING/UNAUDITED_PIPER_VOICES exclusion lists in
 # train/corpus/piper.py were audited against this voice set and this G2P
-# (piper.py header, apple-port.md). Bump both here and in Dockerfile.piper
+# (piper.py header). Bump both here and in Dockerfile.piper
 # together, the way the Kokoro pins are bumped together.
 #
 #   ./scripts/start-piper-host.sh                  # run (foreground)

@@ -17,7 +17,7 @@
 #     training     36.21 ms/step        30.86 ms/step (1.17x)
 # The corpus stage is the longest in a full run, so it carries most of the
 # end-to-end gain. tools/tf_probe.py and tools/bench_tts.py are the probes;
-# the numbers and their caveats are in apple-port.md, phase 3.
+# the full tables and their caveats are in SPEED.md.
 #
 #     ./scripts/setup-mww-applesilicon-trainer.sh                     # once
 #     ./scripts/start-piper-host.sh                                   # in another terminal

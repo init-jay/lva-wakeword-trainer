@@ -11,7 +11,7 @@
 # WHAT IT SHARES: the same train/oww/train.py, the same patches, the same pinned torch
 # 2.5.1. That is deliberate. This exists to measure ONE variable - the macOS wheel
 # against the linux/arm64 one - and anything else that differs between the two paths
-# contaminates the answer. See apple-port.md phase 1b.
+# contaminates the answer; the measurements are in SPEED.md.
 #
 #   ./scripts/setup-applesilicon-trainer.sh                      # once
 #   ./scripts/run-oww-training-applesilicon.sh "hey seeree" --skip-corpus

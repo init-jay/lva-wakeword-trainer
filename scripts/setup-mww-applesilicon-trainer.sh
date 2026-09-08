@@ -12,8 +12,9 @@
 #     full train step (fwd + grad + update)
 #                                container 36.21 ms   host 30.86 ms   host 1.17x
 #
-# The difference is the BLAS, exactly as in phase 1b's matmul - the macOS wheel
-# links Accelerate, the linux/arm64 one does not - and it is small because
+# The difference is the BLAS, exactly as in the torch matmul numbers (SPEED.md)
+# - the macOS wheel links Accelerate, the linux/arm64 one does not - and it is
+# small because
 # mixednet's convolutions are too skinny to feed a GEMM kernel. threading_options
 # makes it worse on both sides (host 33.90, container 39.80 with 10 threads),
 # which is why nothing in this path sets them.
@@ -28,8 +29,8 @@
 #
 # WHETHER IT ACTUALLY HELPS MORE THAN THAT IS UNMEASURED, and the honest
 # expectation is "the measured parts, at the measured rates": mixednet's
-# convolutions were measured to win nowhere on this hardware (apple-port.md
-# phase 1b), so this is a win bought in the TTS server and the GEMM-bound
+# convolutions were measured to win nowhere on this hardware (the oneDNN finding,
+# SPEED.md), so this is a win bought in the TTS server and the GEMM-bound
 # residual, not in the model.
 #
 #     ./scripts/setup-mww-applesilicon-trainer.sh

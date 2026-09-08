@@ -10,7 +10,7 @@ Step 2 of the pipeline. The two targets run on **two different machines**:
 | target | where | why |
 |---|---|---|
 | openWakeWord | **on the host**, the `train-applesilicon/` uv venv | TTS is in-process Kokoro on the GPU — MLX, 25 ms/clip batched, against 88 for the same model behind the fastest server — and the trainer is torch on Accelerate, 6.3× faster steps than the container's wheel, on a model that is `Linear`×7 + one LSTM, so the one thing the macOS wheel lacks (oneDNN) costs it nothing |
-| microWakeWord | **on the host**, the `train-mww-applesilicon/` uv venv (Docker `cpu` overlay also works) | Full run measured 14m14s on the host against 26m06s in the container (1.8×), same library versions: its corpus is 100% Piper, and the host Piper is 2.4× faster (21.66 vs 9.13 clips/s); the TF train stage is 1.7× faster. `apple-port.md` phase 3 |
+| microWakeWord | **on the host**, the `train-mww-applesilicon/` uv venv (Docker `cpu` overlay also works) | Full run measured 14m14s on the host against 26m06s in the container (1.8×), same library versions: its corpus is 100% Piper, and the host Piper is 2.4× faster (21.66 vs 9.13 clips/s); the TF train stage is 1.7× faster. SPEED.md |
 
 **The GPU does exactly one job here: Kokoro.** That is the measured layout,
 not an assumption. In-process MLX is the fastest TTS path this machine has —
@@ -19,18 +19,20 @@ against the same model behind its fastest server configuration, 88 / 229) —
 and it removed the old run-on/plain asymmetry, which is why the second Kokoro
 server (`KOKORO_RUNON_URL`) no longer exists. Everything else is CPU
 *demonstrably*: the torch trainer, because the macOS wheel is the 6.3× measured
-win and MPS for training (`apple-port.md`, phase 2) is still unmeasured; and
-the MWW host route, because its two measured gaps — the Piper corpus at 2.4× and
-the TF train step at 1.17× — are both host wins at the same versions (phase 3),
+win, and the Metal route is closed rather than pending (no device passes through
+Docker, and tensorflow-metal does not pair with TF 2.21.0); and the MWW host route,
+because its two measured gaps — the Piper corpus at 2.4× and the TF train step at
+1.17× — are both host wins at the same versions (SPEED.md),
 and neither wants a GPU. Docker Desktop passes **no Metal device through** —
 which is why `docker-compose.mps.yml` is empty, why anything that wants the
 GPU has to run on the host, and why the host route is this skill, not an
 overlay. Two boundaries to keep straight: the *server's* torch-MPS mode loses
 on batched (0.68×, its ISTFT layers stay on CPU) — history, which is what made
-MLX the winner; and MLX as a *trainer* is not on this path at all — a
-different array framework with no PyTorch/TensorFlow backend, a rewrite of the
-training loops that `apple-port.md` analysed and set aside. MLX here is used
-the healthy way: as the TTS engine inside the training process.
+MLX the winner; and MLX as a *trainer* is not on this path at all — a different array framework
+with no PyTorch/TensorFlow backend, so adopting it means porting the upstream
+training loops that `patches/` already modifies in five places, one of them the only
+reason `--augmentation-rounds > 1` produces data at all. MLX here is used the
+healthy way: as the TTS engine inside the training process.
 
 Measured on this machine (M1 Max, 10 cores, 64 GB): the full-corpus run of
 2026-09-07 used in-process MLX — 25 ms/clip batched (plain), 63 (run-ons) — so
@@ -220,7 +222,7 @@ One quirk, checked and harmless: `onnx2tf` re-saves the input `.onnx`
 ## Running microWakeWord
 
 **On the host** — the default on a Mac, because both measured stages win there
-(full run 14m14s vs 26m06s in the container, 1.8×; `apple-port.md` phase 3):
+(full run 14m14s vs 26m06s in the container, 1.8×; SPEED.md):
 
 ```bash
 ./scripts/setup-mww-applesilicon-trainer.sh   # once per machine; idempotent

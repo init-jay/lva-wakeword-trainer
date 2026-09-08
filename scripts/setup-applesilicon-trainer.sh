@@ -16,7 +16,9 @@
 # either, which is why convolutions go the other way - but openWakeWord's trainable
 # model is Linear x7 and one LSTM with no convolutions at all, so this side of the
 # pipeline sits squarely in the half where the host wins. microWakeWord is mixednet,
-# convolutional, and must stay in its container. See apple-port.md phase 1b.
+# convolutional, so this torch prior pointed the other way for it; it trains with
+# TF, and in TF the host won - it has its own host route now (SPEED.md).
+# The tables behind both claims: SPEED.md.
 #
 # WHETHER IT ACTUALLY HELPS THE REAL LOOP IS UNMEASURED, and the honest expectation is
 # "less than 6.3x". The real training step draws 50 positives, not 1024, and a batch
@@ -80,8 +82,9 @@ fi
 #
 # FOUR OF FIVE, the same four docker/Dockerfile.oww.cpu applies, for the same reasons.
 # gpu-resident-features.py is omitted: it moves the 17.28 GB feature array into VRAM,
-# and there is none here. On a 64 GB Mac the array simply lives in memory, which is
-# the case apple-port.md calls architecturally better rather than merely adequate.
+# and there is none here. On a 64 GB Mac the array simply lives in memory, which
+# removes the problem rather than working around it - a memory setting, not a
+# hardware limit (docker-compose.cpu.yml).
 #
 # Each patch prints "WARNING: patch target not found" and exits 0 rather than failing
 # if upstream has moved, so re-running after an openWakeWord update is safe but the

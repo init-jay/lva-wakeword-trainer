@@ -75,9 +75,8 @@ against 26m06s in the container, 1.8x); its corpus is Piper-majority with a 30%
 Kokoro mix by default (`KOKORO_FRACTION=0` for the all-Piper corpus). Do not
 scale corpus depth in search of quality: doubling it (with double the training
 steps) produced no deployable model in either engine mix - `train/mww/corpus.py`
-and `apple-port.md` phase 3 record both runs.
-Status, measurements, and the phased plan:
-`apple-port.md`.
+and SPEED.md record both runs.
+The route rationale and the measurements: SPEED.md.
 
 ## Invariants that are easy to break
 

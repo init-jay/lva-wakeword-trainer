@@ -4,8 +4,9 @@
 # built on nvidia/cuda:12.1.1-devel-ubuntu22.04, trains on an NVIDIA GPU,
 # and is linux/amd64 - it does not run natively on Apple Silicon, and there is no
 # CPU fallback inside it.
-# The suffix leaves room for a .cpu or .mps variant beside it without either being
-# mistaken for the other; apple-port.md says why one does not exist yet.
+# The suffix leaves room for a .cpu variant beside it, which exists (Dockerfile.oww.cpu);
+# a .mps one cannot - Docker Desktop passes no Metal device through, and
+# docker-compose.mps.yml is the signpost.
 #
 FROM nvidia/cuda:12.1.1-devel-ubuntu22.04
 
