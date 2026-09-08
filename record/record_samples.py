@@ -27,7 +27,6 @@ Usage:
     uv run record_samples.py --wake-word "hey seeree"
     uv run record_samples.py --wake-word "hey seeree" --output-dir ../data/recordings/samples/speaker1
 """
-
 import argparse
 import re
 import subprocess
@@ -57,8 +56,7 @@ SAMPLES_DIR = RECORDINGS_DIR / "samples"
 # the pipeline's shape is built around: a model scored on clips it was trained on
 # reports a number that means nothing. That guarantee is positional - holdout/ is a
 # SIBLING of samples/, not a subdirectory - because the trainer globs the samples
-# tree recursively for positives and would swallow anything nested inside it.
-HOLDOUT_DIR = RECORDINGS_DIR / "holdout"
+# tree recursively for positives and would swallow anything nested inside it.HOLDOUT_DIR = RECORDINGS_DIR / "holdout"
 
 # Unsplit recordings go OUTSIDE data/recordings/samples/. train.py globs that tree
 # recursively for positives, so a three-minute raw file left there becomes a
@@ -119,7 +117,6 @@ class Terminal:
     All of it is a no-op off a TTY: piped stdin has no terminal settings, and its
     buffered input is a script's deliberate input rather than stray keystrokes.
     """
-
     def __init__(self):
         self.saved = None
         if sys.stdin.isatty():
@@ -275,6 +272,7 @@ def capture(backend: str, device: str, warmup_s: float, duration_s: float,
     interrupt before any speech arrives still propagates: there is nothing to keep,
     and the warm-up is what the noise reference is measured from.
     """
+
     step = SAMPLE_RATE // 10 * SAMPLE_WIDTH                # 100 ms
     warmup_bytes = int(SAMPLE_RATE * warmup_s) * SAMPLE_WIDTH
     total_bytes = int(SAMPLE_RATE * duration_s) * SAMPLE_WIDTH

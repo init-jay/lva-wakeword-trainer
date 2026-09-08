@@ -1,13 +1,13 @@
 """The negative wordlist: what the model must learn to reject.
 
-Moved verbatim from train.py. This is engine-agnostic because it is text - the
-phrases are rendered to WAVs by whichever TTS the trainer uses, and both trainers
-need the same list for the same measured reason.
+Engine-agnostic because it is text - the phrases are rendered to WAVs by whichever
+TTS the trainer uses, and both trainers need the same list for the same measured
+reason.
 
 Kept deliberately DISJOINT from the eval corpus in generate_negatives.py. The
-false-accept gates in the tuning log are scored on that corpus, so a phrase appearing in
-both would turn a generalisation measurement into a memorisation one. Check any new
-phrase against EXTEND/RUNNING/HEY_OTHER over there before adding it here.
+false-accept gates in the tuning log are scored on that corpus, so a phrase appearing
+in both would turn a generalisation measurement into a memorisation one. Check any
+new phrase against EXTEND/RUNNING/HEY_OTHER over there before adding it here.
 """
 
 import sys
@@ -43,13 +43,13 @@ TRAINING_COMMANDS = [
 # A wake word worth having is not a dictionary word, so Kokoro's g2p has to guess at
 # it - and some voices guess differently. These six say something that is not "hey
 # seeree", judged by ear over all 42 English voices rendering the phrase once
-# (vtlp_demo/voices/). Every clip such a voice produces is a mislabelled positive,
-# and at 1/42 of the voice list that is ~2.4% of the Kokoro corpus each, ~14% for
-# the six together - across plain AND run-on, since both draw from this list.
+# (vtlp_demo/voices/). Every clip such a voice produces is a mislabelled positive:
+# ~2.4% of the Kokoro corpus each, ~14% for the six together - across plain AND
+# run-on, since both draw from this list.
 #
-# Keyed per wake word: how a voice handles "seeree" says nothing about how it would
-# handle another phrase, so a global blocklist would be wrong for the next model.
-# Same reasoning as CONFUSABLE_NEGATIVES.
+# Keyed per wake word: how a voice handles "seeree" says nothing about another
+# phrase, so a global blocklist would be wrong for the next model. Same reasoning as
+# CONFUSABLE_NEGATIVES.
 #
 # HOW TO REBUILD THIS FOR A NEW WAKE WORD: render every voice saying the phrase once
 # and listen to all of them. It takes a couple of minutes and there is no shortcut -
@@ -59,19 +59,19 @@ TRAINING_COMMANDS = [
 # audit_voices.py automates the screen; it does not replace the listening.
 #
 # Excluded from negatives too, not just positives. A mispronunciation is arguably a
-# useful near-miss to train against, but it is much closer to the real phrase than
-# CONFUSABLE_NEGATIVES entries are, and teaching the model to REJECT something that
-# close risks costing detection on genuine variants. Untested either way.
+# useful near-miss, but it is much closer to the real phrase than CONFUSABLE_NEGATIVES
+# entries are, and teaching the model to REJECT something that close risks costing
+# detection on genuine variants. Untested either way.
 #
 # NOTE: these are Kokoro voice ids. The Piper equivalent is a separate list - Piper
-# phonemises with espeak-ng per MODEL rather than per speaker, so the unit being
-# excluded is a whole voice model, not a speaker within one (audit_voices.py:148).
+# phonemises with espeak-ng per MODEL rather than per speaker, so the unit excluded
+# is a whole voice model, not a speaker within one (audit_voices.py:148).
 LEGACY_VOICE_MARKER = "_v0"
 """Kokoro's v0 voices, skipped by default: they cost generation time and buy nothing.
 
-Kokoro-FastAPI serves 42 English voices; 13 carry this marker and are OLDER RENDERINGS
-OF SPEAKERS ALREADY IN THE SET - af_v0bella beside af_bella, am_v0michael beside
-am_michael, bf_v0emma beside bf_emma. They are not 13 additional speakers, which is
+Kokoro-FastAPI serves 42 English voices; 13 carry this marker and are OLDER
+RENDERINGS OF SPEAKERS ALREADY IN THE SET - af_v0bella beside af_bella, am_v0michael
+beside am_michael, bf_v0emma beside bf_emma. Not 13 additional speakers, which is
 what a raw voice count suggests and what made them look load-bearing.
 
 MEASURED, not assumed. Two openWakeWord corpora, same engine and trainer, differing
@@ -81,10 +81,9 @@ at 4 adversarial false accepts:
     36 voices, v0 included     plain 76%   run-on 56%
     22 voices, v0 excluded     plain 82%   run-on 65%
 
-So excluding them did not cost accuracy - it was slightly ahead at every matched
-false-accept point, though several of those gaps sit near the ~10 point run-to-run
-variance this repo has measured, so the honest claim is "no measurable loss" rather
-than "an improvement".
+So excluding them did not cost accuracy - slightly ahead at every matched false-accept
+point, though several gaps sit near the ~10 point run-to-run variance this repo has
+measured, so the honest claim is "no measurable loss".
 
 What it definitely buys is time: 13 of 36 voices is 36% of the Kokoro clips, and the
 corpus stage is the largest in an openWakeWord run.
@@ -121,10 +120,8 @@ MISPRONOUNCING_VOICES = {
 # Bare "hey" belongs here too: it is what teaches that the second syllable is
 # required rather than optional.
 #
-# These are deliberately DISJOINT from the eval corpus in generate_negatives.py.
-# The gates are scored on that corpus, so any phrase appearing in
-# both turns a generalisation measurement into a memorisation one. When adding
-# phrases here, check them against EXTEND/RUNNING/HEY_OTHER over there first.
+# DISJOINT from the eval corpus (see the module docstring); check new phrases
+# against EXTEND/RUNNING/HEY_OTHER over there first.
 CONFUSABLE_NEGATIVES = {
     "hey_seeree": [
         # the phrase, continuing into another word

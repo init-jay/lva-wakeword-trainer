@@ -2,16 +2,15 @@
 """Run a microWakeWord training pass and report where the model landed.
 
 Wrapped by scripts/run-mww-training.sh, which chains the four stages; the
-openWakeWord equivalent is run-oww-training.sh. This carries over the two
-lessons from it that cost the most:
+openWakeWord equivalent is run-oww-training.sh. This carries over the two lessons
+from it that cost the most:
 
   * WHETHER THE MODEL WAS WRITTEN IS THE REAL SIGNAL, not the exit code. A stale
     model was evaluated twice on the openWakeWord side before identical checksums
     gave it away, so the output is checksummed before and after.
   * AN EMPTY FEATURE SET IS SILENT. microwakeword/data.py logs "No spectrograms
     found in a configured feature set" and carries on, so a corpus that failed to
-    build trains a model on nothing and only shows up as a bewildering evaluation.
-    The config is checked before training starts.
+    build trains a model on nothing. The config is checked before training starts.
 
     python -m train.mww.train --wake-word "hey seeree" \\
         --ambient data/external/mww_ambient/speech \\
@@ -55,16 +54,16 @@ ROC_FILE = "tflite_streaming_roc.txt"
 # Values below are upstream's notebook defaults, kept verbatim as a starting point -
 # they differ from mixednet.py's own argparse defaults, which are narrower
 # (pointwise_filters "48, 48, 48, 48", kernels "[5], [9], [13], [21]", stride 1).
-# Change one at a time and record it, one change at a time.
+# Change one at a time and record it.
 MODEL = "mixednet"
 MODEL_FLAGS = [
     "--pointwise_filters", "64,64,64,64",
     "--repeat_in_block", "1,1,1,1",
     "--mixconv_kernel_sizes", "[5], [7,11], [9,15], [23]",
     # FOUR entries, matching the other three lists. mixednet.model asserts all
-    # four are the same length (mixednet.py:298-305), and upstream's own
-    # argparse default is "0,0,0,0,0" against four pointwise filters - so the
-    # bare defaults fail that assert too.
+    # four are the same length (mixednet.py:298-305); upstream's own argparse
+    # default is "0,0,0,0,0" against four pointwise filters - the bare defaults
+    # fail that assert too.
     "--residual_connection", "0,0,0,0",
     "--first_conv_filters", "32",
     "--first_conv_kernel_size", "5",

@@ -1,38 +1,35 @@
 """Piper sample generation over Wyoming TTS.
 
 microWakeWord generates its positives with Piper, so this is the second engine the
-shared corpus layer needs. It is deliberately shaped like the Kokoro path in
-train.py - render a phrase at a spread of speeds across a spread of voices, write
-16 kHz mono WAVs into a directory - so both trainers can consume either engine's
-output, or both at once.
+shared corpus layer needs. Deliberately shaped like the Kokoro path in train.py -
+phrase at a spread of speeds across a spread of voices, 16 kHz mono WAVs into a
+directory - so both trainers can consume either engine's output, or both at once.
 
-THE SPEED PROBLEM. Wyoming's `synthesize` event carries no rate control, so speed
-has to be applied after synthesis. audit_voices.py:191 does it by resampling, which
-moves pitch as well as rate - correct there, where the point is to deny the ASR a
-comfortable rendering, and wrong here. `PLAIN_SPEEDS = (0.7, 1.6)` in train.py means
-DELIVERY RATE: Kokoro's speed parameter re-times the phrase without turning the
-speaker into a chipmunk, and the model is meant to learn that the phrase can be
-said quickly, not that it can be said by someone with a shorter vocal tract. Pitch
-is already covered, separately and on purpose, by add_child_range_copies.
-
-So speed here goes through `time_stretch` (WSOLA, pitch-preserving) instead. Using
+THE SPEED PROBLEM. Wyoming's `synthesize` event has no rate control, so speed has to
+be applied after synthesis. audit_voices.py:191 does it by resampling, which moves
+pitch as well as rate - correct there (the point is to deny the ASR a comfortable
+rendering), wrong here. `PLAIN_SPEEDS = (0.7, 1.6)` in train.py means DELIVERY RATE:
+Kokoro's speed parameter re-times the phrase without a chipmunk, and the model is
+meant to learn that the phrase can be said quickly, not by someone with a shorter
+vocal tract. Pitch is already covered, separately, by add_child_range_copies. So
+speed here goes through `time_stretch` (WSOLA, pitch-preserving) instead; using
 resampling would silently entangle the speed sweep with the child-range lever and
 make run 13's result impossible to attribute.
 
 PIPER IS STOCHASTIC. VITS samples noise and durations per call, so the same
 (voice, speaker, text, speed) renders differently every time - measured in
-audit_voices.py, where one speaker scored 0% and then 100% across passes. For a
-corpus that is free diversity and needs no special handling. For the audit it is
-why `--repeats` exists. It also means the corpus is not reproducible from a seed,
-which is already true of the Kokoro path (train.py sets no seed).
+audit_voices.py, where one speaker scored 0% then 100% across passes. For a corpus
+that is free diversity; for the audit it is why `--repeats` exists. It also means
+the corpus is not reproducible from a seed, which is already true of the Kokoro
+path (train.py sets no seed).
 
-EXERCISED AGAINST A LIVE SERVICE. piper_voices enumerated 2005 (voice, speaker)
-pairs across en_US/en_GB, and piper_render returns 16 kHz int16 at exact speed
-ratios (0.7000, 1.2501, 1.6001 measured on one clip). Not yet used to build a
-training corpus - that is --piper-fraction, staged as tuning run 17.
+EXERCISED AGAINST A LIVE SERVICE. piper_voices enumerated 2005 (voice, speaker) pairs
+across en_US/en_GB, and piper_render returns 16 kHz int16 at exact speed ratios
+(0.7000, 1.2501, 1.6001 measured on one clip). Not yet used to build a training
+corpus - that is --piper-fraction, staged as tuning run 17.
 
-MEASURE SPEED ON ONE CLIP, NOT ACROSS CALLS. Three separate renderings at 1.0/1.6/0.7
-gave 0.964 s / 0.501 s / 1.194 s, which looks wrong and is not: VITS samples
+MEASURE SPEED ON ONE CLIP, NOT ACROSS CALLS. Three separate renderings at
+1.0/1.6/0.7 gave 0.964 s / 0.501 s / 1.194 s - looks wrong, is not: VITS samples
 durations per call, so the base clip differs every time. Stretch ratios are only
 meaningful against a single rendering.
 """
@@ -53,37 +50,36 @@ from .augment import time_stretch
 SR = 16000
 
 # Voices that mispronounce the wake word, per wake word. THE PIPER EQUIVALENT OF
-# MISPRONOUNCING_VOICES IN corpus/negatives.py, AND IT IS NOT OPTIONAL.
+# MISPRONOUNCING_VOICES in corpus/negatives.py, AND IT IS NOT OPTIONAL.
 #
 # Six of Kokoro's 42 voices say something other than "hey seeree" - ~14% of that
 # corpus mislabelled as positives, undetected for eleven runs.
 #
-# THE EXCLUSION UNIT IS THE SPEAKER, NOT THE MODEL. The expectation going in was the
-# opposite: espeak-ng phonemises per model, so every speaker inside one voice gets
-# the same phoneme string, and it seemed to follow that they would all pronounce it
-# the same. The audit says otherwise - en_US-l2arctic-medium ranges from :ASI at 0%
-# to :PNV at 100%. Identical phonemes, different acoustic models, and intelligibility
-# varies with the speaker. Keys here are therefore "voice:speaker" wherever the audit
-# scored a speaker.
+# THE EXCLUSION UNIT IS THE SPEAKER, NOT THE MODEL. The expectation was the opposite:
+# espeak-ng phonemises per model, so every speaker inside one voice gets the same
+# phoneme string and seemed bound to pronounce it the same. The audit says
+# otherwise - en_US-l2arctic-medium ranges from :ASI at 0% to :PNV at 100%: identical
+# phonemes, different acoustic models. Keys are therefore "voice:speaker" wherever
+# the audit scored a speaker.
 #
 # Below is the 2026-09-02 audit of 96 voices against ASR consensus, everything under
-# 83% agreement. The transcripts make the distinction clear: excluded voices produce
-# a CONSISTENTLY different phrase ("his theory", four renderings running), while the
-# ones kept produce "hey siri" with an occasional slip, which is VITS sampling
-# durations per call rather than a pronunciation problem.
+# 83% agreement. The transcripts make the distinction: excluded voices produce a
+# CONSISTENTLY different phrase ("his theory", four renderings running), while the
+# ones kept produce "hey siri" with an occasional slip - VITS sampling durations per
+# call, not a pronunciation problem.
 #
 # en_US-l2arctic-medium is a non-native-speaker corpus and 7 of its 12 audited
-# speakers land here. That is not automatically a reason to exclude - accented
-# renderings of the CORRECT phrase are good training data, since real users have
-# accents. It is a reason here because the benefit cannot be measured: there is no
-# accented speaker in data/recordings/holdout/, so the contamination is measurable
-# and the upside is not. Revisit if an accented speaker is ever recorded.
+# speakers land here. Not automatically disqualifying - accented renderings of the
+# CORRECT phrase are good training data, since real users have accents. Disqualified
+# here because the benefit cannot be measured: there is no accented speaker in
+# data/recordings/holdout/, so the contamination is measurable and the upside is not.
+# Revisit if an accented speaker is ever recorded.
 #
 # WHAT THIS METHOD CANNOT SEE: the score is agreement with the consensus ACROSS
 # voices, so an error every voice shares is invisible. Every good voice here
 # transcribes as "Hey Siri"; if espeak-ng renders "seeree" as /'sIri/ rather than
-# /si:'ri:/, all 96 are uniformly wrong and all 96 score 100%. Check that by ear
-# against a real recording, once, per wake word - not from this table.
+# /si:'ri:/, all 96 are uniformly wrong and all score 100%. Check that by ear against
+# a real recording, once, per wake word - not from this table.
 MISPRONOUNCING_PIPER_VOICES: dict[str, list[str]] = {
     "hey_seeree": [
         # < 50% - consistently a different phrase
@@ -107,10 +103,10 @@ MISPRONOUNCING_PIPER_VOICES: dict[str, list[str]] = {
 
 # Voices excluded because they were NEVER AUDITED, not because they are wrong.
 #
-# Kept separate from MISPRONOUNCING_PIPER_VOICES deliberately. Everything in that
+# Kept separate from MISPRONOUNCING_PIPER_VOICES deliberately: everything in that
 # list was measured and failed; everything here is simply unknown, and merging the
-# two would destroy the only record of which is which - so a later reader would have
-# no way to tell that these are cheap to reclaim.
+# two would destroy the only record of which is which - i.e. that these are cheap to
+# reclaim.
 #
 # HOW THEY GOT HERE. The 2026-09-02 audit ran against one Piper instance and covered
 # 96 voices. Corpus generation later ran against the compose `piper` service, which
@@ -123,23 +119,22 @@ MISPRONOUNCING_PIPER_VOICES: dict[str, list[str]] = {
 # service. An audit of a different instance is only accidentally relevant.
 #
 # THE CATALOG GROWS, IN BOTH UNITS AT ONCE. Measured 2026-09-07 against the 2.4.3
-# wheel, identical in the Docker image and the host venv
-# (scripts/start-piper-host.sh): 163 voices in the bundled catalog, against 96 at
-# audit time and the 106 the compose service exposed. With units: 96 and 163 are
-# VOICE counts; 106 was a PAIR count. The default selection (en_US/en_GB, 12-
-# speaker cap) measures 37 voices / 2005 pairs raw / 106 pairs capped - the same
-# 106 the compose-era run saw, so the English selection set has not moved since
-# the audit era's known exposure. The growth is voices in other languages, which
-# the languages filter already excludes. Widening --piper-languages is a new
-# unaudited set until tools/audit_voices.py --tts piper has run against the
-# instance that generates the corpus.
+# wheel (identical in the Docker image and the host venv, scripts/start-piper-host.sh):
+# 163 voices in the bundled catalog, against 96 at audit time and the 106 the compose
+# service exposed. With units: 96 and 163 are VOICE counts; 106 was a PAIR count. The
+# default selection (en_US/en_GB, 12-speaker cap) measures 37 voices / 2005 pairs raw
+# / 106 pairs capped - the same 106 the compose-era run saw, so the English selection
+# set has not moved since the audit era's known exposure. The growth is voices in
+# other languages, which the languages filter already excludes. Widening
+# --piper-languages is a new unaudited set until tools/audit_voices.py --tts piper
+# has run against the instance that generates the corpus.
 #
 # TO RECLAIM THEM: audit these ten against the instance that generates the corpus,
-# then move them into MISPRONOUNCING_PIPER_VOICES or delete them from here, and add
-# their F0 to PIPER_VOICE_SEX. Note cori and ljspeech appear at two qualities each,
-# so this is eight distinct voices, and quality variants share a phonemisation but
-# not an acoustic model - l2arctic ranged 0-100% across speakers on identical
-# phonemes, so do not assume -high and -medium agree.
+# then move them into MISPRONOUNCING_PIPER_VOICES or delete them, and add their F0 to
+# PIPER_VOICE_SEX. Note cori and ljspeech appear at two qualities each, so this is
+# eight distinct voices, and quality variants share a phonemisation but not an
+# acoustic model - l2arctic ranged 0-100% across speakers on identical phonemes, so
+# do not assume -high and -medium agree.
 UNAUDITED_PIPER_VOICES: dict[str, list[str]] = {
     "hey_seeree": [
         "en_GB-cori-high",
@@ -159,26 +154,25 @@ UNAUDITED_PIPER_VOICES: dict[str, list[str]] = {
 # or "voice:speaker" for a multi-speaker model.
 #
 # MEASURED, NOT LISTENED TO. Generated by measure_voice_f0.py from the 1.0x audit
-# clips: median F0 per voice, split at 185 Hz. Regenerate it for a new engine or a
-# new voice set rather than extending it by ear - 96 entries is more listening than
-# anyone will actually do, and skipping it silently costs the run-13 lever its reach.
+# clips: median F0 per voice, split at 185 Hz. Regenerate it for a new engine or
+# voice set rather than extending by ear - 96 entries is more listening than anyone
+# will actually do, and skipping it silently costs the run-13 lever its reach.
 #
-# Validated against the ten voices whose NAME states the answer - hfc_male 147 Hz,
-# hfc_female 268 Hz, northern_english_male 117 Hz, southern_english_female 248 Hz,
-# joe 116 Hz, ryan 162 Hz, amy 195 Hz, alba 190 Hz, jenny 205 Hz, lessac 231 Hz.
-# All ten agree with the split.
+# Validated against the ten voices whose NAME states the answer (hfc_male 147 Hz,
+# hfc_female 268, northern_english_male 117, southern_english_female 248, joe 116,
+# ryan 162, amy 195, alba 190, jenny 205, lessac 231 Hz). All ten agree with the split.
 #
-# THE 160-200 Hz BAND IS GENUINELY AMBIGUOUS (vctk:p239 184 Hz, p288 184, p293 182,
-# kathleen 177) and it does not matter much: sex here is only a proxy for F0, and the
-# two ratio ranges nearly coincide at the boundary. At 177 Hz the male range gives
-# 204-230 Hz and the female range 212-239 Hz. The ranges were calibrated against
-# am_adam at 132 Hz and af_bella at 227 Hz, so they are least distinguishable exactly
-# where the classification is least certain.
+# THE 160-200 Hz BAND IS GENUINELY AMBIGUOUS (vctk:p239 184, p288 184, p293 182,
+# kathleen 177) and it does not matter much: sex is only a proxy for F0, and the two
+# ratio ranges nearly coincide at the boundary (at 177 Hz the male range gives
+# 204-230 Hz, the female 212-239). The ranges were calibrated against am_adam at
+# 132 Hz and af_bella at 227 Hz, so they are least distinguishable exactly where the
+# classification is least certain.
 #
 # A voice absent from this map is written piper_pu_* and gets NO child-range copy.
-# That is deliberate: run 12 measured male voices as "useless above R1.30
-# (chipmunk)", so a wrongly-shifted clip is worse than an absent one - training on an
-# artefact teaches the artefact.
+# Deliberate: run 12 measured male voices as "useless above R1.30 (chipmunk)", so a
+# wrongly-shifted clip is worse than an absent one - training on an artefact teaches
+# the artefact.
 PIPER_VOICE_SEX: dict[str, str] = {
     "en_GB-alan-low": "m",  # 98 Hz
     "en_GB-alan-medium": "m",  # 93 Hz
@@ -418,27 +412,27 @@ def generate_piper_samples(host, port, voices, output_dir: Path,
     so the two are substitutable clip-for-clip: same per-voice budget, same
     text-offset-per-voice (without which every voice renders texts[0:n] and a list
     longer than the budget never gets past its own beginning), and the speed drawn
-    from the same grid, in the job-building loop rather than in a worker, so the
-    corpus does not depend on thread scheduling.
+    from the same grid, in the job-building loop rather than a worker, so the corpus
+    does not depend on thread scheduling.
 
     `speeds` is passed in rather than imported: PLAIN_SPEED_GRID lives in train.py
     and this package must not depend on it.
 
-    Filenames are `piper_{voice}_{speaker}_{uuid}.wav`. Note that this does NOT
-    match the `kokoro_`/`runon_` prefixes add_child_range_copies looks for, so Piper
-    clips are skipped by the child-range lever rather than mis-shifted - Piper voice
-    names carry no sex marker to pick a ratio from. See corpus/augment.py.
+    Filenames are `piper_p{sex}_{voice}[_{speaker}]_{uuid}.wav`. This does NOT match
+    the `kokoro_`/`runon_` prefixes add_child_range_copies looks for, so Piper clips
+    are skipped by the child-range lever rather than mis-shifted - Piper voice names
+    carry no sex marker to pick a ratio from. See corpus/augment.py.
 
     VOICE IS THE OUTER LOOP ON PURPOSE - DO NOT REORDER. wyoming-piper holds exactly
     one loaded voice in a module-level global and reloads it whenever a request names
     a different one (handler.py:333-346, `if voice_name != _VOICE_NAME`). Iterating
-    texts or speeds outside voices would rebuild the InferenceSession on every single
-    request - and under --use-cuda that means a fresh CUDA session each time, which
-    is far more expensive than the synthesis itself.
+    texts or speeds outside voices would rebuild the InferenceSession on every
+    request - under --use-cuda a fresh CUDA session each time, far more expensive
+    than the synthesis itself.
 
     The same global is why one server serves strictly one request at a time, and why
     client concurrency measured as pure queueing (docker-compose.yml). Parallelism
-    has to come from separate instances, each with its own voice - which also means
+    has to come from separate instances, each with its own voice - which means
     sharding a multi-voice corpus BY VOICE across instances, never round-robin.
     """
     output_dir.mkdir(parents=True, exist_ok=True)

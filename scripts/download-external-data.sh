@@ -12,7 +12,7 @@
 #
 # WHY A TARGET AND NOT JUST "DOWNLOAD EVERYTHING". Almost none of this is actually
 # shared, and each trainer's private half is large. Sizes measured on disk after a
-# full run, not taken from the download sizes - which for the ambient sets are off by
+# full run, not from the download sizes - for the ambient sets those are off by
 # more than 4x:
 #
 #   shared    mit_rirs, audioset_16k, fma       ~730 MB  BOTH trainers augment with
@@ -20,25 +20,7 @@
 #   oww       ACAV100M + validation features    ~17.2 GB openWakeWord only
 #   mww       mww_ambient RaggedMmap sets       ~25 GB   microWakeWord only
 #                                                        (~5.7 GB of zips, unpacked)
-#
-# So `all` costs ~43 GB to get ~730 MB of genuinely common data. Training only for
-# the ESP32 with `all` means fetching a 17.2 GB array that nothing in the mWW path
-# opens; training only for the server means unpacking 25 GB of ambient spectrograms
-# in microWakeWord's own feature format, which the openWakeWord path cannot read.
-# Either way the surplus is larger than everything the two actually share.
-#
-# THE TARGETS ALSO HAVE DIFFERENT TOOL REQUIREMENTS, which is the other reason they
-# are separable. `shared` and `oww` resample audio through Python `datasets`, `scipy`
-# and `tqdm` - only the trainer image carries those. `mww` needs nothing but curl and
-# unzip, so `mww` alone runs in the mww image, or on a bare host.
-#
-# WHY data/external/ AND NOT data/. Everything under data/ is untracked, but not
-# everything under it is the same KIND of thing. These are third-party downloads:
-# fixed, enormous, and reproducible from a URL. The recordings beside them are
-# irreplaceable, and the corpora are regenerated every run. Keeping downloads in
-# their own subtree is what lets `du -sh data/*` and a backup rule tell those three
-# apart - and it is why train/provenance.py can hash the other two without ever
-# walking these.
+
 
 set -euo pipefail
 
@@ -65,9 +47,9 @@ want_shared=0; want_oww=0; want_mww=0
 case "$TARGET" in
     all) want_shared=1; want_oww=1; want_mww=1 ;;
     oww) want_shared=1; want_oww=1 ;;
-    # NOT want_shared. The audio corpora are shared bytes, and fetching them needs
+    # NOT want_shared: the audio corpora are shared bytes, but fetching them needs
     # the trainer image's Python stack, which the mww image does not have. The check
-    # at the end of this script says so rather than failing at training time.
+    # at the end says so rather than failing at training time.
     mww) want_mww=1 ;;
 esac
 
@@ -77,21 +59,8 @@ echo ""
 # --- idempotence -----------------------------------------------------------------
 #
 # "SKIP IF IT EXISTS" IS ONLY SAFE IF NOTHING HALF-DONE CAN EXIST. Every download
-# here therefore lands somewhere temporary and is renamed into its final name only
-# once it is complete, so an interrupted run leaves nothing that a later run will
-# mistake for finished work.
-#
-# The failure this prevents is quiet and expensive. A 17 GB curl straight to its
-# final path, stopped by Ctrl-C or a full disk at 16 GB, leaves a truncated .npy
-# that `[ -f ]` calls present - so every later run skips it and openWakeWord mmaps a
-# truncated array deep inside training. Same for the audio corpora: `mkdir` before
-# the conversion loop means an interruption leaves an empty directory that `[ -d ]`
-# calls done, and the model then trains with no background audio at all.
-#
-# `--fail` belongs to the same problem. Without it curl writes an HTTP error page to
-# the output file and exits 0, and a 400-byte "404: Not Found" then satisfies the
-# existence check forever.
-
+# therefore lands somewhere temporary and is renamed into place only when complete,
+# so an interrupted run leaves nothing a later run will mistake for finished work.
 fetch_file() {
     # fetch_file <final-path> <url> <description>
     local dest="$1" url="$2" desc="$3"
@@ -240,11 +209,11 @@ fi
 #
 # Pre-computed RaggedMmap spectrograms in microWakeWord's own feature format, so
 # unlike the audio corpora above they cannot be shared with the openWakeWord side.
-# Unlike this repo's adversarial negatives they are large and general - they are what
-# teaches the model that ordinary rooms, music and conversation are not the wake word.
+# Unlike this repo's adversarial negatives they are large and general - they teach
+# the model that ordinary rooms, music and conversation are not the wake word.
 #
-# They also carry mWW's primary metric. Its model selection minimises false accepts
-# per hour on ambient audio before maximising recall, and testing_ambient /
+# They also carry mWW's primary metric: model selection minimises false accepts per
+# hour on ambient audio before maximising recall, and testing_ambient /
 # validation_ambient are what that is measured on.
 
 # name:approx-size, for the progress message only.
@@ -282,11 +251,11 @@ if [ "$want_mww" = 1 ]; then
 
         if [ -d "$target" ]; then
             # REPAIR the double-nesting left by earlier versions of this script, which
-            # unzipped straight into $target and so kept the archive's wrapper folder.
-            # Cheap: a rename within one filesystem, not a copy of several GB. Done here
+            # unzipped straight into $target and kept the archive's wrapper folder.
+            # A rename within one filesystem, not a copy of several GB. Done here
             # rather than as a one-off command because the files are root-owned by the
-            # container that made them, and because re-running this script is the
-            # obvious thing to reach for.
+            # container that made them, and re-running this script is the obvious thing
+            # to reach for.
             if [ -d "$target/$name" ]; then
                 echo "=== $name is double-nested ($target/$name) - flattening"
                 mv "$target/$name" "$target.flat"
@@ -310,8 +279,7 @@ if [ "$want_mww" = 1 ]; then
         # <target>/<name>/training/..., one level deeper than microWakeWord looks.
         # data.py globs <features_dir>/<split>/**/*_mmap and merely WARNS when it finds
         # nothing, so the mistake shows up as a model trained without ambient negatives
-        # rather than as an error.
-        tmp="$AMBIENT_DIR/.unpack_$name"
+        # rather than as an error.        tmp="$AMBIENT_DIR/.unpack_$name"
         rm -rf "$tmp"; mkdir -p "$tmp"
         unzip -q "$AMBIENT_DIR/$name.zip" -d "$tmp"
 
@@ -362,11 +330,11 @@ if [ "$want_mww" = 1 ]; then
     echo "=== which splits each set provides:"
     # THE SETS ARE NOT INTERCHANGEABLE, and which is which is not obvious from the
     # names. Only the *_eval archives carry validation_ambient/testing_ambient, and
-    # those are what model selection runs on: the maximization metric is
-    # average_viable_recall, computed from false accepts per hour on ambient audio.
-    # Without them it reads 0.000 at every step, the best checkpoint never improves on
-    # anything, and the exported model is whichever happened to be current - while
-    # accuracy, recall and precision all still look excellent.
+    # those are what model selection runs on: the metric is average_viable_recall,
+    # from false accepts per hour on ambient audio. Without them it reads 0.000 at
+    # every step, the best checkpoint never improves on anything, and the exported
+    # model is whichever happened to be current - while accuracy, recall and
+    # precision all still look excellent.
     have_eval=""
     for entry in "${SETS[@]}"; do
         name="${entry%%:*}"

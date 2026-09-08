@@ -3,29 +3,6 @@
 # Prepare the HOST openWakeWord trainer on Apple Silicon. Setup only - it trains
 # nothing; scripts/run-oww-training-applesilicon.sh does that.
 #
-# WHAT THIS IS FOR. docker/Dockerfile.oww.cpu does all of this at build time; this
-# script does the same work outside a container, because the container's torch is
-# measurably slower on this hardware. Measured with an identical script in both, torch
-# 2.14 at the time:
-#
-#     matmul 2048^3             container 53.05 ms   host 17.42 ms    host 3.0x
-#     train step, 1024 batch    container 26.39 ms   host  4.19 ms    host 6.3x
-#     conv1d 512x16x96          container  7.38 ms   host 90.16 ms    host 12x SLOWER
-#
-# The macOS wheel links Accelerate; the linux/arm64 one does not. It has no oneDNN
-# either, which is why convolutions go the other way - but openWakeWord's trainable
-# model is Linear x7 and one LSTM with no convolutions at all, so this side of the
-# pipeline sits squarely in the half where the host wins. microWakeWord is mixednet,
-# convolutional, so this torch prior pointed the other way for it; it trains with
-# TF, and in TF the host won - it has its own host route now (SPEED.md).
-# The tables behind both claims: SPEED.md.
-#
-# WHETHER IT ACTUALLY HELPS THE REAL LOOP IS UNMEASURED, and the honest expectation is
-# "less than 6.3x". The real training step draws 50 positives, not 1024, and a batch
-# that small is dominated by Python and optimiser overhead rather than GEMM - exactly
-# where a faster BLAS matters least. The container run this was written alongside
-# measured 26 it/s, so that is the number to beat.
-#
 #     ./scripts/setup-applesilicon-trainer.sh
 #
 # Idempotent: re-running re-applies patches (each is a no-op if already applied) and
@@ -65,14 +42,14 @@ fi
 
 # --- the openWakeWord clone -------------------------------------------------------
 #
-# AT THE REPO ROOT, NOT INSIDE train-applesilicon/, and not by preference:
-# train/oww/train.py resolves it as WORK_DIR/"openwakeword/..." where WORK_DIR is the
-# repo root. Putting it anywhere else means patching train.py, which would then differ
-# between the host and container paths - and the whole point is that they do not.
+# AT THE REPO ROOT, NOT INSIDE train-applesilicon/, and not by preference: train/oww/
+# train.py resolves it as WORK_DIR/"openwakeword/..." where WORK_DIR is the repo root.
+# Putting it anywhere else means patching train.py, which would then differ between
+# the host and container paths - and the whole point is that they do not.
 #
-# .gitignore and .dockerignore both exclude it: it must never be committed, and it
-# must never enter a build context, where it would shadow the clone the image makes
-# for itself with one patched for a different device.
+# .gitignore and .dockerignore both exclude it: it must never be committed, and never
+# enter a build context, where it would shadow the clone the image makes for itself
+# (patched for a different device).
 if [[ ! -d "$CLONE/.git" ]]; then
     echo "==> cloning openWakeWord into $CLONE/"
     git clone https://github.com/dscripka/openWakeWord "$CLONE"
@@ -86,11 +63,12 @@ fi
 # removes the problem rather than working around it - a memory setting, not a
 # hardware limit (docker-compose.cpu.yml).
 #
-# Each patch prints "WARNING: patch target not found" and exits 0 rather than failing
-# if upstream has moved, so re-running after an openWakeWord update is safe but the
-# output is worth reading. The reverse failure - the patches silently UNdone by a
-# working-tree reset in the clone - is caught by run-oww-training-applesilicon.sh,
-# which checks for the sentinel before launching and sends you back here.
+# Each patch prints "WARNING: patch target not found" and exits 0 rather than
+# failing if upstream has moved, so re-running after an openWakeWord update is safe
+# but the output is worth reading. The reverse failure - the patches silently UNdone
+# by a working-tree reset in the clone - is caught by
+# run-oww-training-applesilicon.sh, which checks for the sentinel before launching
+# and sends you back here.
 #
 # Plus one the images do NOT apply: macos-dataloader-fork.py. macOS spawns worker
 # processes where Linux forks, and the training DataLoader wraps a lambda and a
@@ -120,11 +98,9 @@ done
 # --- the environment ---------------------------------------------------------------
 #
 # --extra mlx pulls kokoro-mlx, which renders the Kokoro corpus IN THIS PROCESS
-# instead of over HTTP to a container or a host server. Measured on an M1 Max at
-# 16 kHz: 57 ms/clip single against the service's 88 ms/clip BATCHED, and 25 ms/clip
-# batched. Enabled with `--kokoro-url mlx://` on the training run; see
-# train/corpus/kokoro_mlx.py.
-#
+# instead of over HTTP to a container or a host server. Measured on an M1 Max at 16 kHz:
+# 57 ms/clip single against the service's 88 ms/clip BATCHED, and 25 ms/clip batched.
+# Enabled with `--kokoro-url mlx://` on the training run; see train/corpus/kokoro_mlx.py.
 # It is an extra rather than a plain dependency because it is Apple Silicon only and
 # the trainer images must never need it - the backend imports it lazily and reports
 # why it is unusable rather than failing at import.
@@ -141,16 +117,14 @@ echo "==> syncing $ENV_DIR"
 # THE SPACY MODEL misaki NEEDS, INSTALLED HERE RATHER THAN ON FIRST USE.
 #
 # misaki (kokoro-mlx's G2P) downloads en_core_web_sm lazily by SHELLING OUT to
-# `uv pip install`. That child process has no VIRTUAL_ENV when the trainer is invoked
-# by absolute path rather than an activated venv, so it dies with
+# `uv pip install`. That child has no VIRTUAL_ENV when the trainer is invoked by
+# absolute path rather than an activated venv, so it dies with
 #
 #     error: No virtual environment found; run `uv venv` to create an environment
 #
-# which names uv and says nothing about spacy, misaki or TTS. Worse, it happens at
-# the first clip - after the run has printed its plan and started work.
-#
-# VIRTUAL_ENV is set explicitly for the same reason: spacy's downloader shells out
-# too, and inherits whatever this script's environment gives it.
+# which names uv and says nothing about spacy, misaki or TTS - and it happens at the
+# first clip, after the run has printed its plan. VIRTUAL_ENV is set explicitly for the
+# same reason: spacy's downloader shells out too, and inherits this script's env.
 if [[ -d "$ENV_DIR/.venv" ]]; then
     if ! "$ENV_DIR/.venv/bin/python" -c "import en_core_web_sm" 2>/dev/null; then
         echo "==> installing en_core_web_sm (misaki G2P)"
@@ -164,14 +138,14 @@ fi
 # --no-deps because its setup.py pins `torchaudio>=0.13.1,<1`, and satisfying that
 # would drag torch back to 1.13 and 2022. Neither container obeys that pin either -
 # pip leaves the already-installed wheel alone - so this matches their behaviour
-# deliberately rather than diverging from it. Everything it actually needs is
-# declared in train-applesilicon/pyproject.toml.
+# deliberately rather than diverging from it. Everything it actually needs is declared
+# in train-applesilicon/pyproject.toml.
 #
-# MUST COME AFTER `uv sync`, AND MUST BE REDONE AFTER ANY LATER ONE. sync prunes
+# MUST COME AFTER `uv sync`, AND MUST BE REDONE AFTER ANY LATER ONE: sync prunes
 # whatever is not in the lockfile, and this package is deliberately not - so a bare
 # `uv sync` in that directory silently uninstalls openwakeword and the next run dies
 # on `ModuleNotFoundError: No module named 'openwakeword'`. Re-running this script is
-# the supported way to repair that; it is idempotent.
+# the supported repair; it is idempotent.
 #
 # The VIRTUAL_ENV pin is load-bearing here, not decorative: unlike `uv sync`, `uv pip`
 # resolves its target environment from VIRTUAL_ENV before the project's .venv, so with
@@ -181,15 +155,14 @@ fi
 
 # --- prove it ----------------------------------------------------------------------
 #
-# The same build-time checks the Dockerfile runs, for the same reason: a broken import
-# should surface now, not after an hour of corpus generation.
+# The same build-time checks the Dockerfile runs, for the same reason: a broken
+# import should surface now, not after an hour of corpus generation.
 #
 # The MLX check RENDERS A CLIP rather than just importing, because the failures this
 # path has are runtime ones: espeak-ng data resolving to a build-machine path, a
-# missing spacy model, a model that downloads but will not run. An import proves none
-# of those. It also exercises the word timestamps, which are what run-on cuts depend
-# on - a backend that renders audio but returns no timestamps would silently push
-# every run-on onto the +153 ms estimate.
+# missing spacy model, a model that downloads but will not run. It also exercises the
+# word timestamps, which are what run-on cuts depend on - a backend that renders audio
+# but returns no timestamps would silently push every run-on onto the +153 ms estimate.
 ESPEAK_DATA_PATH="$ESPEAK_DATA" \
 PHONEMIZER_ESPEAK_LIBRARY="${PHONEMIZER_ESPEAK_LIBRARY:-/opt/homebrew/lib/libespeak-ng.dylib}" \
 "$ENV_DIR/.venv/bin/python" - <<'PY'

@@ -147,7 +147,7 @@ def main():
         # used to ignore host/port and return args.url every time, which made a
         # kokoro --instances sweep silently measure ONE server: four instances
         # reported 1.85 clips/s against one instance's 1.86, and the "flat
-        # throughput, linear latency" "" signature looked like real contention rather
+        # throughput, linear latency" signature looked like real contention rather
         # than the bug it was.
         make = lambda host, port: kokoro_caller(f"http://{host}:{port}", voice)
         target = f"kokoro {args.url} voice={voice}"

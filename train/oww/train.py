@@ -28,21 +28,16 @@ import scipy.io.wavfile
 import yaml
 from tqdm import tqdm
 
-# THE REPO ROOT, NOT THIS FILE'S DIRECTORY. Every path in this module is relative -
-# data/ and output/ - and the chdir below is what anchors them. While this file lived
-# at the repo root the two were the same thing; since it moved to train/oww/ they are
-# three levels apart, and getting this wrong does not raise. It builds a corpus under
-# train/oww/ and trains on nothing.
+# THE REPO ROOT, NOT THIS FILE'S DIRECTORY - the chdir below anchors every
+# relative path in this module. Getting this wrong does not raise: it builds the
+# corpus under train/oww/ and trains on nothing.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Importable when run as `python train/oww/train.py` as well as `python -m
-# train.oww.train`; the plain-path form puts train/oww/ on sys.path, not the root.
+# The plain-path form (`python train/oww/train.py`) puts train/oww/ on sys.path, not the root.
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# The engine-agnostic half of corpus construction, shared with the microWakeWord
-# trainer (see ARCHITECTURE.md). Moved out of this file without behaviour change; the
-# reasoning that used to live here moved with it.
+# The engine-agnostic half of corpus construction, shared with the microWakeWord trainer.
 from train.corpus.augment import (CHILD_STRETCH, CHILD_STRETCH_FRACTION,  # noqa: E402
                                   add_child_range_copies, trim_directory,
                                   trim_silence)
@@ -67,60 +62,48 @@ warnings.filterwarnings("ignore", message="Reached EOF prematurely")
 WORK_DIR = REPO_ROOT
 os.chdir(WORK_DIR)
 
-# BASE_NEGATIVES, TRAINING_COMMANDS, MISPRONOUNCING_VOICES and
-# CONFUSABLE_NEGATIVES now live in corpus/negatives.py, imported above.
-
 # Speed coverage of the positives, widened at the top for run 9.
 #
-# The measured failure: a synthetic sweep of the run 4 model detected 6/6 up to
-# 1.25x and then fell off a cliff - 3/6 at 1.40x, 2/6 at 1.60x. Training rendered
-# nothing above 1.3x, so the model fails just outside the range it was shown, and
-# is fine below it (0.55x still gave 6/6). The asymmetry says widen the top only.
+# Measured failure: a synthetic sweep of the run 4 model detected 6/6 up to 1.25x,
+# then 3/6 at 1.40x, 2/6 at 1.60x - training rendered nothing above 1.3x, and it was
+# fine below (6/6 at 0.55x). Widen the top only.
 #
-# It matches a real failure too: four of the five held-out clips run 4 missed were
-# the fast ones, and the shortest (300 ms) was shorter than every clip it detected.
-# Kokoro at 1.6x renders "hey seeree" in 390-590 ms depending on voice, which is
-# exactly that range - checked for intelligibility first, since training on
-# degraded audio would be worse than not covering the speed at all.
+# Matches a real failure too: four of the five held-out clips run 4 missed were the
+# fast ones, and the shortest (300 ms) shorter than every clip it detected. Kokoro
+# at 1.6x renders "hey seeree" in 390-590 ms, exactly that range - checked for
+# intelligibility, since degraded audio is worse than no coverage of the speed.
 #
-# Both lists move together: they are one variable, "how fast can the phrase be".
-# Covering fast phrase-alone renderings while leaving run-ons at 1.2x would leave
-# fast run-on speech - the commonest real case - still untrained.
+# Both lists move together - one variable, "how fast can the phrase be" - since
+# fast run-on speech is the commonest real case.
 #
-# RUNON_SPEEDS stays discrete and five long so the fallback path can keep caching
-# its phrase-alone reference per (voice, speed).
+# Stays discrete and five long so the fallback path can cache its phrase-alone
+# reference per (voice, speed).
 RUNON_SPEEDS = [0.8, 1.0, 1.2, 1.4, 1.6]
-# PLAIN_SPEEDS, PLAIN_SPEED_STEP and PLAIN_SPEED_GRID now live in
-# corpus/positives.py, imported above - both trainers use the same grid.
 
 # How much of the command's onset to keep after the wake word ends, in ms.
 #
 # The value that matters is where the phrase ends relative to the END OF THE ARRAY,
 # because create_fixed_size_clip aligns that with the window. Plain positives sit at
-# ~80 ms (30 ms trim pad + ~50 ms residual). Run-on positives must match, or the
-# positive set is bimodal and the model learns the later mode.
+# ~80 ms (30 ms trim pad + ~50 ms residual); run-ons must match or the positive set
+# is bimodal and the model learns the later mode.
 #
-# The boundary itself now comes from Kokoro's /dev/captioned_speech word timestamps,
-# so this is the whole overshoot rather than a jitter added to an estimate. Two
-# earlier attempts inferred the boundary from a phrase-alone rendering instead:
+# The boundary comes from Kokoro's /dev/captioned_speech word timestamps, so this is
+# the whole overshoot, not jitter on an estimate. Two earlier attempts inferred it
+# from a phrase-alone rendering:
 #
-#   v1, cut at phrase_len + U(50,250): kept 270-470 ms of command. The alignment
-#      peak moved 160 -> 480 ms, median latency 70 -> 130 ms, and extend false
-#      accepts 4/32 -> 7/32, because a trailing region holding speech in BOTH
-#      classes stops discriminating and the model learns to ignore it.
-#   v2, correcting for the 30 ms trim pad: still a median +153 ms late, and
-#      voice-dependent (af_bella ~0 ms, bf_lily +348..+459 ms). Worse, 2 of 18
-#      sampled clips cut slightly INSIDE the wake word, removing the coarticulated
-#      ending that is the entire reason for generating these clips.
+#   v1, cut at phrase_len + U(50,250): kept 270-470 ms of command. Alignment peak
+#      160 -> 480 ms, median latency 70 -> 130 ms, extend false accepts 4/32 -> 7/32 -
+#      a trailing region holding speech in BOTH classes stops discriminating.
+#   v2, correcting for the 30 ms trim pad: still median +153 ms late and
+#      voice-dependent (af_bella ~0, bf_lily +348..+459), and 2/18 clips cut inside
+#      the wake word.
 #
 # The timestamps remove both the bias and the variance. The fallback path still uses
-# the v2 estimate, which is why it reports itself loudly.
+# v2, which is why it reports itself loudly.
 #
-# THE RANGE MUST NOT START AT ZERO, and how far above zero is the open question.
-#
-# The margin is not padding. It is what lets the model hear that the word ENDED
-# rather than continued, which is the entire discrimination between "hey seeree"
-# and "hey serious". Measured against held-out real recordings:
+# THE RANGE MUST NOT START AT ZERO. The margin is not padding; it is what lets the
+# model hear the word ENDED rather than continued - the whole discrimination between
+# "hey seeree" and "hey serious". Measured against held-out real recordings:
 #
 #   effective margin   held-out run-on   extend+hey_other FA   latency
 #     ~50 ms (run 5)         28%              12/32             -20 ms
@@ -129,35 +112,30 @@ RUNON_SPEEDS = [0.8, 1.0, 1.2, 1.4, 1.6]
 #    ~225 ms (run 7)         56%               7/32              83 ms
 #
 # Runs 6 and 7 share an identical real-sample corpus and differ only in this
-# constant, so that pair is clean: +85 ms of margin bought +16 points of real
-# run-on detection. That is the relationship this value exists to exploit.
+# constant: +85 ms of margin bought +16 points of real run-on detection. That is the
+# relationship this value exploits.
 #
-# The false-accept column is NOT a gradient. It plateaus at 7-8/32 across a 3x
-# range of margin; the early monotonic reading was mostly the margin escaping the
-# pathological zero case, and run 4 also had half the real data. Do not raise this
-# expecting fewer false accepts.
+# The false-accept column is NOT a gradient: it plateaus at 7-8/32 across a 3x range
+# of margin (the early monotonic reading was mostly escaping the pathological zero
+# case; run 4 also had half the real data). Do not raise this expecting fewer false
+# accepts.
 #
-# The cost is latency, which tracks margin closely and is at 83 ms against a 120 ms
-# gate. There is roughly one more step of headroom, for diminishing returns.
+# The cost is latency, which tracks margin and sits at 83 ms against a 120 ms gate.
+# Roughly one more step of headroom, for diminishing returns.
 RUNON_TAIL_MS = (150.0, 300.0)
-
-# CHILD_STRETCH and CHILD_STRETCH_FRACTION now live in corpus/augment.py,
-# imported above, alongside the transforms that use them.
 
 
 def report_onnx_providers():
     """Say plainly whether feature computation will run on the GPU.
 
-    Worth doing because the failure is silent and expensive. onnxruntime falls back
-    to CPU with a warning rather than erroring when the CUDA provider cannot load,
-    and openwakeword picks its thread count from torch rather than onnxruntime - so
-    a box with a working GPU and the CPU build of onnxruntime computes features
-    single-threaded on CPU. That cost 36 minutes of an 83-minute run before anyone
-    noticed the warning in the scrollback.
+    The failure is silent and expensive: onnxruntime falls back to CPU with a
+    warning rather than erroring, and openwakeword picks its thread count from torch
+    rather than onnxruntime - so a box with a working GPU and the CPU build computes
+    features single-threaded on CPU. That cost 36 minutes of an 83-minute run before
+    anyone noticed the warning in the scrollback.
 
-    Checking `get_available_providers()` alone is not enough: it reports what the
-    build supports, not what will load. So open a real session against the model
-    that will actually be used, and report what it came back with.
+    get_available_providers() is not enough: it reports what the build supports, not
+    what will load. So open a real session against the model that will be used.
     """
     try:
         import onnxruntime
@@ -184,12 +162,9 @@ def report_onnx_providers():
         print("           make sure cuDNN is on the library path.")
 
 
-# The Kokoro client (pool, probe, voices, tts, batch, run_jobs,
-# generate_kokoro_samples) now lives in corpus/kokoro.py - imported above.
 # generate_runon_samples stays here: its cut logic needs RUNON_SPEEDS and
-# RUNON_TAIL_MS above, which stay openWakeWord-local, and microWakeWord has no
-# run-on positives yet (the gap is documented in train/mww/corpus.py).
-# build_negative_phrases and TRAINING_COMMANDS live in corpus/negatives.py.
+# RUNON_TAIL_MS above, which stay openWakeWord-local. microWakeWord has no run-on
+# positives yet (the gap is documented in train/mww/corpus.py).
 
 
 def generate_runon_samples(pool: "KokoroPool", voices: list, output_dir: Path,
@@ -200,23 +175,21 @@ def generate_runon_samples(pool: "KokoroPool", voices: list, output_dir: Path,
 
     The model measured in the tuning log detects 97% of "hey seeree, what's the time?"
     (comma, so the TTS puts a pause in) but only 83% of "hey seeree what's the time?"
-    spoken as one breath. Splicing a command onto a separately-recorded phrase does
-    not reproduce that, because the phrase keeps its isolated ending; the final
-    syllable has to actually be coarticulated into the next word, which means
-    rendering the whole thing as one utterance.
+    spoken as one breath. Splicing a command onto a separately-recorded phrase does not
+    reproduce that - the final syllable has to actually be coarticulated into the next
+    word, which means rendering the whole thing as one utterance.
 
-    The clip is then CUT shortly after the phrase, and that is the part to be careful
-    about. create_fixed_size_clip aligns the END OF THE ARRAY with the end of the
-    detection window, so a whole "hey seeree what's the time" would land the wake word
-    ~1.5s before the window end - outside the window once it is truncated to 2s, and
-    the opposite of the alignment the rest of the pipeline works to produce. Cutting
-    just past the phrase leaves the command's onset as trailing context, which is the
-    thing being taught, and keeps the phrase where the window expects it.
+    The clip is then CUT shortly after the phrase, and that is the careful part.
+    create_fixed_size_clip aligns the END OF THE ARRAY with the end of the detection
+    window, so a whole "hey seeree what's the time" would land the wake word ~1.5s
+    before the window end - outside the window once truncated to 2s. Cutting just past
+    the phrase leaves the command's onset as trailing context and keeps the phrase
+    where the window expects it.
 
     The cut point comes from a phrase-alone rendering at the same voice and speed,
     cached per (voice, speed). Coarticulation makes the phrase slightly shorter inside
-    the run-on than it is alone, so the cut lands a little way into the command -
-    which is the intent, and the jitter on top of it is deliberate.
+    the run-on than alone, so the cut lands a little way into the command - the
+    intent, with deliberate jitter on top.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     reference = {} if reference is None else reference
@@ -302,32 +275,30 @@ def generate_runon_samples(pool: "KokoroPool", voices: list, output_dir: Path,
     return success
 
 
-# copy_real_samples, time_stretch, vocal_tract_shift,
-# add_child_range_copies, trim_silence and trim_directory now live in
-# corpus/real.py and corpus/augment.py, imported above.
+# copy_real_samples, time_stretch, vocal_tract_shift, add_child_range_copies,
+# trim_silence and trim_directory live in corpus/real.py and corpus/augment.py.
 
 
 def convert_to_tflite(model_path: Path):
     """Convert the exported .onnx with this repo's converter. Returns the path or None.
 
-    UPSTREAM'S CONVERSION CANNOT RUN HERE, AND IS NOT MEANT TO. openwakeword's
-    train.py finishes by calling convert_onnx_to_tflite, which imports onnx_tf -
-    part of the tensorflow-cpu 2.8.1 / tensorflow_probability / onnx_tf trio this
-    image deliberately does not install, because it never resolved against
-    protobuf >= 3.20. So it raises ModuleNotFoundError and openwakeword exits 1
-    AFTER the .onnx is safely written. That is the whole reason the freshness check
-    above exists rather than trusting the exit code.
+    UPSTREAM'S CONVERSION CANNOT RUN HERE. openwakeword's train.py finishes by
+    calling convert_onnx_to_tflite, which imports onnx_tf - part of the
+    tensorflow-cpu 2.8.1 / tensorflow_probability / onnx_tf trio this image
+    deliberately does not install (it never resolved against protobuf >= 3.20). So it
+    exits 1 AFTER the .onnx is safely written - the whole reason the freshness check
+    exists rather than trusting the exit code.
 
     Doing it here means the .tflite arrives in the same run, from the converter that
-    actually VERIFIES the result: onnx2tflite tries each axis adaptation, scores it
-    against the source ONNX on random inputs, and refuses to write a model that
-    disagrees. That check is not optional care - onnx2tf's output axis order varies
-    by version, and a wrong-axis tflite loads cleanly, reports a plausible input
-    shape and returns plausible 0-1 scores while detecting nothing at all.
+    VERIFIES the result: onnx2tflite tries each axis adaptation, scores it against the
+    source ONNX on random inputs, and refuses a model that disagrees. That check is
+    not optional care - onnx2tf's output axis order varies by version, and a wrong-axis
+    tflite loads cleanly, reports a plausible shape, and returns plausible 0-1 scores
+    while detecting nothing at all.
 
     A FAILURE HERE DOES NOT FAIL THE RUN. The .onnx is what eval/ and
     run-oww-training.sh work with; the .tflite is for preflight and the deployment
-    runtime, and it can be produced later from the same .onnx without retraining.
+    runtime, and can be produced later from the same .onnx without retraining.
     """
     tflite_path = model_path.with_suffix(".tflite")
     print(f"Converting to tflite: {tflite_path.name}")
@@ -351,20 +322,17 @@ def setup_training_dirs(wake_word: str, skip_corpus: bool = False) -> Path:
     data/corpus/<wake_word>/oww/ - beside the microWakeWord corpus at .../mww/,
     without either pipeline reaching into the other's directory.
 
-    skip_corpus keeps what is already there instead of clearing it, for a re-run
-    after a failure downstream of generation - the OOM at the feature array is the
-    motivating case, since it strikes with the whole corpus already built. It
-    VERIFIES rather than trusts: an empty or partial corpus trains a model on
-    nothing and reports excellent accuracy for it, so a missing class is a hard
-    error here rather than a puzzling scorecard an hour later.
+    skip_corpus keeps what is already there, for a re-run after a failure downstream
+    of generation - the OOM at the feature array is the motivating case. It VERIFIES
+    rather than trusts: an empty or partial corpus trains a model on nothing and
+    reports excellent accuracy, so a missing class is a hard error here.
 
-    THE CORPUS AND THE MODELS ARE NOW SEPARATE TREES, and this function is why. It
-    rmtree's its base directory on every run. That base used to sit under
-    one tree, the same tree run-oww-training.sh copies the commit-tagged models
-    into, so a run could delete the archive of previous runs - it did exactly that
-    until the corpus was nested a level deeper. With the corpus under data/ and the
-    models under output/, the destructive path cannot reach a model at all: this
-    rmtree is confined to generated audio that the next run would rebuild anyway.
+    THE CORPUS AND THE MODELS ARE SEPARATE TREES, and this function is why. It
+    rmtree's its base directory on every run. The base used to share a tree with the
+    models run-oww-training.sh archives, so a run could delete the archive - it did
+    until the corpus nested a level deeper. With the corpus under data/ and models
+    under output/, this rmtree is confined to generated audio the next run would
+    rebuild anyway and cannot reach a model at all.
     """
     safe_name = wake_word.replace(" ", "_").lower()
     base_dir = WORK_DIR / "data" / "corpus" / safe_name / "oww"
@@ -413,22 +381,21 @@ def create_config(wake_word: str, n_samples: int, training_steps: int,
     config["target_accuracy"] = 0.7
     config["target_recall"] = 0.5
     config["target_false_positives_per_hour"] = 0.1
-    # MODELS OUT, CORPUS ELSEWHERE. Upstream uses output_dir for exactly three
-    # things (openwakeword/train.py:652, 905, 909): the .onnx export, the .tflite
-    # conversion beside it, and an empty <output_dir>/<model_name>/ it creates
-    # unconditionally - that last one is where the corpus WOULD have gone, and its
-    # being empty is the visible sign that corpus_dir took over. Everything else
-    # that used to derive from output_dir is re-pointed by
-    # patches/configurable-corpus-dir.py, which is what makes corpus_dir exist.
+    # MODELS OUT, CORPUS ELSEWHERE. Upstream uses output_dir for exactly three things
+    # (openwakeword/train.py:652, 905, 909): the .onnx export, the .tflite conversion
+    # beside it, and an empty <output_dir>/<model_name>/ it creates unconditionally -
+    # that last one is where the corpus WOULD have gone; its being empty is the
+    # visible sign corpus_dir took over. Everything else formerly derived from
+    # output_dir is re-pointed by patches/configurable-corpus-dir.py, which is what
+    # makes corpus_dir exist.
     # BOTH ABSOLUTE, AND corpus_dir MUST BE. Upstream runs os.path.abspath() on
     # output_dir (train.py:649) but knows nothing about corpus_dir, so a relative
     # value survives into trim_mmap, which builds its temp file like this:
     #
-    #     output_file2 = mmap_path.strip(".npy") + "2.npy"      # data.py:876
+    #     output_file2 = mmap_path.strip(".npy") + "2.npy"       # data.py:876
     #
     # str.strip takes a CHARACTER SET and strips BOTH ends, so a leading "./" loses
-    # its dot and a relative path silently becomes an absolute one at the filesystem
-    # root:
+    # its dot and a relative path silently becomes absolute at the filesystem root:
     #
     #     ./data/corpus/hey_seeree/oww/positive_features_train.npy
     #     ->  /data/corpus/hey_seeree/oww/positive_features_trai2.npy
@@ -440,43 +407,37 @@ def create_config(wake_word: str, n_samples: int, training_steps: int,
     config["corpus_dir"] = str(WORK_DIR / "data" / "corpus" / safe_name / "oww")
 
     # CREATE output_dir OURSELVES, ALL OF IT. Upstream makes it with os.mkdir
-    # (train.py:650-651), which creates ONE level - fine when output_dir was a single
-    # directory at the repo root, fatal now that it is three deep:
+    # (train.py:650-651), which creates ONE level - fatal now that it is three deep:
     #
     #     FileNotFoundError: [Errno 2] No such file or directory:
     #         '/app/output/hey_seeree/oww'
     #
-    # /app/output exists because compose mounts it; the two levels under it do not.
     # It fails inside the augmentation subprocess, after corpus generation has
-    # already run, so the cost is the whole generation stage.
-    #
-    # corpus_dir needs no equivalent: patches/configurable-corpus-dir.py creates it
-    # with os.makedirs, which is recursive.
+    # already run, so the cost is the whole generation stage. corpus_dir needs no
+    # equivalent: patches/configurable-corpus-dir.py creates it with os.makedirs.
     (WORK_DIR / config["output_dir"]).mkdir(parents=True, exist_ok=True)
 
-    # End of a linear ramp: the negative-class loss weight grows from 1 to this
-    # over training (openwakeword/train.py:274), so higher penalises false
-    # positives harder.
+    # End of a linear ramp: the negative-class loss weight grows from 1 to this over
+    # training (openwakeword/train.py:274), so higher penalises false positives harder.
     #
-    # Run 8 tried 4000. It does reduce false accepts (7/32 -> 3/32 at threshold
-    # 0.5) but costs detection (held-out plain 89% -> 77%, run-on 56% -> 37%).
-    # Compared at MATCHED false-accept counts rather than a fixed threshold the
-    # two models trade places without either dominating - so the weight mostly
-    # moved the operating point along the same curve, which the detection
-    # threshold does for free and without a retrain. Back at 2000 for that reason.
+    # Run 8 tried 4000: fewer false accepts (7/32 -> 3/32 at threshold 0.5) but worse
+    # detection (held-out plain 89% -> 77%, run-on 56% -> 37%). At MATCHED
+    # false-accept counts the two models trade places without either dominating - the
+    # weight mostly moved the operating point along the same curve, which the
+    # detection threshold does for free and without a retrain. Back at 2000.
     #
     # Raise this only if the deployment cannot tune its threshold.
     config["max_negative_weight"] = max_negative_weight
 
-    # Each round re-augments every clip with a different impulse response,
-    # background and gain, so this multiplies the distinct feature vectors without
-    # any extra TTS. It matters because training draws 50 positives per step for
-    # 50,000 steps - 2.5M draws against ~14k clips, so every clip is revisited
-    # ~180 times, and at one round those are 180 views of an identical vector.
+    # Each round re-augments every clip with a different impulse response, background
+    # and gain, multiplying the distinct feature vectors at no extra TTS. It matters
+    # because training draws 50 positives per step for 50,000 steps - 2.5M draws
+    # against ~14k clips, ~180 revisits each, and at one round those are 180 views
+    # of an identical vector.
     #
-    # Needs patches/honour-augmentation-rounds.py: upstream multiplies the clip
-    # list by this value but sizes the output array from the unmultiplied
-    # directory, so without the patch the extra rounds are computed and discarded.
+    # Needs patches/honour-augmentation-rounds.py: upstream multiplies the clip list
+    # by this value but sizes the output array from the unmultiplied directory, so
+    # without the patch the extra rounds are computed and discarded.
     config["augmentation_rounds"] = augmentation_rounds
     config["rir_paths"] = [f'{data_dir}/mit_rirs']
     config["background_paths"] = [f'{data_dir}/audioset_16k', f'{data_dir}/fma']
@@ -508,30 +469,6 @@ def run_augmentation():
 
 def wait_for_kokoro_shutdown(timeout: int = 120):
     """Block until the Kokoro servers have released their VRAM.
-
-    A BARRIER, NOT A COURTESY. run-oww-training.sh watches this script's log for
-    "Training model" and then stops Kokoro from the host - but that is a 2 s poll
-    followed by SIGTERM and two container shutdowns, racing a torch.empty() that
-    runs in milliseconds. The host cannot win, so the run OOM'd here:
-
-        torch.OutOfMemoryError: Tried to allocate 16.09 GiB.
-        GPU 0 has a total capacity of 23.56 GiB of which 15.34 GiB is free.
-
-    8.2 GiB was Kokoro, still resident. Note the gap against the ~2.4 GiB the script
-    header still quoted at the time: that figure predates the public 0.8.1 image.
-    Waiting for the ports to close is what makes the sequencing real rather than
-    hopeful, and it is nearly free when Kokoro is already down.
-
-    Not fatal on timeout. The generation stage has finished by now, so failing here
-    would throw away the expensive half of the run to avoid a failure that may not
-    happen - a smaller corpus can fit alongside Kokoro. Report and continue.
-
-    SKIPPED ENTIRELY WITHOUT CUDA. Everything above is about VRAM, and on a CPU run
-    there is none to contend for - Kokoro holding host RAM is not a problem this
-    barrier can help with. Worse than useless there, in fact: on the Mac it waited
-    the full 120 s and then printed a warning naming a 16.09 GiB OOM that cannot
-    occur on a machine with no GPU, which reads as a real problem and is not one.
-    It waits at all because KOKORO_EXTERNAL leaves the containers up on purpose.
     """
     import socket
 
@@ -723,10 +660,9 @@ def main():
     print("[Compute]")
     report_onnx_providers()
 
-    # ONLY WHEN GENERATING. --skip-corpus needs no TTS, and probing here would
-    # fail a resumed run for want of a server it is never going to call - while
-    # also holding ~8 GiB of VRAM that training is about to want. See
-    # wait_for_kokoro_shutdown.
+    # ONLY WHEN GENERATING. --skip-corpus needs no TTS, and probing here would fail
+    # a resumed run for want of a server it never calls - while also holding
+    # ~8 GiB of VRAM that training is about to want. See wait_for_kokoro_shutdown.
     if not args.skip_corpus:
         # Get Kokoro voices
         print("\n[Kokoro servers]")
@@ -742,9 +678,9 @@ def main():
         excluded.update(v.strip() for v in args.exclude_voices.split(",") if v.strip())
 
         # The v0 legacy voices, dropped by default. Reported separately from the
-        # mispronouncing ones because the reason is entirely different: those are
-        # excluded to protect accuracy, these to save time that buys nothing. See
-        # LEGACY_VOICE_MARKER for the two corpora that measured it.
+        # mispronouncing ones: those are excluded to protect accuracy, these to save
+        # time that buys nothing. See LEGACY_VOICE_MARKER for the corpora that
+        # measured it.
         legacy = sorted(v for v in kokoro_voices if LEGACY_VOICE_MARKER in v)
         if legacy and not args.include_legacy_voices:
             excluded.update(legacy)
@@ -783,22 +719,20 @@ def main():
         #
         # NO UPPERCASE. `wake_word.upper()` was in this list for the first twelve runs
         # and it renders the invented word as SPELLED-OUT LETTERS - "hey S-E-E-R-E-E" -
-        # which was then labelled as the wake word. A sixth of the plain positives were
-        # mislabelled that whole time. Caught by ear; the measurements that were
-        # supposed to catch it both failed, and how they failed is the point:
+        # labelled as the wake word. A sixth of the plain positives were mislabelled
+        # that whole time. Caught by ear; the measurements that were supposed to catch
+        # it both failed, and how they failed is the point:
         #
-        #   * duration: 1083 ms against 965 ms, only +12%. Spelling six letters should
-        #     have doubled it. Too weak a signal to conclude anything from, and it was
-        #     read as "emphatic delivery" instead.
-        #   * embedding distance: 0.535 from plain, about the same as a DIFFERENT VOICE
-        #     (0.70). That was read as "lots of diversity" when it was really "this is
-        #     not the same phrase".
+        #   * duration: 1083 ms against 965 ms, only +12%. Too weak to conclude
+        #     anything from; read as "emphatic delivery" instead.
+        #   * embedding distance: 0.535 from plain, about a DIFFERENT VOICE (0.70).
+        #     Read as "lots of diversity" when it was "this is not the same phrase".
         #
-        # A large distance from the plain rendering cannot distinguish useful variety
-        # from a different utterance. Anything added here must be LISTENED to.
+        # A large distance from plain cannot distinguish useful variety from a
+        # different utterance. Anything added here must be LISTENED to.
         #
-        # It is uppercase on the invented word specifically: "HEY seeree" measures 0.031
-        # from plain (nothing happens), while "hey SEEREE" measures 0.030 from
+        # It is uppercase on the invented word specifically: "HEY seeree" measures
+        # 0.031 from plain (nothing happens), while "hey SEEREE" measures 0.030 from
         # "HEY SEEREE" (both spell it). A real word in caps is fine; the wake word is
         # not a real word, which is the whole reason it makes a good wake word.
         #
@@ -813,11 +747,10 @@ def main():
         #   hey seeree.    0.086 / 0.294
         #   Hey Seeree     0.027 / 0.053   <- dropped, indistinguishable from plain
         #
-        # `.lower()` is also gone: it is the same STRING as `wake_word` for a lowercase
-        # wake word, so it was a literal duplicate slot.
+        # `.lower()` is also gone: a literal duplicate of a lowercase wake word.
         #
-        # The phrase-alone texts, and the tuned speed grid, live in
-        # corpus/positives.py so the microWakeWord corpus renders the same thing.
+        # The phrase-alone texts and tuned speed grid live in corpus/positives.py so
+        # the microWakeWord corpus renders the same thing.
         positive_texts = plain_positive_texts(wake_word)
 
         # Negative phrases - see build_negative_phrases for why the confusable ones
@@ -844,13 +777,13 @@ def main():
         # Adding would move three things at once: engine diversity, total corpus size,
         # and - because real clips are a FRACTION of the positive set - real-clip
         # density, which run 10 measured as the largest single lever here (run-on
-        # 53% -> 77%). A naive "also generate Piper" over all 84 voices would have taken
-        # real clips from ~17% of positives to ~6%, and the result would have measured
-        # dilution rather than diversity.
+        # 53% -> 77%). A naive "also generate Piper" over all 84 voices would have
+        # taken real clips from ~17% of positives to ~6%, measuring dilution rather
+        # than diversity.
         #
         # Substituting holds the total, the plain/run-on split, and real-clip density
-        # fixed, leaving one variable: where a share of the phrase-alone clips came from.
-        # Run-ons stay entirely Kokoro - see the --piper-fraction help for why.
+        # fixed, leaving one variable: where a share of the phrase-alone clips came
+        # from. Run-ons stay entirely Kokoro - see the --piper-fraction help for why.
         piper_voices = []
         kokoro_plain_train, kokoro_plain_test = plain_train, plain_test
         if args.piper_fraction > 0:
@@ -895,11 +828,9 @@ def main():
         if runon_train:
             # ONE POOL FOR EVERYTHING. Run-ons briefly had their own server: on
             # Kokoro-FastAPI they were the slow half (229 ms/clip batched on CPU
-            # against 88 for plain), and Metal was faster for them specifically
-            # (143 ms) while being slower for plain. MLX removed the asymmetry - it
-            # does run-ons in 89 ms single and 63 ms batched, beating both - so there
-            # is no slow half left to route elsewhere, and a second engine would be
-            # complexity for a case that no longer exists.
+            # against 88 for plain), and Metal was faster for them (143 ms) while
+            # slower for plain. MLX removed the asymmetry - 89 ms single, 63 ms
+            # batched - so there is no slow half left to route elsewhere.
             #
             # One reference cache across both sets: the phrase-alone lengths are the
             # same, and rebuilding it would cost a few hundred needless TTS calls.
@@ -922,10 +853,10 @@ def main():
             add_child_range_copies(pos_test, "VTLP positive test", args.child_fraction)
 
         print("\n[Real Voice]")
-        # The training half of the recordings. data/recordings/holdout/ is a SIBLING and
-        # is never read here - copy_real_samples globs this tree recursively, so a
-        # holdout nested inside it would be trained on and every eval number after that
-        # would be measuring memorisation. See eval/paths.py, which enforces the pair.
+        # The training half of the recordings. data/recordings/holdout/ is a SIBLING
+        # and is never read here - copy_real_samples globs this tree recursively, so
+        # a holdout nested inside it would be trained on and every eval number after
+        # would measure memorisation. eval/paths.py enforces the pair.
         real_samples_dir = WORK_DIR / "data" / "recordings" / "samples"
         real_count = copy_real_samples(real_samples_dir, pos_train, args.real_copies)
         if real_count > 5:
@@ -981,23 +912,21 @@ def main():
     # Note the existing model before training. setup_training_dirs clears the corpus
     # but NOT the exported model, so a previous run's model survives here - and if
     # training fails, an unchanged file would be reported as this run's output. That
-    # happened: a CUDA OOM during validation killed training at 75%, the script still
-    # printed "TRAINING COMPLETE!", and the stale model was copied off the box and
-    # evaluated twice before the identical checksums gave it away. Now that the two
-    # trees are separate the model ALWAYS survives a run, so this check matters more
-    # than it did, not less.
+    # happened: a CUDA OOM at 75% killed training, the script still printed
+    # "TRAINING COMPLETE!", and the stale model was copied off the box and evaluated
+    # twice before the identical checksums gave it away. Now that the two trees are
+    # separate the model ALWAYS survives a run, so this check matters more, not less.
     model_path = WORK_DIR / "output" / safe_name / "oww" / f"{safe_name}.onnx"
     before = model_path.stat().st_mtime if model_path.exists() else None
 
     returncode = run_training()
 
     # Whether the model was WRITTEN is the real signal, not the exit code.
-    # openwakeword saves the .onnx and then tries to convert it to tflite, which
-    # fails on this image and exits 1. Its conversion goes through onnx_tf, which
-    # is deliberately not installed - onnx_tf 1.10 is abandoned and never worked
-    # here anyway (tensorflow-cpu 2.8.1 against protobuf >= 3.20), so the image
-    # carries onnx2tf and onnx2tflite.py in its place. Treating that exit as
-    # failure would discard a perfectly good run.
+    # openwakeword saves the .onnx and then tries to convert it to tflite, which fails
+    # on this image and exits 1: its conversion goes through onnx_tf, which is
+    # deliberately not installed (abandoned; never worked here - tensorflow-cpu 2.8.1
+    # against protobuf >= 3.20), replaced by onnx2tf + onnx2tflite.py. Treating that
+    # exit as failure would discard a perfectly good run.
     fresh = model_path.exists() and (before is None
                                      or model_path.stat().st_mtime != before)
 

@@ -49,9 +49,9 @@
 #     KOKORO_EXTERNAL=1 KOKORO_URL=http://host.docker.internal:8880 \
 #         ./scripts/run-oww-training.sh "hey seeree"
 #
-# HONEST EXPECTATION: 2.25x is real but it does not close the gap to the training
-# box, whose Kokoro is CUDA-accelerated and generates the same corpus far faster.
-# This makes an openWakeWord corpus on a Mac take about an hour instead of several.
+# HONEST EXPECTATION: 2.25x is real but does not close the gap to the training box,
+# whose Kokoro is CUDA-accelerated. This makes an oWW corpus on a Mac take about an
+# hour instead of several.
 
 set -euo pipefail
 
@@ -94,8 +94,7 @@ command -v uv >/dev/null || { echo "ERROR: uv not found - see https://docs.astra
 #         No such file or directory
 #
 # It reaches that point having already loaded the model onto Metal, so the failure
-# looks like an MPS problem and is not.
-ESPEAK_DATA="${ESPEAK_DATA_PATH:-/opt/homebrew/share/espeak-ng-data}"
+# looks like an MPS problem and is not.ESPEAK_DATA="${ESPEAK_DATA_PATH:-/opt/homebrew/share/espeak-ng-data}"
 if [[ ! -f "$ESPEAK_DATA/phontab" ]]; then
     echo "ERROR: no espeak-ng data at $ESPEAK_DATA" >&2
     echo "       brew install espeak-ng" >&2
@@ -120,16 +119,16 @@ cd "$APP_DIR"
 # Mac. With no extra selected torch comes from plain PyPI, and the macOS arm64 wheel
 # is the one that carries MPS.
 #
-# The venv is created FIRST. start-gpu_mac.sh upstream runs `uv pip install -e .`
+# The venv is created FIRST: start-gpu_mac.sh upstream runs `uv pip install -e .`
 # before any venv exists, which errors, and the `uv run --no-sync` after it skips
 # installing - so the server starts without uvicorn and dies with
 # "Failed to spawn: `uvicorn`".
 [[ -d .venv ]] || uv venv
-# PIN uv TO THAT VENV. uv 0.9.10 (Homebrew, Nov 2025) no longer auto-discovers
-# the local .venv from this directory - it resolved a DIFFERENT venv of a newer
-# Python, where tiktoken 0.8.0's cp312 wheels do not match, and rebuilt it from
-# the sdist, which needs a Rust compiler. With VIRTUAL_ENV pinned, uv pip sees
-# tiktoken already satisfied and only reinstalls the editable.
+# PIN uv TO THAT VENV. uv 0.9.10 (Homebrew, Nov 2025) no longer auto-discovers the
+# local .venv from this directory - it resolved a DIFFERENT venv of a newer Python,
+# where tiktoken 0.8.0's cp312 wheels do not match, and rebuilt it from the sdist,
+# which needs a Rust compiler. With VIRTUAL_ENV pinned, uv pip sees tiktoken already
+# satisfied and only reinstalls the editable.
 export VIRTUAL_ENV="$PWD/.venv"
 uv pip install -e . --quiet
 

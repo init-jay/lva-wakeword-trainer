@@ -2,17 +2,13 @@
 """
 Compare trained wake-word models at MATCHED false-accept rates.
 
-This exists because comparing models at a fixed threshold is misleading, and that
-mistake cost several wrong conclusions over the seventeen tuning runs.
-Two runs of an IDENTICAL configuration measured 77% and 67% on held-out run-on
-speech at threshold 0.5, and both reached 95% at 8/32 false accepts. What varies
-between training runs is largely where the score distribution sits, not how well the
-model separates the classes - so a fixed-threshold comparison measures the operating
-point rather than the model.
+Comparing models at a fixed threshold is misleading. What varies between runs is largely where
+the score distribution sits, not how well the model separates the classes - a
+fixed-threshold comparison measures the operating point rather than the model.
 
 Every comparison here therefore tunes the threshold per model to hit the same
-false-accept count, and reports detection at that point. A model is better only if it
-detects more at the same precision.
+false-accept count, and reports detection at that point. A model is better only if
+it detects more at the same precision.
 
 Negatives are read PER CATEGORY, never pooled: the corpus from generate_negatives.py
 is adversarial by construction - a fifth of it is phrase-extending - so a pooled rate
@@ -23,9 +19,8 @@ MODELS FROM BOTH TRAINERS CAN BE COMPARED HERE, and the matched-false-accept met
 is what makes that legitimate. An openWakeWord score and a microWakeWord
 sliding-window average are not the same quantity and share no threshold scale - but
 "detection at the operating point that admits N adversarial false accepts" is the
-same question asked of both, on the same corpus, through the same code. Read the
-matched table; the fixed-0.5 table above it is meaningless ACROSS backends as well as
-across runs.
+same question asked of both, on the same corpus, through the same code. The
+fixed-0.5 table is meaningless ACROSS backends as well as across runs.
 
 Two things travel with a microWakeWord number and are printed with it: the sliding
 window size, without which a cutoff means nothing, and the score resolution, because
@@ -54,12 +49,12 @@ Usage, from the repo root:
 POSITIVES MUST BE RECORDINGS THE MODEL HAS NOT TRAINED ON, which is why the defaults
 come from `eval/paths.py` rather than being spelled out here: the trainer globs
 data/recordings/samples/ recursively, so scoring against that tree reports training
-accuracy - it overstated detection by ~10 points during this work. Passing a directory
-inside samples/ anyway is warned about, not blocked.
+accuracy - it overstated detection by ~10 points during this work. Passing a
+directory inside samples/ anyway is warned about, not blocked.
 
-Needs onnxruntime and an importable openwakeword for .onnx, plus a TFLite runtime and
-pymicro-features for microWakeWord. The `eval` compose service carries all of it and
-builds native on the Mac.
+Needs onnxruntime and an importable openwakeword for .onnx, plus a TFLite runtime
+and pymicro-features for microWakeWord. The `eval` compose service carries all of it
+and builds native on the Mac.
 """
 
 import argparse

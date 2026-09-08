@@ -2,22 +2,6 @@
 #
 # Run a full training pass on the trainer host.
 #
-# Wraps the sequence that has to happen in order, including the two steps that are
-# easy to forget and expensive to get wrong:
-#
-#   * Kokoro must be UP for generation and DOWN for training. The GPU-resident
-#     feature patch holds ~16.6 GiB of VRAM, so anything else on the card is the
-#     difference between a run and an OOM. Two have happened, at opposite ends of
-#     training: the validation step's ~2.76 GiB allocation killed a run at 37,500 of
-#     50,000 steps, and the feature array's 16.09 GiB killed one before step 1 with
-#     ~8 GiB of Kokoro still resident. Both after generation and feature computation
-#     had completed - the expensive half is always already spent when this bites.
-#
-#   * The model must be checked for freshness. train.py now verifies this itself,
-#     but the check is repeated here against the file you are about to copy off the
-#     box, because a stale model was evaluated twice before identical checksums gave
-#     it away.
-#
 # Usage:
 #   ./scripts/run-oww-training.sh "hey seeree"
 #   ./scripts/run-oww-training.sh "hey seeree" --samples-per-voice 400 --training-steps 100000
@@ -27,16 +11,6 @@
 #
 #   SKIP_BUILD=1     use the existing image (see below for when)
 #   SKIP_CORPUS=1    reuse data/corpus/<wake>/oww/ instead of regenerating it
-#
-# SKIP_CORPUS IS FOR RESUMING, NOT FOR TUNING THE CORPUS. It exists because both
-# recorded OOMs strike after generation has completed, so the failure destroys the
-# cheap half of the run and preserves the expensive half. It skips TTS, real-clip
-# copying and trimming, and still re-runs augmentation and training - so
-# --training-steps, --layer-size and --max-negative-weight are all still live, while
-# --samples-per-voice and friends are silently inert because the clips already exist.
-# The unlike-mWW part: it also means no TTS server starts at all, which is the
-# cleanest possible answer to the VRAM contention that caused the OOM.
-
 set -euo pipefail
 
 WAKE_WORD="${1:-}"
@@ -54,8 +28,8 @@ fi
 #
 # It named its outputs after that, took a minute to fail, and failed somewhere
 # unrelated - in train.py's argument parser, reporting a missing .onnx. Everything
-# downstream here derives paths from this string, so a bad one is cheap to catch now
-# and confusing to diagnose later.
+# downstream here derives paths from this string, so a bad one is cheap to catch
+# now and confusing to diagnose later.
 #
 # Letters, spaces, apostrophes and hyphens only. Deliberately narrow: the wordlists
 # and the TTS engines both take plain text, and no legitimate wake word has needed
@@ -162,15 +136,16 @@ elif [[ -n "${KOKORO_EXTERNAL:-}" ]]; then
     #     host, DEVICE_TYPE=cpu    3.56 clips/s   283 ms median
     #     docker, CPU image        ~4    clips/s
     #
-    # 2.25x, and the host/container difference is nil - 3.56 against ~4 - so the gain
-    # is Metal, not the environment. A SECOND MPS INSTANCE BUYS NOTHING (9.07 vs 8.45
-    # clips/s): they share one GPU and serialise on it. Point this at one server.
+    # 2.25x, and the host/container difference is nil (3.56 against ~4) - the gain
+    # is Metal, not the environment. A SECOND MPS INSTANCE BUYS NOTHING (9.07 vs
+    # 8.45 clips/s): they share one GPU and serialise on it. Point this at one
+    # server.
     #
     # It generalises past Metal: any Kokoro this script did not start - one on
-    # another box, one already warm from a previous run - works the same way. Note
-    # the repo's own warning before reaching for a remote one, though: adding two
-    # REMOTE servers to two local ones measured SLOWER, because batching amortises
-    # latency and not the ~640 KB a batch of 16 sends back.
+    # another box, one already warm - works the same way. Note the repo's own warning
+    # before reaching for a remote one: adding two REMOTE servers to two local ones
+    # measured SLOWER, because batching amortises latency and not the ~640 KB a
+    # batch of 16 sends back.
     #
     # From inside the compose network the host is `host.docker.internal`:
     #
@@ -252,23 +227,23 @@ echo "=== $(date '+%H:%M:%S')  training (log: $LOG)"
 # Kokoro. train.oww.train therefore BLOCKS on the ports closing before it allocates;
 # this loop is what makes that wait terminate, not what makes it safe.
 #
-# ~8 GiB across the two containers, measured against the public 0.8.1 image. An
-# earlier ~2.4 GiB figure here predated that image and understated it by 3x, which
-# is why the sizing is quoted with the image it was measured on.
-# Poll the log rather than `tail -f | grep -q`. That pipeline is fragile in two
-# ways that both fail SILENTLY, leaving Kokoro running and reproducing the OOM this
-# exists to prevent: with pipefail inherited, grep -q exiting on a match kills
-# tail -f with SIGPIPE and the pipeline reports failure, so the `&&` never runs; and
-# BSD grep buffers stdin, so it may never process a line until EOF, which tail -f
-# never sends. A polling loop has neither problem.
+# ~8 GiB across the two containers, measured against the public 0.8.1 image (an
+# earlier ~2.4 GiB figure here predated it and understated by 3x - hence quoting the
+# image).
+# Poll the log rather than `tail -f | grep -q`. That pipeline fails SILENTLY in two
+# ways, leaving Kokoro running and reproducing the OOM: with pipefail inherited,
+# grep -q exiting on a match kills tail -f with SIGPIPE and the pipeline reports
+# failure, so the `&&` never runs; and BSD grep buffers stdin, so it may never
+# process a line until EOF, which tail -f never sends. A polling loop has neither
+# problem.
 #
 # Not started under SKIP_CORPUS=1: Kokoro was stopped before the run began, so there
-# is nothing to wait for and a watcher would only sit there until the run ends.
+# is nothing to wait for.
 #
-# Not under KOKORO_EXTERNAL=1 either, and for a stronger reason than "pointless":
-# stopping a server this script did not start is out of bounds. The host MPS process
-# is the user's, and on a shared box the URL may be someone else's entirely. The VRAM
-# argument that justifies the stop does not apply anyway - an external Kokoro is not
+# Not under KOKORO_EXTERNAL=1 either, for a stronger reason than "pointless":
+# stopping a server this script did not start is out of bounds - the host MPS
+# process is the user's, and on a shared box the URL may be someone else's entirely.
+# The VRAM argument for stopping does not apply anyway: an external Kokoro is not
 # on the training GPU, which is the whole point of it being external.
 WATCH_PID=""
 if [[ "${SKIP_CORPUS:-}" != "1" && -z "${KOKORO_EXTERNAL:-}" ]]; then
@@ -291,23 +266,22 @@ fi
 CMD="docker compose run --rm"
 # -e OVERRIDES THE SERVICE'S OWN KOKORO_URL, and without it this whole path is inert.
 # docker-compose.yml sets KOKORO_URL=http://kokoro:8880,http://kokoro2:8880 in the
-# oww-trainer service, and a value set in `environment:` beats the one inherited from
-# the shell - so exporting KOKORO_URL alone would be silently ignored and the run
-# would dial the containers that KOKORO_EXTERNAL=1 deliberately did not start.
+# oww-trainer service, and a value in `environment:` beats the one inherited from the
+# shell - so exporting KOKORO_URL alone would be silently ignored and the run would
+# dial the containers KOKORO_EXTERNAL=1 deliberately did not start.
 [[ -n "${KOKORO_EXTERNAL:-}" ]] && CMD="$CMD -e KOKORO_URL=$(printf '%q' "$KOKORO_URL")"
 CMD="$CMD oww-trainer python -m train.oww.train"
 # /app/data/external, NOT /app/data. The third-party corpora moved into
 # data/external/ and train.py builds rir_paths/background_paths/feature_data_files
 # by joining this prefix - so the old value points at directories that no longer
 # exist, and openWakeWord augments with no impulse responses and no background audio
-# rather than erroring.
-CMD="$CMD --wake-word $(printf '%q' "$WAKE_WORD") --data-dir /app/data/external"
+# rather than erroring.CMD="$CMD --wake-word $(printf '%q' "$WAKE_WORD") --data-dir /app/data/external"
 [[ "${SKIP_CORPUS:-}" == "1" ]] && CMD="$CMD --skip-corpus"
 for arg in "$@"; do CMD="$CMD $(printf '%q' "$arg")"; done
 
 # Run under `script` so the container gets a pty. Piping to tee otherwise denies
-# docker a TTY, and tqdm then has no terminal to draw on - the training progress
-# bar disappears entirely. `script -e` propagates the child's exit status.
+# docker a TTY, and tqdm has no terminal to draw on - the progress bar disappears
+# entirely. `script -e` propagates the child's exit status.
 #
 # Foreground with PIPESTATUS, because a backgrounded pipeline reports tee's status
 # rather than docker's and would call a failed run a success.
@@ -334,8 +308,7 @@ echo
 # saves the .onnx and then tries to convert it to tflite via onnx_tf, which this
 # image deliberately does not carry (it never worked - tensorflow-cpu 2.8.1 against
 # protobuf >= 3.20 - and onnx2tf replaced it), so that step exits 1. Treating that
-# as a failure would discard a good run - the README documents it under "TFLite
-# conversion error at end".
+# as a failure would discard a good run (README: "TFLite conversion error at end").
 if [[ ! -f "$MODEL" ]]; then
     echo "=== TRAINING FAILED (exit $STATUS) - $MODEL does not exist. See $LOG"
     exit "${STATUS:-1}"
@@ -357,8 +330,7 @@ fi
 # Name the output by the code AND the audio that produced it - see
 # train/provenance.py. Computed HERE, after training, on purpose: the synthetic
 # corpus is built by the run itself, so hashing it beforehand would name the model
-# after the previous run's audio.
-TAG="$(python3 -m train.provenance --wake-word "$WAKE_WORD" --tag --fallback "$STAMP")"
+# after the previous run's audio.TAG="$(python3 -m train.provenance --wake-word "$WAKE_WORD" --tag --fallback "$STAMP")"
 DIRTY=""
 git diff --quiet 2>/dev/null || DIRTY="-dirty"
 TAGGED="output/${SAFE_NAME}/oww/${SAFE_NAME}_${TAG}.onnx"
@@ -367,10 +339,10 @@ cp "$MODEL" "$TAGGED"
 
 # The .tflite gets THE SAME TAG, from the same run. train.py converts it straight
 # after export, so it is derived from exactly this .onnx - and a tagged .onnx beside
-# an untagged .tflite is how a model and its conversion drift apart, which is
-# precisely the mix-up eval/backends.py warns about when it says the two are not
-# guaranteed to agree. Absent if the conversion failed; that is not fatal here, the
-# .onnx is the artifact everything else works from.
+# an untagged .tflite is how a model and its conversion drift apart, the mix-up
+# eval/backends.py warns about when it says the two are not guaranteed to agree.
+# Absent if the conversion failed; not fatal - the .onnx is the artifact everything
+# else works from.
 TFLITE="${MODEL%.onnx}.tflite"
 TAGGED_TFLITE="${TAGGED%.onnx}.tflite"
 if [[ -f "$TFLITE" ]]; then

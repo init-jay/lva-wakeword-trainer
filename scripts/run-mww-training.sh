@@ -25,7 +25,7 @@
 #   MAX_FAPH=0.2     false-accepts-per-hour budget for the manifest cutoff
 #
 # WHY NO KOKORO DANCE. run-oww-training.sh stops Kokoro before training because the
-# GPU-resident feature patch needs the ~2.4 GB its CUDA contexts hold. Nothing here
+# GPU-resident feature patch needs the VRAM its CUDA contexts hold. Nothing here
 # does that: mWW's corpus comes from PIPER, which runs CPU-only by design, so it
 # holds no CUDA context and can stay up throughout.
 
@@ -117,18 +117,16 @@ else
     docker compose up -d piper
 
     # WAIT FROM INSIDE THE COMPOSE NETWORK, NOT FROM THE HOST. Piper speaks Wyoming
-    # over TCP rather than HTTP, so readiness is a connect check - and a host-side
-    # connect to localhost:10200 is a FALSE POSITIVE. Docker's port proxy accepts as
-    # soon as the container starts, before wyoming-piper has loaded its default voice
-    # and bound the port inside it. That check passed on its first attempt, printed
-    # "Piper ready" in the same second as "starting Piper", and the corpus container
-    # then died on "Connection refused" dialling piper:10200.
+    # over TCP, so readiness is a connect check - and a host-side connect to
+    # localhost:10200 is a FALSE POSITIVE: Docker's port proxy accepts as soon as the
+    # container starts, before wyoming-piper has bound the port inside it. That check
+    # passed on its first attempt, printed "Piper ready" in the same second as
+    # "starting Piper", and the corpus container then died on "Connection refused"
+    # dialling piper:10200. Polling the same DNS name the real command uses is the
+    # only check that means anything.
     #
-    # Kokoro's check in run-oww-training.sh is unaffected: it issues a real HTTP
-    # request, which the proxy cannot answer on the app's behalf.
-    #
-    # Polling the same DNS name the real command uses is the only check that means
-    # anything. One container start, looping inside it.
+    # (Kokoro's check in run-oww-training.sh is unaffected: it issues a real HTTP
+    # request, which the proxy cannot answer on the app's behalf.)
     docker compose run --rm --no-deps --entrypoint python3 mww-trainer -c "
 import socket, sys, time
 for _ in range(90):
@@ -144,12 +142,11 @@ sys.exit('piper did not start listening on piper:10200 within 180s')
     run "building corpus (log: $LOG)"
     : > "$LOG"
     # --kokoro-fraction 0 is EXPLICIT, not the module default, on purpose: the
-    # compose mww-trainer service has no KOKORO_URL and no kokoro service
-    # dependency (unlike oww-trainer), so the moment someone wires those in,
-    # this line is where the mix should change - and a silent default change
-    # here would make container corpora drift from each other without a
-    # visible diff. The Apple Silicon route (run-mww-training-applesilicon.sh)
-    # already runs 0.3.
+    # compose mww-trainer service has no KOKORO_URL and no kokoro service dependency
+    # (unlike oww-trainer), so the moment someone wires those in, this line is where
+    # the mix should change - and a silent default change here would make container
+    # corpora drift from each other without a visible diff. The Apple Silicon route
+    # (run-mww-training-applesilicon.sh) already runs 0.3.
     docker compose run --rm mww-trainer python -m train.mww.corpus \
         --wake-word "$WAKE_WORD" --piper-url piper:10200 --kokoro-fraction 0 2>&1 | tee -a "$LOG"
 fi
@@ -166,11 +163,10 @@ else
     # then quietly use the old audio while the tag names the new.
     CLEAN=(--clean)
     [[ "${SKIP_CORPUS:-}" == "1" ]] && CLEAN=()
-    run "generating spectrogram features ${CLEAN[*]:-（reusing what exists）}"
+    run "generating spectrogram features ${CLEAN[*]:-(reusing what exists)}"
     docker compose run --rm mww-trainer python -m train.mww.features \
         --wake-word "$WAKE_WORD" "${CLEAN[@]}" 2>&1 | tee -a "$LOG"
 fi
-
 # --- the run tag -----------------------------------------------------------------
 #
 # Computed HERE, after the corpus exists and before training starts. Both halves of
@@ -179,7 +175,6 @@ fi
 # directory, so the tag has to be decided before the run rather than after it. That
 # is the opposite of the openWakeWord side, where the corpus is built by the training
 # command itself and the tag is therefore computed at the end.
-
 TAG="$(python3 -m train.provenance --wake-word "$WAKE_WORD" --tag --fallback "$STAMP")"
 DIRTY=""
 git diff --quiet 2>/dev/null || DIRTY="-dirty"
@@ -207,8 +202,8 @@ fi
 # cutoff can be chosen later from the ROC that is already on disk. It is separated
 # out because choosing probability_cutoff is a judgement, not a build step - the
 # default budget of 0.0 has no measured row on most ROCs and is meant to refuse
-# rather than silently pick the synthetic frr=1.0 terminator, which is how a manifest
-# once shipped with a model that could not fire.
+# rather than silently pick the synthetic frr=1.0 terminator, which is how a
+# manifest once shipped with a model that could not fire.
 
 run "cutting the ESPHome manifest (--max-faph $MAX_FAPH)"
 if docker compose run --rm mww-trainer python -m train.mww.manifest \
@@ -234,7 +229,6 @@ fi
 # filename - `stream_state_internal_quant.tflite` - so a manifest copied beside a
 # renamed model points at a file that is not there. ESPHome would fail to load it,
 # and the JSON would look correct while doing so.
-
 TAGGED_MODEL="${OUT_DIR}/${SAFE_NAME}_${TAG}.tflite"
 TAGGED_MANIFEST="${OUT_DIR}/${SAFE_NAME}_${TAG}.json"
 TAGGED_ROC="${OUT_DIR}/tflite_streaming_roc_${TAG}.txt"

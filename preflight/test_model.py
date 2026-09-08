@@ -10,21 +10,6 @@ needs the mic. Nothing here is containerised.
     uv run test_model.py --model ../output/hey_seeree/oww/hey_seeree_705c23b.tflite
     uv run test_model.py --model ../output/hey_seeree/mww/hey_seeree_705c23b.json
 
-WHY THIS IS NOT JUST ANOTHER EVAL RUN. The harness in eval/ scores recordings: fixed
-clips, padded with room tone, one model at a time. This scores YOUR ROOM - its noise
-floor, its reverb, your mic's gain and placement, and you actually speaking rather
-than a clip of you speaking. Every one of those is a variable the corpus does not
-contain, and the gates cannot see. A model that passes eval/ and fails here has not
-regressed; it has met a condition nothing upstream measured.
-
-IT RUNS THE DEPLOYMENT RUNTIME, and shares that code with the eval harness rather than
-reimplementing it - `eval/backends.py` holds the one implementation, and this drives
-it incrementally via start()/feed() instead of over whole clips. Reimplementing the
-streaming here is how you end up preflighting a third pipeline that nothing ships;
-that mistake is already recorded at the top of backends.py.
-
-    .tflite / .json    the deployment runtime, what the device runs      <- preflight this
-    .onnx              the tuning-run path, whole clips only             <- refused
 
 THE THRESHOLD IS THE POINT OF THE EXERCISE. Say the phrase ten or twenty times, at the
 distance and volume you would really use, and watch `peak`. A model whose peaks sit

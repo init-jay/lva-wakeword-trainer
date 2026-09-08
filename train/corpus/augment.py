@@ -9,12 +9,10 @@ Moved verbatim from train.py. Both trainers need these for the same reasons:
 - Child-range copies, because the corpus is otherwise adult-only. This was the
   largest single win in the tuning log (run 13: a 4-year-old 24% -> 83%).
 
-CAVEAT FOR THE microWakeWord PORT: add_child_range_copies reads the voice's sex from
-the Kokoro filename convention (kokoro_af_bella_<uuid> -> "af" -> female). Piper voice
-names carry no such marker - en_US-libritts_r-medium with a numeric speaker id says
-nothing about sex - so this function will skip every Piper clip rather than
-mis-shift it. Making the lever work for Piper needs a sex mapping per voice/speaker,
-which is open work rather than something this module already handles.
+NOTE ON PIPER CLIPS: add_child_range_copies reads the voice's sex from the filename
+convention (kokoro_af_bella_<uuid> -> "af" -> female; Piper clips are named
+piper_p{sex}_... so the same extraction works) - see the function docstring for the
+unknown-sex case it skips.
 """
 
 from fractions import Fraction
@@ -117,6 +115,7 @@ def vocal_tract_shift(data: np.ndarray, ratio: float, sr: int = 16000) -> np.nda
     vtlp_demo/ clips: same F0 to within the estimator's resolution, and this keeps
     the original length exactly where atempo drifts ~3%.
     """
+
     frac = Fraction(ratio).limit_denominator(100)
     shifted = resample_poly(data.astype(np.float64), frac.denominator, frac.numerator)
     out = time_stretch(shifted, float(ratio), sr=sr)

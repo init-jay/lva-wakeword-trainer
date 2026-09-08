@@ -7,7 +7,6 @@ reason it moved: the microWakeWord corpus was Piper-only because this client liv
 inside the openWakeWord trainer, which the corpus layer cannot import without
 dragging in that whole pipeline. Both trainers now import it from here - the same
 "shared code, separate output" split as the rest of this package.
-
 WHAT MOVED AND WHAT STAYED:
 
   * moved: KokoroPool, probe_kokoro_servers, get_kokoro_voices,
@@ -17,7 +16,7 @@ WHAT MOVED AND WHAT STAYED:
   * stayed in train/oww/train.py: generate_runon_samples. Its cut logic needs
     RUNON_SPEEDS and RUNON_TAIL_MS, which stay openWakeWord-local for now
     (RUNON_TAIL_MS carries the run-4-through-7 history), and microWakeWord has no
-    run-on positives yet. It moves here when it needs to, with those constants.
+    run-on positives yet.
 
 "mlx://" is a URL that means "in this process": kokoro_tts and kokoro_tts_timed
 dispatch on it rather than plumbing a backend argument, because a URL is what
@@ -56,8 +55,8 @@ class KokoroPool:
     are what scale, until the cores run out.
 
     Round-robin per job rather than a static split by index, so a thread that draws
-    a slow server holds it longer and completes fewer jobs. That balancing is weak,
-    though - it does not make a slow server free.
+    a slow server holds it longer and completes fewer jobs. That balancing is weak -
+    it does not make a slow server free.
 
     MEASURED: with batching on, adding two remote servers to the two local ones made
     the run SLOWER, so the local pair alone is the better configuration here.
@@ -171,10 +170,7 @@ def get_kokoro_voices(kokoro_url: str) -> list:
 def kokoro_tts(kokoro_url: str, voice: str, text: str, speed: float):
     """Render one utterance as 16 kHz int16 audio, or None on failure.
 
-    "mlx://" means in-process rather than over HTTP - see corpus/kokoro_mlx.py. It is
-    dispatched on the URL rather than plumbed through as a separate backend argument
-    because a URL is what every call site already threads around; this keeps
-    KokoroPool, generate_kokoro_samples and generate_runon_samples untouched.
+    "mlx://" means in-process rather than over HTTP - see corpus/kokoro_mlx.py.
     """
     if kokoro_mlx.is_mlx_url(kokoro_url):
         return kokoro_mlx.render(voice, text, speed)
@@ -211,10 +207,10 @@ def kokoro_tts(kokoro_url: str, voice: str, text: str, speed: float):
 def kokoro_tts_timed(kokoro_url: str, voice: str, text: str, speed: float):
     """Render an utterance and return (16 kHz int16 audio, word timestamps).
 
-    Kokoro-FastAPI's /dev/captioned_speech returns per-word start/end times
-    alongside the audio, which is what makes an exact cut possible for the run-on
-    positives: it says precisely where the wake word ends inside the utterance,
-    instead of that having to be inferred from a separate phrase-alone rendering.
+    /dev/captioned_speech returns per-word start/end times alongside the audio, which
+    is what makes an exact cut possible for the run-on positives: it says precisely
+    where the wake word ends inside the utterance, instead of that having to be
+    inferred from a separate phrase-alone rendering.
 
     Returns (None, None) if the endpoint is unavailable, so callers can fall back.
     """

@@ -1,23 +1,7 @@
 #!/usr/bin/env bash
 #
-# Run the microWakeWord trainer on the HOST, on Apple Silicon. The container-free
-# counterpart to run-mww-training.sh: the same four stages, the same
-# train/mww/*.py, the same pinned tensorflow 2.21.0 - with the corpus stage's
-# Piper on the host instead of in the compose network.
+# Run the microWakeWord trainer on the HOST, on Apple Silicon. 
 #
-# WHY IT IS A SEPARATE SCRIPT rather than a flag on run-mww-training.sh: that
-# script is docker-compose orchestration - a network that does not exist on a
-# Mac, a piper service name that does not resolve, an image build to wait for.
-# Threading a host mode through it would leave both paths harder to read than
-# two scripts, the same reasoning the openWakeWord pair documents.
-#
-# WHY IT IS FASTER THAN THE CONTAINER, MEASURED (2026-09-07, this machine):
-#     stage        container            host
-#     corpus       9.13 clips/s Piper   21.66 clips/s Piper (2.4x)
-#     training     36.21 ms/step        30.86 ms/step (1.17x)
-# The corpus stage is the longest in a full run, so it carries most of the
-# end-to-end gain. tools/tf_probe.py and tools/bench_tts.py are the probes;
-# the full tables and their caveats are in SPEED.md.
 #
 #     ./scripts/setup-mww-applesilicon-trainer.sh                     # once
 #     ./scripts/start-piper-host.sh                                   # in another terminal
@@ -29,26 +13,24 @@
 # substitution, not addition: the total clip count, the real-clip share, and the
 # Piper-only negative set all stay fixed, mirroring the 30% its openWakeWord
 # sibling already runs (engines swapped). 0.3 needs the Kokoro host server above;
-# KOKORO_FRACTION=0 (or --kokoro-fraction 0) runs all-Piper, the historical
-# corpus, and needs only Piper. The module document: train/mww/corpus.py.
+# KOKORO_FRACTION=0 (or --kokoro-fraction 0) runs all-Piper, the historical corpus,
+# and needs only Piper. The module document: train/mww/corpus.py.
 #
 # --samples-per-voice N (default 60, the corpus module's) sets the corpus DEPTH
 # and is consumed by this script, applied to the corpus stage only - the train
-# stage does not take it and would reject it. Scaling the data the model
-# actually SEES needs --training-steps too (that one flows to the train stage):
-# steps default to 10000, so a 2x corpus at 10000 steps trains on the same
-# total number of examples and tests nothing about data size.
+# stage does not take it and would reject it. Scaling the data the model actually
+# SEES needs --training-steps too (that one flows to the train stage): steps
+# default to 10000, so a 2x corpus at 10000 steps trains on the same total number
+# of examples and tests nothing about data size.
 #
 # --negatives-per-voice N (default 12, the corpus module's) sets how many
-# adversarial clips each Piper voice renders - the REJECTION training, as
-# opposed to the positive budget above. The 2026-09-08 doubled-depth runs
-# showed what an underfed rejection set does: with 984 adversarial clips
-# against 8-15k positives, one of the two produced a firehose that fired on
-# everything Piper-ish and lost its FAPH operating point entirely. Doubling
-# this to 24 (1,968 clips, ~2 minutes of TTS) is the cheap, single-variable
-# counter-test. Measured 2026-09-08 (tag ecbf160-dirty-da01854d): first model
-# to pass the extend+hey_other gate; recall paid the price - the measurement
-# lives in train/mww/corpus.py, point 5.
+# adversarial clips each Piper voice renders - the REJECTION training, as opposed
+# to the positive budget above. The 2026-09-08 doubled-depth runs showed what an
+# underfed rejection set does: with 984 adversarial clips against 8-15k positives,
+# one of the two produced a firehose that fired on everything Piper-ish and lost
+# its FAPH operating point entirely. Doubling this to 24 (1,968 clips, ~2 minutes
+# of TTS) is the cheap, single-variable counter-test; the measurement lives in
+# train/mww/corpus.py, point 5.
 #
 # SKIP_CORPUS=1 / SKIP_FEATURES=1 behave exactly as in run-mww-training.sh.
 #
@@ -85,10 +67,10 @@ fi
 shift
 
 # THE ENVS ARE SPLIT ON NUMPY, so is the failure mode. If the microwakeword
-# package is missing from THIS venv, the run dies with ModuleNotFoundError in
-# the features stage; if numpy is <2, model_train_eval's RaggedMmap path dies
-# later still. Both are setup-script territory, so say that here, now, in the
-# message a tired reader will actually read.
+# package is missing from THIS venv, the run dies with ModuleNotFoundError in the
+# features stage; if numpy is <2, model_train_eval's RaggedMmap path dies later
+# still. Both are setup-script territory, so say that here, now, in the message a
+# tired reader will actually read.
 if [[ ! -x "$ENV_DIR/.venv/bin/python" ]]; then
     echo "ERROR: $ENV_DIR/.venv missing. Run ./scripts/setup-mww-applesilicon-trainer.sh" >&2
     exit 2
@@ -217,9 +199,8 @@ export KOKORO_URL
 
 # THE CONTAINER MAY OWN THESE FILES. Both paths write data/corpus/ and output/,
 # and the trainer images run as root - train/ownership.py hands output/ back
-# afterwards, but data/corpus/ is left as root wrote it. A host run then fails
-# on permissions somewhere unhelpful, so check here where the fix is obvious.
-SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
+# afterwards, but data/corpus/ is left as root wrote it. A host run then fails on
+# permissions somewhere unhelpful, so check here where the fix is obvious.SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
 for d in "data/corpus/${SAFE_NAME}/mww" "output/${SAFE_NAME}/mww"; do
     if [[ -e "$d" && ! -w "$d" ]]; then
         echo "ERROR: $d is not writable by $(whoami) - a container run probably made it." >&2
@@ -315,9 +296,9 @@ LOG="training-${SAFE_NAME}-macos-${STAMP}.log"
 # The one stage this script reaches differently: PIPER_URL and KOKORO_URL are
 # host servers, never compose service names. generate_piper_samples and
 # generate_kokoro_samples here are the same code the container runs - the 2.4x
-# Piper gap comes from the server process, not the client. The mix is the
-# 30% the header documents; the corpus module prints the split it applies.
-# The optional depth override goes through an array: a double-quoted
+# Piper gap comes from the server process, not the client.
+#
+# The optional depth overrides go through an array: a double-quoted
 # "${SAMP_PER_VOICE:+--samples-per-voice $SAMP_PER_VOICE}" is ONE word to bash -
 # no splitting inside the quotes - and argparse rejects it, as this script's
 # first 820-voice run found out.
@@ -369,10 +350,9 @@ fi
 # === 3. train ======================================================================
 #
 # The tag is computed HERE, after the corpus exists and before training starts -
-# the same reason run-mww-training.sh documents: the corpus is part of the tag, and
-# model_train_eval refuses to train into an existing directory. The checksum guard
-# in train/mww/train.py still applies - it is in the code, not in the shell.
-TAG="$("$ENV_DIR/.venv/bin/python" -m train.provenance --wake-word "$WAKE_WORD" --tag --fallback "$STAMP")"
+# the same reason run-mww-training.sh documents: the corpus is part of the tag,
+# and model_train_eval refuses to train into an existing directory. The checksum
+# guard in train/mww/train.py still applies - it is in the code, not in the shell.TAG="$("$ENV_DIR/.venv/bin/python" -m train.provenance --wake-word "$WAKE_WORD" --tag --fallback "$STAMP")"
 DIRTY=""
 git diff --quiet 2>/dev/null || DIRTY="-dirty"
 run "run tag: $TAG"

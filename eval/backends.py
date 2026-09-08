@@ -3,19 +3,13 @@
 THE INFERENCE CODE THE DEPLOYMENT TARGET RUNS.
 
 The target is Linux Voice Assistant (OHF-Voice/linux-voice-assistant), which does not
-implement inference itself - it depends on two libraries and drives them from
-`__main__.py`:
+implement inference itself - it drives two libraries from `__main__.py`:
 
     pymicro-wakeword   MicroWakeWordFeatures + MicroWakeWord   (the ESP32/mWW models)
     pyopen-wakeword    OpenWakeWordFeatures  + OpenWakeWord    (the openWakeWord ones)
 
 Both are used here exactly as LVA uses them, down to the chunk size and the order of
-calls. NOTHING IN THIS FILE COMPUTES A SPECTROGRAM, QUANTIZES A TENSOR OR AVERAGES A
-SLIDING WINDOW. An earlier version of it did, reimplementing microWakeWord's
-`inference.py` from the training repo, and that was wrong twice over: it measured a
-pipeline nothing ships, and every detail it got right had to be rediscovered by
-experiment. What is left here is clip handling and the arithmetic that turns a stream
-of probabilities into an offset in the audio.
+calls. 
 
     backend = load("output/hey_seeree/mww/hey_seeree_705c23b.json")
     scores, offsets = backend.score(pcm_int16)
@@ -26,12 +20,12 @@ position each probability appears at. It is the anchor for latency, and it diffe
 between backends (80 ms chunks for openWakeWord, 10 ms for microWakeWord), which is
 why it is returned rather than recomputed by callers from a constant they guessed.
 
-
 WHAT USING THE DEPLOYMENT RUNTIME SETTLED, that reading the training repo did not:
 
-* THE MANIFEST IS PART OF THE MODEL. `MicroWakeWord.from_config()` takes the JSON, not
-  the .tflite, and reads `probability_cutoff` and `sliding_window_size` from it. Score
-  the .json and the manifest is under test too; score a bare .tflite and it is not.
+* THE MANIFEST IS PART OF THE MODEL. `MicroWakeWord.from_config()` takes the JSON,
+  not the .tflite, and reads `probability_cutoff` and `sliding_window_size` from it.
+  Score the .json and the manifest is under test too; score a bare .tflite and it is
+  not.
 
 * RESETTING BETWEEN CLIPS REQUIRES RELOADING THE MODEL. `MicroWakeWord.reset()` calls
   `close()` and `_load_model()`, with the comment "Need to reload model to reset
@@ -44,8 +38,8 @@ WHAT USING THE DEPLOYMENT RUNTIME SETTLED, that reading the training repo did no
 * THE DEPLOYED PROBABILITY IS NOT THE ONE IN `tflite_streaming_roc.txt`. The training
   repo dequantizes with a hardcoded 1/255 (microwakeword/inference.py); the runtime
   uses the output tensor's own scale, 1/256 here. So a cutoff read off the ROC table
-  is about 0.4% off the number the device compares against. Small, but it means the
-  ROC file is a guide and this harness is the measurement.
+  is about 0.4% off the number the device compares against. The ROC file is a guide;
+  this harness is the measurement.
 
 * int8 COARSENS THE SCORES. The output tensor is uint8: 256 levels, 0.0039 apart,
   divided by the sliding window average of 5. Sweeping much below 0.01 measures
@@ -55,14 +49,6 @@ WHAT USING THE DEPLOYMENT RUNTIME SETTLED, that reading the training repo did no
   `sliding_window_size`. Only the first is swept here; the second is fixed per
   comparison and printed with every result, because a cutoff means nothing without it.
 
-
-THE ONE PLACE THIS DOES NOT USE THE DEPLOYMENT RUNTIME, and why. `pyopen-wakeword` is
-TFLite-only, and this repo's openWakeWord ship candidates are `.onnx` - only some runs
-were ever converted. `OpenWakeWordOnnxBackend` scores those through
-`openwakeword.model.Model`, the path all seventeen tuning runs were measured on.
-It is comparability with the notebook, NOT a deployment measurement, and `describe()`
-says so on every report. To measure a `.onnx` candidate as it would actually run,
-convert it first with `train/oww/onnx2tflite.py` and score the `.tflite`.
 """
 
 import argparse
@@ -111,7 +97,7 @@ class Backend:
     # `start` + `feed` are how the runtime is actually driven; `_stream` below is
     # just those two in a loop over a fixed clip. Split out so that LIVE detection
     # (preflight/test_model.py, microphone, no end) and OFFLINE scoring (eval, whole
-    # clips) go through one implementation rather than two. Which matters here more
+    # clips) go through one implementation rather than two. That matters more here
     # than it usually would: an earlier version of this file reimplemented the
     # runtime and got it subtly wrong, and a preflight that streams differently from
     # the harness would be measuring a third thing again.

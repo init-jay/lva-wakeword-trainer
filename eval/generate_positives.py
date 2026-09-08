@@ -3,12 +3,11 @@
 OpenAI-compatible TTS server (tested against Kokoro-FastAPI).
 
 Read the output carefully, because this corpus is not a generalisation test.
-`train.py` generates its positives from every English Kokoro voice at speeds
-0.7-1.3, so a plain rendering of the wake phrase is inside the training
-distribution and the model has effectively seen it. Detection near 100% on those
-clips means the training run worked; it says nothing about a new speaker. The
-held-out recordings in `data/recordings/holdout/` remain the only
-speaker-generalisation measure.
+`train.py` generates its positives from every English Kokoro voice at speeds 0.7-1.3,
+so a plain rendering of the wake phrase is inside the training distribution and the
+model has effectively seen it. Detection near 100% on those clips means the training
+run worked; it says nothing about a new speaker. The held-out recordings in
+`data/recordings/holdout/` remain the only speaker-generalisation measure.
 
 What this *is* good for is the axes where the corpus can be pushed outside what
 training saw, which is why generation is organised as sweeps:
