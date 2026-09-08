@@ -90,14 +90,18 @@ far.
 │       ├── config.py
 │       ├── train.py
 │       └── manifest.py
-├── eval/                         3 · eval model
-│   ├── paths.py                  holdout vs samples - a safety property, not a convention
-│   ├── generate_negatives.py     builds the eval corpus
-│   ├── generate_positives.py     builds the eval corpus
-│   ├── backends.py
-│   ├── eval_model.py
-│   ├── compare_models.py
-│   └── check_model_alignment.py
+├── eval/                         3 · eval model - self-contained: everything the step needs
+│   ├── docker-compose.yml        its own compose project, out of the base training file
+│   ├── Dockerfile                CPU only, native on Apple Silicon
+│   └── src/                      the harness; the image mounts it at /app/eval, keeping
+│       │                         the `python -m eval.X` invocation unchanged
+│       ├── paths.py              holdout vs samples - a safety property, not a convention
+│       ├── generate_negatives.py builds the eval corpus
+│       ├── generate_positives.py builds the eval corpus
+│       ├── backends.py
+│       ├── eval_model.py
+│       ├── compare_models.py
+│       └── check_model_alignment.py
 ├── preflight/                    4 · preflight
 │   ├── test_model.py             live mic, the deployment runtime
 │   ├── pyproject.toml            its own uv env - host, like record/
@@ -117,7 +121,6 @@ far.
 │   ├── Dockerfile.mww.cpu        same, on python:3.12-slim - the TF image is amd64-only
 │   ├── Dockerfile.piper          CUDA base, but runs CPU-only by choice
 │   ├── Dockerfile.kokoro         CPU by default; CUDA via docker-compose.cuda.yml
-│   ├── Dockerfile.eval           CPU only, native on Apple Silicon
 │   └── requirements.txt          shared by BOTH oww trainers, cuda and cpu
 ├── scripts/
 │   ├── download-external-data.sh  -> data/external/  [all|oww|mww]
@@ -130,7 +133,7 @@ far.
 │   ├── setup-mww-applesilicon-trainer.sh what Dockerfile.mww.cpu does, on the host
 │   └── run-mww-training-applesilicon.sh  2 · four stages, no container
 ├── .dockerignore                 keeps data/ (~43 GB) out of every build context
-├── docker-compose.yml            no GPU required, so eval and record run anywhere
+├── docker-compose.yml            no GPU required; the eval step has its own file in eval/
 ├── docker-compose.cuda.yml       overlay: NVIDIA devices - kokoro, trainers, piper
 ├── docker-compose.cpu.yml        overlay: CPU trainers - Apple Silicon, or any non-NVIDIA box
 ├── SPEED.md                      measured timings - the evidence for the README's route calls

@@ -64,6 +64,7 @@ Copy `wordlists/hey_seeree.yaml` as the worked example; its comments explain eac
 category in place. Then:
 
 ```bash
+cd eval
 docker compose run --rm eval python -m eval.generate_negatives \
     --wake-word "okay jarvis" --dry-run
 ```

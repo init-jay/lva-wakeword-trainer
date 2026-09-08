@@ -32,26 +32,9 @@ services:
     command: ["--uri", "tcp://0.0.0.0:10200", "--data-dir", "/data",
               "--download-dir", "/data", "--voice", "en_US-lessac-medium"]
 
-  eval:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.eval
-    volumes:
-      - ./eval:/app/eval:ro
-      # train/ for `python -m train.mww.manifest`, which cuts the ESPHome manifest
-      # from a measured cutoff - an evaluation decision, so it belongs in this image.
-      - ./train:/app/train:ro
-      # The per-wake-word phrase lists the eval corpus is generated from. Read-only:
-      # generate_negatives.py renders them, it does not edit them - they are written
-      # by hand or by the `write-wordlists` skill, and a corpus that silently stopped
-      # matching its wordlist would be untraceable.
-      - ./wordlists:/app/wordlists:ro
-      - ./output:/app/output
-      - ./data/recordings/holdout:/app/data/recordings/holdout:ro
-      # Training positives, for the rare deliberate check against them. Scoring here
-      # reports TRAINING accuracy, and eval/paths.py warns when a run is pointed here.
-      - ./data/recordings/samples:/app/data/recordings/samples:ro
-      - ./data/corpus/eval:/app/data/corpus/eval
+  # The eval step has moved out of this file into eval/docker-compose.yml - its
+  # own project, because the base file is the training one and an eval-only
+  # machine should not be building trainer images.
 
   # microWakeWord trainer, for the ESP32 target - step 2. A SEPARATE image
   # from `oww-trainer` because mWW requires numpy>=2 and this repo pins numpy<2 for

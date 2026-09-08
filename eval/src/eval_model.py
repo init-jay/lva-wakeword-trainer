@@ -4,7 +4,7 @@ Score a trained wake-word model against the four gates below.
 
 Everything here is measured by streaming - `Model.predict_clip` slides the model
 over the clip 80 ms at a time, exactly as live detection does - because that is
-what the gates are about. `eval/check_model_alignment.py` answers a different question
+what the gates are about. `eval/src/check_model_alignment.py` answers a different question
 (where in the window the model wants the phrase) by placing clips at fixed offsets;
 a clip that misses at one offset may well fire at the next one in streaming, so the
 two scripts are not interchangeable.
@@ -34,7 +34,7 @@ generate_negatives.py is adversarial by construction - a fifth of it is
 phrase-extending - so a pooled false-accept rate means nothing. Category comes from
 the filename prefix (`extend_000_af_bella.wav` -> `extend`).
 
-BOTH TRAINERS ARE SCORED THROUGH THE SAME CODE. `eval/backends.py` picks an
+BOTH TRAINERS ARE SCORED THROUGH THE SAME CODE. `eval/src/backends.py` picks an
 openWakeWord or a microWakeWord backend by inspecting the model, so everything below
 is arithmetic over scores. Two consequences worth stating rather than discovering:
 
@@ -47,7 +47,7 @@ is arithmetic over scores. Two consequences worth stating rather than discoverin
 
 POSITIVES DEFAULT TO THE HELD-OUT RECORDINGS, not to everything recorded. The trainer
 globs data/recordings/samples/ recursively, so scoring these gates against that tree
-measures memorisation; `eval/paths.py` carries the split and warns if a run is pointed
+measures memorisation; `eval/src/paths.py` carries the split and warns if a run is pointed
 back inside it. The `_runon` directories are excluded here on purpose - this file
 builds its own command-following case by concatenating a command onto a plain clip,
 so a real run-on recording among the positives would be scored as the phrase alone.

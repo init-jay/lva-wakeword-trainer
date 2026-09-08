@@ -47,7 +47,7 @@ Usage, from the repo root:
         output/hey_seeree/mww/hey_seeree_705c23b.json
 
 POSITIVES MUST BE RECORDINGS THE MODEL HAS NOT TRAINED ON, which is why the defaults
-come from `eval/paths.py` rather than being spelled out here: the trainer globs
+come from `eval/src/paths.py` rather than being spelled out here: the trainer globs
 data/recordings/samples/ recursively, so scoring against that tree reports training
 accuracy - it overstated detection by ~10 points during this work. Passing a
 directory inside samples/ anyway is warned about, not blocked.

@@ -23,7 +23,7 @@ the measurement supports - but see `choose_cutoff` for why that default nearly a
 lands on a synthetic row, and shipped one manifest that could not fire.
 
 AND THE ROC IS A GUIDE, NOT THE MEASUREMENT. Two reasons to confirm the cutoff with
-`eval/backends.py` against held-out recordings before deploying it:
+`eval/src/backends.py` against held-out recordings before deploying it:
 
   * The ROC is scored on the ambient evaluation sets, not on this repo's adversarial
     negatives. `extend` false accepts - the failure mode unsolved since run 6 - are

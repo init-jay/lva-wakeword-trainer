@@ -25,7 +25,7 @@ Takes either the .onnx or the .tflite. Prefer the .tflite when that is what you
 deploy: a wrong-axis conversion loads cleanly and returns plausible scores while
 detecting nothing, so the artifact that ships is the one worth measuring.
 
-WHY THIS KEEPS ITS OWN LOADER INSTEAD OF USING `eval/backends.py`. Step 3
+WHY THIS KEEPS ITS OWN LOADER INSTEAD OF USING `eval/src/backends.py`. Step 3
 said to point all three eval tools at the shared backend layer; the other two are on
 it and this one is not, deliberately. That contract is `score(pcm) -> scores`, fed 16
 kHz audio and streamed. This tool never has PCM at the point it calls the model - it
@@ -56,10 +56,10 @@ Usage:
         --positives data/recordings/holdout/speaker1
     python -m eval.check_model_alignment --model M --step 20 --max-gap 600
 
-Run it as a MODULE, from the repo root. As a path (`python eval/check_model_alignment
-.py`) Python puts `eval/` itself on sys.path rather than the repo root, which is
-harmless today but breaks the moment this file imports anything from the package
-beside it.
+Run it as a MODULE, from the repo root (`python -m eval.check_model_alignment`, from
+/app in the image). The plain-path form (`python eval/src/check_model_alignment.py`)
+puts this directory on sys.path instead of the root; the try/except on the `paths`
+import below is what keeps it working.
 """
 
 import argparse
@@ -70,7 +70,12 @@ import numpy as np
 import onnxruntime as ort
 import scipy.io.wavfile
 
-from eval import paths
+try:
+    from eval import paths
+except ImportError:
+    # Plain-path form (`python eval/src/check_model_alignment.py`): this directory
+    # is on sys.path, the package is not.
+    import paths
 
 SR = 16000
 

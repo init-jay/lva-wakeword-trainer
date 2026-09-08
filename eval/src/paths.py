@@ -30,8 +30,17 @@ coincidence of where the caller happened to be standing.
 
 from pathlib import Path
 
-# eval/ sits one level under the root.
-REPO_ROOT = Path(__file__).resolve().parents[1]
+# The repo root is the nearest ancestor that has BOTH data/recordings/ and
+# wordlists/ - not a fixed depth above this file. The image mounts this tree at
+# /app/eval, one level shallower than the checkout's eval/src/, and a fixed
+# offset would be right in exactly one of the two places.
+def _repo_root():
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "data" / "recordings").is_dir() and (parent / "wordlists").is_dir():
+            return parent
+    raise RuntimeError(f"no repo root (data/recordings/ and wordlists/) above {__file__}")
+
+REPO_ROOT = _repo_root()
 
 RECORDINGS_DIR = REPO_ROOT / "data" / "recordings"
 SAMPLES_DIR = RECORDINGS_DIR / "samples"

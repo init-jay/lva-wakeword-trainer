@@ -52,16 +52,23 @@ SKIP_CORPUS=1 ./scripts/run-mww-training.sh "hey seeree"
 For resuming, not for tuning. Training flags still apply; the ones that shape the
 corpus are inert, because the clips already exist.
 
-**3 · Eval.** Runs on whichever machine you are sitting at. Generate the adversarial
-corpus once, then score:
+**3 · Eval.** Runs on whichever machine you are sitting at. The step is self-contained
+in `eval/` - compose file, image and sources - and the only thing it needs from
+elsewhere is a TTS server for the adversarial corpus. Generate the corpus once,
+then score:
 
 ```bash
+# the TTS server: the base file, from the repo root
 docker compose up -d kokoro
-docker compose run --rm eval python -m eval.generate_negatives \
-    --url http://kokoro:8880/v1/audio/speech
-docker compose stop kokoro
 
-# the four gates, one model
+# everything else: eval/ is its own compose project
+cd eval
+docker compose build                  # first time, or after Dockerfile changes
+docker compose run --rm eval python -m eval.generate_negatives \
+    --url http://host.docker.internal:8880/v1/audio/speech
+cd .. && docker compose stop kokoro
+
+# the four gates, one model (still in eval/; model paths are relative to /app)
 docker compose run --rm eval python -m eval.eval_model \
     --model output/hey_seeree/oww/<tag>.onnx
 
@@ -108,8 +115,8 @@ not the model.
 
 ### Picking an overlay for the training step
 
-Nothing in the base compose file requires a GPU, so evaluation and recording work
-anywhere. Training is the one step that cares, and it picks a set of images:
+Nothing in either compose file requires a GPU, so TTS, evaluation and recording
+work anywhere. Training is the one step that cares, and it picks a set of images:
 
 ```bash
 # NVIDIA box. Will not match an AMD card under ROCm - `driver: nvidia` is a CUDA

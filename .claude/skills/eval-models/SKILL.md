@@ -5,8 +5,9 @@ description: Score trained wake-word models against held-out recordings and deci
 
 # Evaluating trained wake-word models
 
-Step 3. Runs in the `eval` container — it carries both inference stacks and neither
-trainer, because scoring a model and training one have incompatible pins.
+Step 3. Runs in the eval container built from `eval/` — its own compose project,
+carrying both inference stacks and neither trainer, because scoring a model and
+training one have incompatible pins.
 
 ## You can run this one yourself
 
@@ -16,11 +17,15 @@ harness prints has a way of being read wrongly, and the sections below are those
 
 ## Preflight
 
+The whole step is self-contained in `eval/` — compose file, image and sources. From
+there:
+
 ```bash
-docker compose build eval            # first time, or after Dockerfile.eval changes
-ls output/*/oww output/*/mww         # models to score
-ls data/recordings/holdout/          # what to score them against
-ls data/corpus/eval/negatives_tts/   # the adversarial corpus
+cd eval
+docker compose build            # first time, or after Dockerfile changes
+ls ../output/*/oww ../output/*/mww       # models to score
+ls ../data/recordings/holdout/           # what to score them against
+ls ../data/corpus/eval/negatives_tts/    # the adversarial corpus
 ```
 
 If the negatives are missing, `eval_model.py` and `compare_models.py` both exit before
@@ -31,10 +36,18 @@ publishes linux/arm64, so it runs natively on the same Mac as the eval image. Me
 on an M-series Mac: ready in ~5 s, ~1 s per clip, the whole 100-clip corpus in under
 two minutes.
 
+The eval project cannot reach `kokoro` by service name — different project, different
+network — so it goes through kokoro's published port via `host.docker.internal`
+(`eval/docker-compose.yml` maps the name to `host-gateway`, which Linux needs):
+
 ```bash
+# from the repo root
 docker compose up -d kokoro
+
+# from eval/
 docker compose run --rm eval python -m eval.generate_negatives \
-    --url http://kokoro:8880/v1/audio/speech
+    --url http://host.docker.internal:8880/v1/audio/speech
+cd ..
 docker compose stop kokoro
 ```
 
@@ -48,7 +61,8 @@ KOKORO_IMAGE=ghcr.io/remsky/kokoro-fastapi-cpu:v0.8.1-arm64 \
 ```
 
 On the training server, add the GPU overlay for the faster image — same command
-otherwise, and the two render the same voices, so the corpora are interchangeable:
+otherwise, and the two render the same voices, so the corpora are interchangeable
+(from the repo root; the `--url` above then points at that machine's port):
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.cuda.yml up -d kokoro
@@ -60,6 +74,9 @@ phrase — `EXTEND`, `RUNNING` and `HEY_OTHER` carry nearly all the signal and n
 retargeting for a different one.
 
 ## The commands
+
+All from `eval/`. Model paths are relative to the container's `/app` workdir, which
+is the mounted repo root:
 
 ```bash
 # the four gates, one model

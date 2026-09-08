@@ -856,7 +856,7 @@ def main():
         # The training half of the recordings. data/recordings/holdout/ is a SIBLING
         # and is never read here - copy_real_samples globs this tree recursively, so
         # a holdout nested inside it would be trained on and every eval number after
-        # would measure memorisation. eval/paths.py enforces the pair.
+        # would measure memorisation. eval/src/paths.py enforces the pair.
         real_samples_dir = WORK_DIR / "data" / "recordings" / "samples"
         real_count = copy_real_samples(real_samples_dir, pos_train, args.real_copies)
         if real_count > 5:

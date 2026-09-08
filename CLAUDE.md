@@ -82,7 +82,7 @@ The route rationale and the measurements: SPEED.md.
 
 - **`data/recordings/holdout/` is never trained on.** The guarantee is *positional* —
   it is a sibling of `samples/`, not a child, because the trainer globs the samples
-  tree recursively. `eval/paths.py` enforces and explains it.
+  tree recursively. `eval/src/paths.py` enforces and explains it.
 - **`data/` is inputs and generated corpus; `output/` is models.** The trainers
   `rmtree` their corpus every run, so the split is what keeps that away from models.
 - **Never compare models at a fixed threshold.** Two runs of an identical config

@@ -32,7 +32,11 @@ diverged: that copy keeps its phrases inline and has no wordlists package.
 
 Examples
 --------
-    # against a Kokoro-FastAPI server on the LAN
+    # from inside the eval container, against kokoro on the host
+    python -m eval.generate_negatives \\
+        --url http://host.docker.internal:8880/v1/audio/speech
+
+    # against a Kokoro-FastAPI server elsewhere on the LAN
     python -m eval.generate_negatives \\
         --url http://192.168.2.14:8880/v1/audio/speech
 
@@ -63,18 +67,25 @@ import numpy as np
 from scipy.io import wavfile
 from scipy.signal import resample_poly
 
-# Runnable as `python eval/generate_negatives.py` as well as `python -m
-# eval.generate_negatives`: the plain-path form puts eval/ on sys.path, not the root.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-import wordlists  # noqa: E402
-
+# Runnable as `python eval/src/generate_negatives.py` as well as `python -m
+# eval.generate_negatives`. The module form has the `eval` package importable;
+# the plain-path form only has this directory on sys.path, so try both. Then put
+# the repo root on sys.path for `wordlists` - paths.py finds the root.
 try:
     from eval import paths
-    DEFAULT_OUT = str(paths.NEGATIVES_DIR)
 except ImportError:
-    # The copy of this script that lives in the openWakeWord repo, where there is no
-    # eval package and no data/ layout to write into.
+    try:
+        import paths  # plain-path form: this directory is on sys.path
+    except ImportError:
+        # The copy of this script that lives in the openWakeWord repo, where there
+        # is no package and no data/ layout to write into.
+        paths = None
+
+if paths is not None:
+    sys.path.insert(0, str(paths.REPO_ROOT))
+    import wordlists  # noqa: E402
+    DEFAULT_OUT = str(paths.NEGATIVES_DIR)
+else:
     DEFAULT_OUT = "negatives_tts"
 
 SR = 16000  # openWakeWord operates on 16 kHz mono audio

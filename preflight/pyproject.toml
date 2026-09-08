@@ -18,7 +18,7 @@ requires-python = ">=3.10"
 # runs native on Apple Silicon. macOS 15 is the floor; an older Mac falls back to the
 # sdist and will fail to find libtensorflowlite_c.
 #
-# Versions match docker/Dockerfile.eval, so a preflight and an eval of the same model
+# Versions match eval/Dockerfile, so a preflight and an eval of the same model
 # go through the same inference code.
 dependencies = [
     "numpy>=2,<3",

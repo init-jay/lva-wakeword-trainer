@@ -37,7 +37,7 @@ WORDLIST_DIR = Path(__file__).resolve().parent
 # The eval corpus categories, and what each one is FOR. Read as documentation for
 # whoever writes the next wordlist: a category is a question about the model, not a
 # bag of phrases, and the answer is only meaningful per category (see
-# eval/generate_negatives.py on why a pooled false-accept rate means nothing).
+# eval/src/generate_negatives.py on why a pooled false-accept rate means nothing).
 EVAL_CATEGORIES = {
     "extend":    "the phrase, then the word keeps going ('hey serious')",
     "running":   "the wake word's sounds inside ordinary speech, with no 'hey'",

@@ -221,7 +221,7 @@ fi
 # --- collection ------------------------------------------------------------------
 #
 # The three shipped files, commit-tagged, directly under output/<wake>/mww/ - the
-# same shape run-oww-training.sh produces for the .onnx, and what eval/paths.py
+# same shape run-oww-training.sh produces for the .onnx, and what eval/src/paths.py
 # documents as the collected form. The per-run directory stays where it is; this is
 # a copy, not a move, because model_train_eval owns that directory's layout.
 #
@@ -257,5 +257,5 @@ echo "    $TAGGED_MODEL  ($(du -h "$TAGGED_MODEL" | cut -f1))"
 echo
 echo "    Confirm the cutoff against held-out recordings before deploying it - the"
 echo "    ROC is scored on ambient sets, not on this repo's adversarial negatives:"
-echo "      docker compose run --rm eval python -m eval.compare_models \\"
+echo "      cd eval && docker compose run --rm eval python -m eval.compare_models \\"
 echo "          --models $TAGGED_MANIFEST"

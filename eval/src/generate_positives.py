@@ -67,11 +67,13 @@ import numpy as np
 from scipy.io import wavfile
 from scipy.signal import resample_poly
 
-# Runnable as `python eval/generate_positives.py` as well as `python -m
-# eval.generate_positives`: the plain-path form puts eval/ on sys.path, not the root.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from eval import paths  # noqa: E402
+# Runnable as `python eval/src/generate_positives.py` as well as `python -m
+# eval.generate_positives`: the module form has the `eval` package importable,
+# the plain-path form only has this directory on sys.path, so try both.
+try:
+    from eval import paths
+except ImportError:
+    import paths
 
 SR = 16000
 FULL_SCALE = 32768.0

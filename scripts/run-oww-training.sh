@@ -340,7 +340,7 @@ cp "$MODEL" "$TAGGED"
 # The .tflite gets THE SAME TAG, from the same run. train.py converts it straight
 # after export, so it is derived from exactly this .onnx - and a tagged .onnx beside
 # an untagged .tflite is how a model and its conversion drift apart, the mix-up
-# eval/backends.py warns about when it says the two are not guaranteed to agree.
+# eval/src/backends.py warns about when it says the two are not guaranteed to agree.
 # Absent if the conversion failed; not fatal - the .onnx is the artifact everything
 # else works from.
 TFLITE="${MODEL%.onnx}.tflite"
@@ -360,5 +360,5 @@ echo "    $TAGGED  ($(du -h "$TAGGED" | cut -f1), md5 ${AFTER_SUM:0:8})"
 [[ -n "$DIRTY" ]] && echo "    NOTE: working tree was dirty - the code half of $TAG is not reproducible"
 echo
 echo "    scp to the eval machine, then:"
-echo "      docker compose run --rm eval python -m eval.compare_models \\"
+echo "      cd eval && docker compose run --rm eval python -m eval.compare_models \\"
 echo "          --models <new> <previous-best>"

@@ -27,10 +27,12 @@ from pathlib import Path
 
 import numpy as np
 
-# The repo root, so `eval.backends` imports: preflight/ is one level down.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# The eval harness source, so `backends` imports. On the host it is not a package
+# (the image is what mounts it as `eval`), so preflight puts the directory itself
+# on sys.path and imports the module directly.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "eval" / "src"))
 
-from eval import backends  # noqa: E402
+import backends  # noqa: E402
 
 RATE = 16000
 WARMUP = 0.6            # seconds avfoundation needs to open the mic

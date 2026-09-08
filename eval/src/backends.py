@@ -382,7 +382,12 @@ def main():
 
     import scipy.io.wavfile
 
-    from eval import paths
+    try:
+        from eval import paths
+    except ImportError:
+        # The host preflight imports this file directly rather than through the
+        # package: its directory, not a package root, is on sys.path.
+        import paths
 
     # One speaker is enough: this is a self-check on the backend, not a measurement
     # of the model, so it wants a handful of real clips rather than the whole holdout.

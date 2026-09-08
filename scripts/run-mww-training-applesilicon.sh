@@ -415,7 +415,7 @@ fi
 # === collect =======================================================================
 #
 # The three shipped files, commit-tagged, in output/<wake>/mww/ - the same shape
-# run-oww-training.sh produces and what eval/paths.py documents. Verbatim from
+# run-oww-training.sh produces and what eval/src/paths.py documents. Verbatim from
 # run-mww-training.sh, including the manifest rewrite: its "model" key is a bare
 # sibling filename, so a manifest copied beside a renamed model points at a file
 # that is not there.
@@ -449,7 +449,7 @@ echo "    Compare the wall time against the container's 26m06s (this machine, 20
 echo "    and the per-stage numbers against tools/tf_probe.py and tools/bench_tts.py."
 echo
 echo "    Evaluate (Docker, unchanged):"
-echo "      docker compose run --rm eval python -m eval.eval_model \\"
+echo "      cd eval && docker compose run --rm eval python -m eval.eval_model \\"
 echo "          --model $TAGGED_MODEL"
 echo "    Confirm the cutoff against the held-out recordings before deploying it;"
 echo "    the per-speaker rows are the ones that decide it."
