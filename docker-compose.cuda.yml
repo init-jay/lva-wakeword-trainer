@@ -36,7 +36,8 @@
 # a base file that could not be parsed usefully on the Mac, which is where the eval
 # and record steps live.
 #
-# For an Apple Silicon variant see docker-compose.mps.yml, which is a placeholder.
+# There is no Apple Silicon variant of this overlay: Docker Desktop passes no
+# Metal device through, so a containerised GPU path does not exist (SPEED.md).
 services:
   kokoro:
     build:

@@ -5,8 +5,7 @@
 # and is linux/amd64 - it does not run natively on Apple Silicon, and there is no
 # CPU fallback inside it.
 # The suffix leaves room for a .cpu variant beside it, which exists (Dockerfile.oww.cpu);
-# a .mps one cannot - Docker Desktop passes no Metal device through, and
-# docker-compose.mps.yml is the signpost.
+# a .mps one cannot exist - Docker Desktop passes no Metal device through (SPEED.md).
 #
 FROM nvidia/cuda:12.1.1-devel-ubuntu22.04
 

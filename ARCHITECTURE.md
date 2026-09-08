@@ -133,7 +133,6 @@ far.
 ├── docker-compose.yml            no GPU required, so eval and record run anywhere
 ├── docker-compose.cuda.yml       overlay: NVIDIA devices - kokoro, trainers, piper
 ├── docker-compose.cpu.yml        overlay: CPU trainers - Apple Silicon, or any non-NVIDIA box
-├── docker-compose.mps.yml        overlay: Metal - permanently empty, self-explanatory
 ├── SPEED.md                      measured timings - the evidence for the README's route calls
 ├── train-applesilicon/           host uv env for the oww trainer - SPEED.md
 └── train-mww-applesilicon/       host uv env for the mww trainer - SPEED.md

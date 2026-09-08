@@ -209,11 +209,17 @@ one 25,537-parameter model, too small to fill a 3090, in a run that is mostly no
 training: `docker/Dockerfile.mww.cuda` records the CPU baseline at ~46 s per 500
 steps — about 15 minutes for a 10,000-step run — and notes that a model this small
 may not fill a GPU at all; and Piper corpus generation is CPU-only on both machines
-by choice, since `--use-cuda` measured 2.5x *slower*. The Metal question is closed,
-not pending, on top of that: Docker Desktop passes no Metal device through (so
-`docker-compose.mps.yml` is permanently empty), the host MPS/CoreML route was
-evaluated and abandoned, and tensorflow-metal does not pair with TF 2.21.0, so
-microWakeWord has no Metal path at all.
+by choice, since `--use-cuda` measured 2.5x *slower*.
+
+The Metal question is closed, not pending, and this section is where it is
+recorded. Docker Desktop passes no Metal device through to containers, so a
+torch build that asks for `mps` inside one finds nothing and falls back to CPU -
+silently, which is worse than failing - and no compose overlay can say otherwise
+(there is no device reservation to write, unlike `docker-compose.cuda.yml`'s
+`driver: nvidia`), so there is no `.mps` overlay at all. The host is the only
+route to Metal; the MPS/CoreML training route there was evaluated and abandoned,
+and tensorflow-metal does not pair with TF 2.21.0, so microWakeWord has no Metal
+path at all. Kokoro is the one measured exception (below).
 
 ## Kokoro TTS: three ways to run it, and the speed/quality tradeoff
 

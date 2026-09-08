@@ -123,10 +123,3 @@ export COMPOSE_FILE=docker-compose.yml:docker-compose.cpu.yml
 
 Set one per shell, then use the scripts in `scripts/` unchanged — they read
 `COMPOSE_FILE` like every other compose command.
-
-**On a Mac, `cpu` is the only option, and `docker-compose.mps.yml` is empty on
-purpose.** Docker Desktop passes no Metal device through, so a containerised MPS
-build would get CPU without saying so. Before blaming the CPU for a slow run, raise
-Docker Desktop's memory limit: openWakeWord mmaps a 17.28 GB feature array, and
-running short of RAM page-faults rather than erroring — the same stall the CUDA box
-hit at 20 GB.
