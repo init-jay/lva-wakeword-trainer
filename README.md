@@ -1,6 +1,6 @@
 # lva-wakeword-trainer
 
-A wakeword training pipeline for [Linux Voice Assistant](https://github.com/OHF-Voice/linux-voice-assistant) - Docker on a Linux or GPU box, natively on the host on an Apple Silicon Mac.
+A wakeword training pipeline for [Linux Voice Assistant](https://github.com/OHF-Voice/linux-voice-assistant) - meant to run natively on an Apple Silicon Mac, or alteranatively via Docker on a Linux machine (with optional CUDA acceleration).
 
 ## The pipeline
 
@@ -75,7 +75,7 @@ commands for each of the three scripts in `scripts/`.
 ## Design choices
 
 - **Apple Silicon native for training** - a host environment first, a
-  multi-arch CPU container as the fallback, CUDA on the GPU box.
+  multi-arch CPU/GPU container as the fallback.
 - **A microphone and speaker are required**, for the voice capture and preflight check steps.
 - **Agent first.** This repo is meant to be handed to an agent or coding harness. The in-repo skills are written so an agent can drive the whole pipeline and explain the performance of the deployment candidate to you. If you have deep knowledge of how oww and mww models work, you can also refer to the [manual run docs](docs/MANUAL_RUN.md) to execute the pipeline by hand and interpret the results yourself.
 
@@ -94,14 +94,5 @@ you what to expect.
 | Eval | minutes | minutes |
 | Preflight | needs a mic | needs a mic |
 
-- On a Mac, the **host** route (`scripts/*-applesilicon.sh`) is the default for
-  both targets: it is faster than the in-Docker route, and the one measured
-  quality comparison (openWakeWord, same holdout) found the host-trained model
-  at least as good at every matched false-accept point. The in-Docker route
-  (`docker-compose.cpu.yml`) remains a working fallback there, and is the
-  route for any other non-NVIDIA machine; the CUDA box runs both trainers on
-  the GPU.
-- Timings are full runs measured with `time`, ±30% machine load; on a Mac,
-  never compare two runs measured on different days.
 - Corpus generation is the largest stage of either run; `SKIP_CORPUS=1` skips
-  it on a re-run.
+  it on a re-run and saves about 10-15 minutes from number above.
