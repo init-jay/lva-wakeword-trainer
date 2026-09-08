@@ -42,20 +42,14 @@ should not need to name a script, a path, or a step.
 
 It will then:
 
-1. **Write the wordlists** for your phrase. These are the adversarial negatives built
-   from your wake word's own sounds, and they are the one part that does not transfer
-   between wake words.
-2. **Stop and hand recording to you** — the recorder waits on ENTER and needs a person
-   at a microphone. It gives you the commands, then checks what comes back: clip
-   counts, levels, and where the speech sits in the detection window.
-3. **Fetch the training corpora** and **run the training**, once you confirm which
-   target you want. An hour or less per target, depending on the machine (the
-   table below has the numbers).
-4. **Read the scorecard back to you** — per category, per speaker, at matched
+1. **Write the wordlists** for your phrase.
+2. **Stop and hand recording to you** — the recorder waits a real person
+   at a microphone. It gives you the commands, then checks what comes back.
+3. **Train the model**, once you confirm which
+   target you want (oww/mww).
+4. **Evaluate the model scorecard for you** — per category, per speaker, at matched
    false-accept counts — and say whether it is shippable.
-5. **Stop again for the live mic check**, which needs your room and your voice.
-
-The two stops are real limits, not caution: both steps need a human speaking.
+5. **Stop and ask for live mic check**, - you can then say the wakeword and see model detection live on your machine.
 
 Useful things to say along the way:
 
