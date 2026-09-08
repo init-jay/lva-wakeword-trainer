@@ -12,7 +12,7 @@ tuned phrase texts and speed grid. Two corpora built by one set of rules.
     python -m train.mww.corpus --wake-word "hey seeree" --piper-url piper:10200 \
         --kokoro-url http://127.0.0.1:8880 --kokoro-fraction 0.3
 
-TWO DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
+DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
 
 1. REAL RECORDINGS ARE COPIED ONCE, not ten times. openWakeWord's --real-copies 10
    exists because it augments by globbing the directory once, so N copies become N
@@ -50,6 +50,41 @@ TWO DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
    The client that would solve it (corpus/kokoro.py, with phrase_end_sample) is now
    importable from here; the constants it needs (RUNON_TAIL_MS) stay
    openWakeWord-local until this gap is closed.
+
+4. DEPTH IS NOT THE LEVER. The default is 60 phrase-alone clips per voice.
+   Doubling that to 120 (2026-09-08, both runs trained 20,000 steps so the extra
+   data was actually seen) never produced a deployable gain, and the two 2x runs
+   failed in opposite ways. The 30% mix collapsed on held-out detection: at
+   12/32 adversarial false accepts, plain 86 -> 59 and run-on 93 -> 28 against
+   the 1x mix, 17/32 adversarial false accepts at the 0.5 reference. The all-Piper
+   2x kept the best held-out detection of any run (84% plain / 87% run-on at
+   0.5, ceilings 86/90) but lost its operating point entirely: 37.5% of its own
+   training negatives score above 0.99 (training-ROC AUC 0.295, below chance)
+   and no cutoff meets the 0.2 FAPH budget, so the manifest stage refused to
+   write. So: the Kokoro share has a sweet spot at 1x (the mix's run-on win came
+   from the engines, not the volume), and at doubled depth the mix was the
+   poison while Piper-only depth was neutral-to-harmful. The remaining levers
+   are the ones depth cannot touch: more REAL recordings (the per-speaker spread
+   - jen at 0-30% against jay at 69-89% - is the standing failure in every
+   configuration) and the run-on positives in point 3.
+
+5. REJECTION IS TRAINED, NOT FREE. The negative set is small on purpose in
+   this module's history (12 adversarial clips per voice, 984 total against
+   ~8,000 positives), and the 2026-09-08 doubled-depth runs showed what that
+   leaves out: a model trained on 15,156 positives and 984 adversarial clips
+   became a firehose - 37.5% of its own training negatives above 0.99, no FAPH
+   operating point, manifest unwritable. Doubling the negatives to 24 per voice
+   (1,968 total; tag ecbf160-dirty-da01854d, all-Piper 1x depth, 15m54s on the
+   Apple Silicon host) fixed exactly that and nothing else: at its calibrated
+   0.09 cutoff it passed the extend+hey_other gate for the first time in this
+   repo (1/32, versus 5-17/32 for every earlier run) with zero training false
+   accepts at 0.81, while per-speaker plain detection became the best measured
+   (jay 94, jen 40, ryan 83 at 4/32 matched). The price was recall, not
+   rejection: run-on 37 (against 65-93 for the 1x runs), detection-with-command
+   57%, median latency 261 ms - the conservative model fires late - and the
+   per-speaker wall (jen 20-40%) survived it, as it has every lever so far.
+   If a run stops rejecting things that used to be rejected, reach for this
+   knob before reaching for depth.
 """
 
 import argparse

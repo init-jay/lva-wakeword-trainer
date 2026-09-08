@@ -73,7 +73,11 @@ its own - the corpus calls go to a host uv venv (`scripts/start-kokoro-host.sh`,
 `scripts/start-piper-host.sh`) or a Docker service on a reachable port. The mww
 host route is the measured-faster one on a Mac (full run measured 14m14s there
 against 26m06s in the container, 1.8x); its corpus is Piper-majority with a 30%
-Kokoro mix by default (`KOKORO_FRACTION=0` for the all-Piper corpus). Status, measurements, and the phased plan:
+Kokoro mix by default (`KOKORO_FRACTION=0` for the all-Piper corpus). Do not
+scale corpus depth in search of quality: doubling it (with double the training
+steps) produced no deployable model in either engine mix - `train/mww/corpus.py`
+and `apple-port.md` phase 3 record both runs.
+Status, measurements, and the phased plan:
 `apple-port.md`.
 
 ## Invariants that are easy to break

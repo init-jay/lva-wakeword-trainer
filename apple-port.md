@@ -387,6 +387,42 @@ while plain detection was a wash (57 vs 55) and the per-speaker spread survived
 (jen 20% vs jay 69%, n=10/35) — diversity bought run-on, not yet generalisation;
 the latter still needs more jen/ryan recordings, which is a human task.
 
+The depth question, measured the next morning (2026-09-08). First run doubled
+the per-voice phrase-alone budget 60 -> 120 and the training budget 10,000 ->
+20,000 steps, keeping the 30% mix (tag `ecbf160-dirty-d4504462`): the corpus
+stage took **12m20s** (15,132 positives - the near-linear scaling the table
+implies), the full run **27m01s**, and the model collapsed: at 12/32 adversarial
+false accepts, plain 86 -> 59 and run-on 93 -> 28, with 17/32 adversarial false
+accepts at the 0.5 reference - the worst of the four models compared. To
+separate the depth effect from the mix effect, the same doubled budget was
+re-run at 100% Piper (`ecbf160-dirty-dcdbcc5c`, 15,156 positives, **24m35s**
+total): held-out detection came **back** - the best of any run (84% plain and
+87% run-on at the 0.5 reference, ceilings 86/90 at 12/32) - but the model
+became a firehose: it no longer rejects its own training set (37.5% of the
+training negatives score above 0.99, training-ROC AUC 0.295, below a coin
+flip), so no cutoff meets the 0.2 FAPH deployment budget and the manifest
+stage refused to write. Read the two runs together: at doubled depth the 30%
+mix was what collapsed detection (all-Piper 2x far ahead of mixed 2x on
+held-out), while Piper-only depth bought no deployable gain over 1x and cost
+the operating point. The Kokoro share has a sweet spot at 1x (the run-on win
+above); doubling depth in either configuration did not. The levers that remain
+are the ones depth cannot touch - more real recordings (the per-speaker spread
+is the standing failure in every configuration, including jen at 0% on the
+firehose) and the run-on positives that take the word timestamps Kokoro already provides (`train/mww/corpus.py` records both measurements).
+
+That same morning, a third run tested the lever the firehose had pointed at:
+with 1x depth and all-Piper, doubled the adversarial negatives 12 -> 24 per
+voice (1,968 total; `ecbf160-dirty-da01854d`, **15m54s** total). It confirmed
+the diagnosis - the firehose was not overfitting, it was an underfed rejection
+set. At its calibrated 0.09 cutoff this is the first model in the repo to pass
+the extend+hey_other gate: 1/32 against 5-17/32 for every earlier run, with
+zero training false accepts at 0.81, and the best per-speaker plain numbers
+measured (jay 94 / jen 40 / ryan 83 at 4/32 matched). The price was recall,
+not rejection: run-on 37 (against 65-93 for the 1x runs), detection-with-
+command 57%, median latency 261 ms - the conservative model fires late - and
+the per-speaker wall (jen 20-40%) survived it, as it has every lever so far.
+`train/mww/corpus.py` records the measurement as point 5.
+
 The training stage beat its 1.17x probe, because the conversion and ROC
 calibration that follow it run in the same process and carried the same gap.
 The container route stays correct everywhere else; on this Mac the host route

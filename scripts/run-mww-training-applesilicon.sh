@@ -32,6 +32,24 @@
 # KOKORO_FRACTION=0 (or --kokoro-fraction 0) runs all-Piper, the historical
 # corpus, and needs only Piper. The module document: train/mww/corpus.py.
 #
+# --samples-per-voice N (default 60, the corpus module's) sets the corpus DEPTH
+# and is consumed by this script, applied to the corpus stage only - the train
+# stage does not take it and would reject it. Scaling the data the model
+# actually SEES needs --training-steps too (that one flows to the train stage):
+# steps default to 10000, so a 2x corpus at 10000 steps trains on the same
+# total number of examples and tests nothing about data size.
+#
+# --negatives-per-voice N (default 12, the corpus module's) sets how many
+# adversarial clips each Piper voice renders - the REJECTION training, as
+# opposed to the positive budget above. The 2026-09-08 doubled-depth runs
+# showed what an underfed rejection set does: with 984 adversarial clips
+# against 8-15k positives, one of the two produced a firehose that fired on
+# everything Piper-ish and lost its FAPH operating point entirely. Doubling
+# this to 24 (1,968 clips, ~2 minutes of TTS) is the cheap, single-variable
+# counter-test. Measured 2026-09-08 (tag ecbf160-dirty-da01854d): first model
+# to pass the extend+hey_other gate; recall paid the price - the measurement
+# lives in train/mww/corpus.py, point 5.
+#
 # SKIP_CORPUS=1 / SKIP_FEATURES=1 behave exactly as in run-mww-training.sh.
 #
 # The corpus stage needs a Piper server, and - at the default 30% mix - a Kokoro
@@ -52,7 +70,7 @@ MWW_COMMIT="4665173cd35f1cff9a61e06fc427f124766c488e"
 
 WAKE_WORD="${1:-}"
 if [[ -z "$WAKE_WORD" ]]; then
-    echo "usage: $0 \"wake word\" [extra train.py args...]" >&2
+    echo "usage: $0 \"wake word\" [--kokoro-fraction F] [--samples-per-voice N] [--negatives-per-voice N] [extra train.py args...]" >&2
     exit 2
 fi
 
@@ -106,7 +124,11 @@ fi
 # the corpus takes it. KOKORO_FRACTION on the environment wins over nothing -
 # a command-line --kokoro-fraction wins over the environment, which wins over
 # the 0.3 default, the same precedence the oww script gives its --piper-fraction.
+# --samples-per-voice is consumed here for the same reason: the train stage
+# does not take it and would reject it.
 KOKORO_FRACTION="${KOKORO_FRACTION:-0.3}"
+SAMP_PER_VOICE=""
+NEGATIVES_PER_VOICE=""
 TRAIN_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -115,10 +137,28 @@ while [[ $# -gt 0 ]]; do
             KOKORO_FRACTION="$2"; shift 2 ;;
         --kokoro-fraction=*)
             KOKORO_FRACTION="${1#*=}"; shift ;;
+        --samples-per-voice)
+            [[ $# -ge 2 ]] || { echo "ERROR: --samples-per-voice needs a value" >&2; exit 2; }
+            SAMP_PER_VOICE="$2"; shift 2 ;;
+        --samples-per-voice=*)
+            SAMP_PER_VOICE="${1#*=}"; shift ;;
+        --negatives-per-voice)
+            [[ $# -ge 2 ]] || { echo "ERROR: --negatives-per-voice needs a value" >&2; exit 2; }
+            NEGATIVES_PER_VOICE="$2"; shift 2 ;;
+        --negatives-per-voice=*)
+            NEGATIVES_PER_VOICE="${1#*=}"; shift ;;
         *)
             TRAIN_ARGS+=("$1"); shift ;;
     esac
 done
+if [[ -n "$SAMP_PER_VOICE" && ! "$SAMP_PER_VOICE" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: --samples-per-voice must be a positive integer, got $SAMP_PER_VOICE." >&2
+    exit 2
+fi
+if [[ -n "$NEGATIVES_PER_VOICE" && ! "$NEGATIVES_PER_VOICE" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: --negatives-per-voice must be a positive integer, got $NEGATIVES_PER_VOICE." >&2
+    exit 2
+fi
 if [[ ! "$KOKORO_FRACTION" =~ ^([0-9]+(\.[0-9]+)?|\.[0-9]+)$ ]]; then
     echo "ERROR: KOKORO_FRACTION='$KOKORO_FRACTION' is not a number." >&2
     exit 2
@@ -277,6 +317,13 @@ LOG="training-${SAFE_NAME}-macos-${STAMP}.log"
 # generate_kokoro_samples here are the same code the container runs - the 2.4x
 # Piper gap comes from the server process, not the client. The mix is the
 # 30% the header documents; the corpus module prints the split it applies.
+# The optional depth override goes through an array: a double-quoted
+# "${SAMP_PER_VOICE:+--samples-per-voice $SAMP_PER_VOICE}" is ONE word to bash -
+# no splitting inside the quotes - and argparse rejects it, as this script's
+# first 820-voice run found out.
+CORPUS_EXTRA=()
+[[ -n "$SAMP_PER_VOICE" ]] && CORPUS_EXTRA+=(--samples-per-voice "$SAMP_PER_VOICE")
+[[ -n "$NEGATIVES_PER_VOICE" ]] && CORPUS_EXTRA+=(--negatives-per-voice "$NEGATIVES_PER_VOICE")
 if [[ "${SKIP_CORPUS:-}" == "1" ]]; then
     echo
     echo "=== $(date '+%H:%M:%S')  corpus (skipped)"
@@ -284,11 +331,13 @@ elif [[ -n "${KOKORO_FRACTION:-}" ]]; then
     run "corpus (Piper ${PIPER_URL} + Kokoro ${KOKORO_URL}, fraction ${KOKORO_FRACTION})" \
         "$ENV_DIR/.venv/bin/python" -m train.mww.corpus \
             --wake-word "$WAKE_WORD" --piper-url "$PIPER_URL" --piper-speakers 12 \
-            --kokoro-url "$KOKORO_URL" --kokoro-fraction "$KOKORO_FRACTION"
+            --kokoro-url "$KOKORO_URL" --kokoro-fraction "$KOKORO_FRACTION" \
+            "${CORPUS_EXTRA[@]+"${CORPUS_EXTRA[@]}"}"
 else
     run "corpus (Piper ${PIPER_URL}, all-Piper mix)" \
         "$ENV_DIR/.venv/bin/python" -m train.mww.corpus \
-            --wake-word "$WAKE_WORD" --piper-url "$PIPER_URL" --piper-speakers 12
+            --wake-word "$WAKE_WORD" --piper-url "$PIPER_URL" --piper-speakers 12 \
+            "${CORPUS_EXTRA[@]+"${CORPUS_EXTRA[@]}"}"
 fi
 
 # === 2. features ===================================================================
