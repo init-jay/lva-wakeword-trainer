@@ -37,12 +37,11 @@ guess a wake word from the repo's existing `hey_seeree` files.
 ## What you cannot do
 
 - **Record or preflight.** Both need a human speaking into a microphone.
-- **Use a GPU on a Mac.** Training itself now works there — `docker-compose.cpu.yml`
-  builds both trainers multi-arch, native on arm64 — but on CPU only, and unmeasured
-  as of 2026-09-04. Docker Desktop passes no Metal device through, so there is no MPS
-  image to select and `docker-compose.mps.yml` is empty on purpose. Read
-  `apple-port.md` before relitigating; it has the measurements and the phased plan.
 - **Pick `probability_cutoff` from a default.** It comes from the measured ROC.
+- **Treat `deploy/` as staging ground.** It stages ONE candidate with its measured
+  status written down (`deploy/README.md`), out of `output/` because trainers rmtree
+  that tree every run. Replacing the candidate requires a measured win at matched
+  false accepts, per speaker.
 
 ## Where things run
 

@@ -57,5 +57,6 @@ __pycache__/
 record/
 preflight/
 docs/
+deploy/
 *.md
 training-*.log

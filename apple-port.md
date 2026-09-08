@@ -178,11 +178,11 @@ on demand next to it. Verified on this Mac that day: describe enumerates the ful
 163-voice catalog (2,005 en_US/en_GB pairs), a first render lands in 1.2 s wall, a
 warm one renders 1.55 s of audio in 0.1 s, and an unseen voice downloads and
 renders in 7.2 s including the 63 MB download. Measured 2026-09-07, in the
-README's timing table: the Kokoro corpus is 30m29s with the host FastAPI server
+SPEED.md table: the Kokoro corpus is 30m29s with the host FastAPI server
 and 19m06s/24m54s in-process (`--kokoro-url mlx://`), and the README's estimate
 now assumes the in-process route because it generates the corpus 1.2-1.6x
-faster; the open remainder is its run-on regression, documented in the README's
-Kokoro section.
+faster; the open remainder is its run-on regression, documented in the Kokoro
+section of SPEED.md.
 
 ### Phase 1 — CPU images, in Docker, and measure them
 
@@ -361,7 +361,7 @@ mechanism to every other number in this document. The corpus stage is the
 longest in a full run (roughly 14 of the container run's 26m06s), so it carries
 most of the end-to-end gain. Full run on this machine: the host's, 2026-09-07,
 against the container's 2026-09-06 run - a day apart, so per the day rule in
-the README's Kokoro section, read the total as directional and the same-day
+SPEED.md, read the total as directional and the same-day
 stage probes as the evidence. Container stage times are that run's log
 timestamps:
 

@@ -102,6 +102,8 @@ far.
 │   ├── test_model.py             live mic, the deployment runtime
 │   ├── pyproject.toml            its own uv env - host, like record/
 │   └── uv.lock
+├── deploy/                       the current deployment candidate, staged out of
+│   └── README.md                 output/ with its measured status - one at a time
 ├── tools/                        not in the diagram - one-off measurement
 │   ├── audit_voices.py
 │   ├── bench_tts.py
@@ -132,6 +134,7 @@ far.
 ├── docker-compose.cuda.yml       overlay: NVIDIA devices - kokoro, trainers, piper
 ├── docker-compose.cpu.yml        overlay: CPU trainers - Apple Silicon, or any non-NVIDIA box
 ├── docker-compose.mps.yml        overlay: Metal - permanently empty, see apple-port.md
+├── SPEED.md                      measured timings - the evidence for the README's route calls
 ├── train-applesilicon/           host uv env for the oww trainer - apple-port.md phase 1b
 └── train-mww-applesilicon/       host uv env for the mww trainer - apple-port.md phase 3
 ```
