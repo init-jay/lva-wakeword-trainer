@@ -24,7 +24,7 @@ response shapes.
 
 The URL is therefore a `tcp://` spec, not an HTTP URL:
 
-  KOKORO_URL=tcp://127.0.0.1:8899,tcp://127.0.0.1:8900 python train/oww/train.py ...
+  KOKORO_URL=tcp://127.0.0.1:8899,tcp://127.0.0.1:8901 python train/oww/train.py ...
 
 The old `http://...` / `mlx://...` forms are deliberately rejected by the
 client - they used to mean different backends with different audio, and a
@@ -340,22 +340,25 @@ def generate_kokoro_samples(pool: KokoroPool, voices, output_dir: Path,
         voice, speed, chunk = vs
         url = pool.next()
         out = kokoro_tts_batch(url, voice, chunk, speed)
-        with lock:
-            for text, (audio, _ts) in zip(chunk, out):
-                if audio is None:
-                    # The split could not locate this utterance's words.
-                    # Re-render it alone - a single-utterance render either
-                    # works or it does not, and if it does not we simply
-                    # skip it (a transient miss, not a data problem).
-                    audio2, _ = kokoro_tts_timed(url, voice, text, speed)
-                    if audio2 is None:
-                        continue
-                    audio = audio2
-                if len(audio) < int(0.5 * SR):
-                    continue  # runt, see docstring
+        for text, (audio, _ts) in zip(chunk, out):
+            if audio is None:
+                # The split could not locate this utterance's words.
+                # Re-render it alone - a single-utterance render either
+                # works or it does not, and if it does not we simply
+                # skip it (a transient miss, not a data problem).
+                audio2, _ = kokoro_tts_timed(url, voice, text, speed)
+                if audio2 is None:
+                    continue
+                audio = audio2
+            if len(audio) < int(0.5 * SR):
+                continue  # runt, see docstring
+            name = f"{uuid.uuid4().hex}.wav"
+            scipy.io.wavfile.write(output_dir / name, SR, audio)
+            with lock:
+                # Only the counter needs the lock. The network re-render and
+                # the wav write ran under it before and at workers=2 one miss
+                # stalled the other worker for a full render.
                 counts[voice] += 1
-                name = f"{uuid.uuid4().hex}.wav"
-                scipy.io.wavfile.write(output_dir / name, SR, audio)
 
     run_jobs(jobs, _job, desc=desc, workers=workers)
 

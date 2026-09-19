@@ -169,7 +169,10 @@ def transcribe(pcm16, host, port, timeout=120):
 # --------------------------------------------------------------------------
 
 def tts_targets(spec, languages, max_speakers, voice_filter):
-    """[(voice, speaker_or_None), ...] for the server at `spec`."""
+    """([(voice, speaker_or_None), ...], the TtsClient) for the server at
+    `spec`. The client comes back because its catalog fetch is what set
+    server_engine - the caller's header prints the engine's own name
+    (wire.py), and a client built here and never queried would leave it None."""
     c = TtsClient(spec)
     # All speakers come back flat (one (voice, speaker) pair per speaker): the
     # server's own max_speakers cap takes the FIRST N (speaker ids are
@@ -181,7 +184,7 @@ def tts_targets(spec, languages, max_speakers, voice_filter):
         catalog = [v for v in catalog
                    if (v if isinstance(v, str) else v[0]) in wanted]
     if not c.speaker_voices:
-        return [(v, None) for v in catalog]
+        return [(v, None) for v in catalog], c
     groups = {}
     for v in catalog:
         if isinstance(v, (list, tuple)):
@@ -198,7 +201,7 @@ def tts_targets(spec, languages, max_speakers, voice_filter):
             keep = set(nicks[i] for i in sorted(set(idx)))
             speakers = [s for s in speakers if s is None or s in keep]
         out.extend((voice, s) for s in speakers)
-    return out
+    return out, c
 
 
 def tts_render(c: TtsClient, voice, speaker, text, speed):
@@ -264,12 +267,15 @@ def main():
     langs = tuple(l.strip() for l in args.languages.split(",") if l.strip())
     filters = ([v.strip() for v in args.voices.split(",") if v.strip()])
     try:
-        client = TtsClient(args.tts)
-        targets = tts_targets(args.tts, langs, args.piper_speakers, filters)
+        targets, client = tts_targets(args.tts, langs, args.piper_speakers,
+                                      filters)
     except Exception as e:
         print(f"cannot audit: {type(e).__name__}: {e}")
         return 1
-    engine = client.server_engine or "tts"
+    # tts_targets' client made the catalog request, so this is the engine's
+    # own name (wire.py), not the protocol client's constant: a URL pointed
+    # at the wrong server says so here, not at the end of the audit.
+    engine = client.server_engine or client.name
     source = f"{args.tts} (engine={engine})"
 
     if not targets:

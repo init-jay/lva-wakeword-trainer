@@ -52,7 +52,8 @@ and --instances answers it.
 
 The tool speaks the TTS protocol (tts-service/), so it benches the servers the
 corpus actually uses - the per-engine protocol servers on 8898 (piper) and
-8899/8900 (kokoro) - and it can batch, because that is how the corpus renders.
+8899/8901 (the two docker kokoro instances; the Mac's in-process mlx one
+defaults to 8900) - and it can batch, because that is how the corpus renders.
 A raw `http://` URL is also accepted for the un-wrapped Kokoro-FastAPI
 (scripts/start-kokoro-host.sh, or the fastapi port of the docker image): that
 mode is unbatched only, one clip per request, which is what all the historical
@@ -105,24 +106,42 @@ def sweep_one(spec: str, voice: str, batch: int, threads: int, clips: int):
                               timeout=120)
             r.raise_for_status()
             latencies.append(time.time() - t0)
+        work = list(range(clips))
         engine = "kokoro-fastapi (raw)"
     else:
         c = TtsClient(spec)
         c.voices()  # populates server_engine; cached thereafter
+        # The corpus's batching: N texts joined into ONE render, split on word
+        # timestamps. batch <= 1 must take the plain render() instead - a
+        # one-element batch still goes through Engine.batch's join, which
+        # appends "." to the text (engine.py), so it is not the request
+        # render() would send.
+        size = max(batch, 1)
+        # min() makes the final chunk the remainder, so work sums to exactly
+        # `clips`. Without it every batched run renders one full-size chunk
+        # past the request - 64 clips for 60, 112 for 100 at batch 16 -
+        # while rate divides by the requested count, reading throughput
+        # 7-12% low. This is the tool that feeds SPEED.md; do not bias the
+        # numbers it publishes.
+        work = [[i for i in range(i, min(i + size, clips))]
+                for i in range(0, clips, size)]
 
-        def one(i):
+        def one(chunk):
             t0 = time.time()
-            if batch:
-                c.batch(voice, 1.0, [PHRASES[i % len(PHRASES)]])
+            texts = [PHRASES[i % len(PHRASES)] for i in chunk]
+            if len(chunk) == 1:
+                c.render(voice, texts[0], 1.0)
             else:
-                c.render(voice, PHRASES[i % len(PHRASES)], 1.0)
-            latencies.append(time.time() - t0)
+                c.batch(voice, 1.0, texts)
+            # per-request wall, divided back to a per-clip number so both
+            # modes report the same unit
+            latencies.append((time.time() - t0) / len(chunk))
         engine = c.server_engine or "?"
     latencies = []
 
     t0 = time.time()
     with cf.ThreadPoolExecutor(max_workers=threads) as ex:
-        list(ex.map(one, range(clips)))
+        list(ex.map(one, work))
     wall = time.time() - t0
     latencies.sort()
     return (clips / wall,
@@ -139,7 +158,10 @@ def main():
                     help="URLs of several servers (instance sweep)")
     ap.add_argument("--batch", type=int, default=1,
                     help="texts joined per render, as the corpus does "
-                         "(1 = one text per request; protocol servers only)")
+                         "(1 = one text per request; protocol servers only; "
+                         "latency percentiles have one sample per render, "
+                         "so batched runs need more --clips for a meaningful "
+                         "p95)")
     ap.add_argument("--threads", type=int, default=1,
                     help="client threads per server - the queueing axis")
     ap.add_argument("--clips", type=int, default=60)
@@ -174,7 +196,7 @@ def main():
         rate, med, p95, engine = sweep_one(spec, voice, args.batch, args.threads,
                                            args.clips)
         mode = ("unbatched (raw http)" if spec.startswith("http")
-                else f"batch{args.batch}" if args.batch else "unbatched")
+                else f"batch{args.batch}" if args.batch > 1 else "unbatched")
         print(f"{spec}  [{engine}, voice={voice}, {args.threads} thread(s), {mode}]")
         print(f"    {rate:6.2f} clips/s   median {med:8.0f} ms   p95 {p95:8.0f} ms")
 

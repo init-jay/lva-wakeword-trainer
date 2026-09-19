@@ -47,7 +47,8 @@ def main(argv=None) -> int:
     if not ok:
         print(f"ERROR: {args.server} is not usable: {why}", file=sys.stderr)
         return 1
-    print(f"{args.server}: {client.name}, timestamps={client.supports_timestamps}, "
+    print(f"{args.server}: {client.server_engine or client.name}, "
+          f"timestamps={client.supports_timestamps}, "
           f"speaker={client.speaker_voices}")
 
     voices = client.voices()
@@ -91,10 +92,10 @@ def main(argv=None) -> int:
                 print(f"  {len(audio) / SR:5.3f}s  {text[:44]}")
 
     dt = time.monotonic() - t0
-    try:
-        n = clips or len(args.texts)
-    except ZeroDivisionError:
-        n = 1
+    # max(n, 1) covers the zero-clip case; there is no division in n itself
+    # (an older revision wrapped this in try/except ZeroDivisionError for
+    # nothing).
+    n = clips or len(args.texts)
     print(f"{clips}/{len(args.texts)} clips in {dt * 1000:.0f} ms "
           f"({dt * 1000 / max(n, 1):.0f} ms/clip end to end)")
     return 0 if clips else 2

@@ -475,7 +475,7 @@ def wait_for_kokoro_shutdown(timeout: int = 120):
         print("  no CUDA - not waiting for Kokoro (nothing holds VRAM here)")
         return
 
-    # The NATIVE FastAPI ports, not the protocol ones (8899/8900): this wait is
+    # The NATIVE FastAPI ports, not the protocol ones (8899/8901): this wait is
     # about VRAM, and VRAM is held by the in-image FastAPI process, which still
     # listens on 8880 in BOTH kokoro containers - 8881 is only the host-side
     # mapping of kokoro2's 8880 ("8881:8880" in docker-compose.yml), and the

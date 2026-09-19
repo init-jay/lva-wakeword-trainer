@@ -36,9 +36,9 @@ import threading
 from .engine import Engine
 from .wire import (MAX_LINE, b64_decode, decode_line, encode_msg, wav_audio)
 
-# The lock guards the catalog cache only: it is filled once, by the first
-# thread, instead of racing N probe threads into N catalog fetches at the top
-# of a corpus run.
+# The lock guards the catalog cache only: each (max_speakers, languages)
+# request shape is fetched once, by the first thread that asks for it, instead
+# of racing N probe threads into N catalog fetches at the top of a corpus run.
 _cache_lock = threading.Lock()
 
 
@@ -81,7 +81,7 @@ class TtsClient(Engine):
         # above the longest measured batch by an order of magnitude and still
         # turns a wedged server into an error instead of a hang.
         self.timeout = timeout
-        self._catalog = None
+        self._catalog = {}
         # The engine name the server declares in its catalog answer (wire.py):
         # what the probe prints, so a URL pointed at the wrong server (a Piper
         # port, a stale process) says so at the top of a run.
@@ -121,25 +121,34 @@ class TtsClient(Engine):
             return False, str(e)
 
     def voices(self, **kwargs):
-        """The catalog, cached. (voice, speaker) pairs when the server declares
-        speaker voices, plain names otherwise - the same shapes the corpus
-        layer has always worked in."""
-        if self._catalog is None:
+        """The catalog, cached per request shape. (voice, speaker) pairs when
+        the server declares speaker voices, plain names otherwise - the same
+        shapes the corpus layer has always worked in. The key is the
+        normalised kwargs: the server does the filtering, so an unfiltered
+        entry must not answer a filtered request. 2026-09-17 review found the
+        single unkeyed slot let available() and batch() pin the UNFILTERED
+        catalog for the process life, and a later
+        voices(languages=..., max_speakers=...) silently returned it."""
+        max_speakers = (int(kwargs["max_speakers"])
+                        if kwargs.get("max_speakers") else 0)
+        languages = (tuple(sorted(str(l) for l in kwargs["languages"]))
+                     if kwargs.get("languages") else ())
+        key = (max_speakers, languages)
+        if key not in self._catalog:
             with _cache_lock:
-                if self._catalog is None:
+                if key not in self._catalog:
                     payload = {"op": "voices"}
-                    if kwargs.get("max_speakers"):
-                        payload["max_speakers"] = int(kwargs["max_speakers"])
-                    if kwargs.get("languages"):
-                        payload["languages"] = [str(l) for l in kwargs["languages"]]
+                    if max_speakers:
+                        payload["max_speakers"] = max_speakers
+                    if languages:
+                        payload["languages"] = list(languages)
                     msg = self._request(payload)
                     self.server_engine = msg.get("engine")
                     self.supports_timestamps = bool(msg.get("timestamps"))
                     self.speaker_voices = bool(msg.get("speaker"))
-                    raw = msg["voices"]
-                    self._catalog = [tuple(v) if isinstance(v, list) else v
-                                     for v in raw]
-        return self._catalog
+                    self._catalog[key] = [tuple(v) if isinstance(v, list) else v
+                                          for v in msg["voices"]]
+        return self._catalog[key]
 
     def timed_render(self, voice, text: str, speed: float = 1.0):
         voice = list(voice) if isinstance(voice, tuple) else voice
@@ -158,6 +167,8 @@ class TtsClient(Engine):
         # the no-timestamps loop and every cut that needs word times degrades to
         # the estimate fallback (measured 2026-09-09: 100% of run-on clips fell
         # back that way). Fetch lazily: one cheap exchange, cached for life.
-        if self._catalog is None:
+        # server_engine marks "some catalog fetched": the capability flags
+        # arrive in the same envelope as the catalog, whatever its key.
+        if self.server_engine is None:
             self.voices()
         return Engine.batch(self, voice, speed, texts)

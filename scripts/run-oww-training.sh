@@ -127,9 +127,12 @@ elif [[ -n "${KOKORO_EXTERNAL:-}" ]]; then
     # KOKORO_URL exactly as given.
     #
     # THE CASE THIS EXISTS FOR IS METAL. Docker Desktop passes no Metal device
-    # through, so an MPS Kokoro has to be a HOST process - and then `docker compose
-    # up -d kokoro kokoro2` cannot even start, because the host process already holds
-    # 8880. Measured on an M1 Max, same Kokoro-FastAPI v0.8.1 install throughout,
+    # through, so a Metal Kokoro has to be a HOST process. On a Mac that host
+    # engine is the in-process mlx one on 8900, and it takes precedence: the
+    # Mac does not run docker kokoro at all - which is also why no compose
+    # service publishes 8900 (docker-compose.yml).
+    #
+    # Measured on an M1 Max, same Kokoro-FastAPI v0.8.1 install throughout,
     # only DEVICE_TYPE changed:
     #
     #     host, DEVICE_TYPE=mps    8.02 clips/s   120 ms median
@@ -186,7 +189,7 @@ else
     # not yet serving. The check is a TCP connect to the PROTOCOL port, not the raw
     # API port: the wrapper's serve() only starts listening after its own available()
     # check passed, so a listener IS the readiness signal.
-    for name in kokoro:8899 kokoro2:8900; do
+    for name in kokoro:8899 kokoro2:8901; do
         port="${name##*:}"
         for _ in $(seq 1 60); do
             (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null && { exec 3>&-; break; }

@@ -47,13 +47,18 @@ import argparse
 import socket
 import threading
 
-from .wire import (b64_encode, decode_line, encode_msg, wav_audio,
-                   wav_bytes)
+from .wire import (MAX_LINE, b64_encode, decode_line, encode_msg,
+                  wav_bytes)
 
 _engine = None
 _engine_lock = threading.Lock()
 _stats_lock = threading.Lock()
 _stats = {"renders": 0, "clips": 0}
+# The request is one small line (wire.py); no live client takes a minute to
+# send it. A client that connects and never sends a newline used to pin this
+# thread for the process lifetime, so the read is timed and capped like the
+# client's identical framing (client.py). 60 s is far above anything real.
+_RECV_TIMEOUT = 60.0
 
 
 def _handle_render(msg: dict) -> dict:
@@ -65,8 +70,11 @@ def _handle_render(msg: dict) -> dict:
     # pass through unchanged.
     if isinstance(voice, list):
         voice = tuple(voice)
-    audio, timestamps = _engine.timed_render(voice, msg["text"],
-                                             float(msg.get("speed", 1.0)))
+    with _engine_lock:
+        # The engine is the single serial lane (see the module docstring); the
+        # encoding below stays outside it because it touches no engine state.
+        audio, timestamps = _engine.timed_render(voice, msg["text"],
+                                                 float(msg.get("speed", 1.0)))
     if audio is None:
         # The KOKORO convention, carried over the wire: the engine is alive but
         # rendered nothing. The client sees (None, None) and retries the clip
@@ -88,12 +96,13 @@ def _handle(msg: dict) -> dict:
             kwargs["max_speakers"] = int(msg["max_speakers"])
         if msg.get("languages"):
             kwargs["languages"] = [str(l) for l in msg["languages"]]
-        try:
+        with _engine_lock:
+            # No TypeError fallback to a no-argument call: it silently served
+            # an adapter that raised INSIDE a current voices() its uncapped,
+            # unfiltered catalog (2026-09-17 review). The Engine contract is
+            # voices(**kwargs) (engine.py) and every adapter in this repo takes
+            # it, so a nonconforming one should fail loudly here.
             voices = _engine.voices(**kwargs)
-        except TypeError:
-            # An adapter that predates the optional parameters: no arguments at
-            # all, rather than guessing which subset it takes.
-            voices = _engine.voices()
         return {"ok": True,
                 # The engine's self-reported name: the corpus probe prints it,
                 # so a URL pointed at the wrong server (a Piper port, a stale
@@ -114,20 +123,36 @@ def _handle(msg: dict) -> dict:
 
 
 def _serve_connection(conn: socket.socket, addr) -> None:
+    conn.settimeout(_RECV_TIMEOUT)
     buf = b""
-    while not buf.endswith(b"\n"):
-        chunk = conn.recv(65536)
-        if not chunk:
-            return
-        buf += chunk
+    response = None
     try:
-        response = _handle(decode_line(buf))
-    except Exception as e:
-        # The PIPER convention, carried over the wire: an engine that raises
-        # means the failure is about the voice or the transport, and the
-        # caller wants to report WHICH one - so this becomes an error envelope,
-        # not a null clip (see wire.py).
-        response = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        while not buf.endswith(b"\n"):
+            chunk = conn.recv(65536)
+            if not chunk:
+                return
+            buf += chunk
+            if len(buf) > MAX_LINE:
+                # The client caps the identical framing; a line over the cap
+                # is a protocol violation, and the answer is the error
+                # envelope, not unbounded accumulation.
+                response = {"ok": False, "error": f"request over {MAX_LINE} B"}
+                break
+    except OSError:
+        # timed out (a client that never finished the line) or went away
+        return
+    if response is None:
+        try:
+            response = _handle(decode_line(buf))
+        except Exception as e:
+            # The PIPER convention, carried over the wire: an engine that raises
+            # means the failure is about the voice or the transport, and the
+            # caller wants to report WHICH one - so this becomes an error
+            # envelope, not a null clip (see wire.py).
+            response = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    # The request cap does not fit the reply: a long render legitimately takes
+    # minutes, so lift the timeout before sending it.
+    conn.settimeout(None)
     conn.sendall(encode_msg(response))
     conn.close()
 
@@ -142,10 +167,9 @@ def serve(engine, host: str, port: int) -> None:
     if not ok:
         raise SystemExit(f"engine {engine.name!r} is not usable: {why}")
     _engine = engine
-    try:
-        voices = engine.voices(max_speakers=0)
-    except TypeError:
-        voices = engine.voices()
+    # The Engine contract is voices(**kwargs) (engine.py); a nonconforming
+    # adapter fails here, at startup, not silently mid-run.
+    voices = engine.voices(max_speakers=0)
     print(f"tts-protocol: engine {engine.name} - {len(voices)} voices, "
           f"timestamps={engine.supports_timestamps}, "
           f"speaker={engine.speaker_voices}")

@@ -119,10 +119,25 @@ def build_corpus(categories, phrases):
     return out
 
 
-def synth(index, category, text, args):
-    """Render one utterance and write it as a 16 kHz mono 16-bit WAV."""
+def vtag(voice):
+    """Filename-safe tag for a voice: the id itself for Kokoro,
+    voice_speaker for Piper multi-speaker models. The same convention as
+    generate_positives.vtag and the corpus naming - the client's voice is a
+    (voice, speaker) tuple for Piper, and interpolating it raw put the tuple
+    repr into the filename."""
+    if isinstance(voice, tuple):
+        return f"{voice[0]}_{voice[1]}" if voice[1] is not None else voice[0]
+    return voice
+
+
+def synth(index, category, text, voice, args):
+    """Render one utterance and write it as a 16 kHz mono 16-bit WAV.
+
+    The voice is passed in rather than derived from the index: main groups
+    the jobs voice-outer (see there), which is a correctness property, not a
+    scheduling preference.
+    """
     rng = np.random.default_rng(index)
-    voice = args.voices[index % len(args.voices)]
     speed = round(float(rng.uniform(*args.speed_range)), 3)
 
     # The engine returns 16 kHz int16 for both Kokoro and Piper, so the old
@@ -138,10 +153,11 @@ def synth(index, category, text, args):
             if audio is not None:
                 break
     if audio is None:
-        return None, (f"FAIL {category}_{index:03d}: {args.engine.name}"
+        return None, (f"FAIL {category}_{index:03d}: "
+                      f"{args.engine.server_engine or args.engine.name}"
                       f"{': ' + err if err else ''}")
 
-    name = f"{category}_{index:03d}_{voice}.wav"
+    name = f"{category}_{index:03d}_{vtag(voice)}.wav"
     wavfile.write(Path(args.out) / name, SR, audio)
     return name, f"{name:<34} {len(audio)/SR:5.2f}s  speed={speed:<5} {text[:44]}"
 
@@ -234,18 +250,37 @@ def main():
     out = Path(args.out).expanduser()
     out.mkdir(parents=True, exist_ok=True)
     args.out = out
+    # The catalog reply carries the engine's own name (wire.py): a URL pointed
+    # at the wrong server (a Piper port, a stale process) says so at the top
+    # of the run, not at its end. One cheap exchange, cached for life.
+    args.engine.voices()
     print(f"generating {len(corpus)} negatives -> {out} "
-          f"({args.engine.name}, {len(args.voices)} voices)")
+          f"({args.engine.server_engine or args.engine.name}, "
+          f"{len(args.voices)} voices)")
 
     written, failures = 0, []
+    # Voice-outer, the way generate_positives.render_jobs orders the same
+    # server: the protocol serves one request at a time (the lock in
+    # tts_protocol/server.py), and Piper holds one voice resident - a voice
+    # swap costs a reload, and the old per-clip rotation swapped on nearly
+    # every clip. Each voice's group is fully done before the next starts, so
+    # the order holds even though workers within a group run in parallel.
+    # The voice assignment itself stays index-based, so filenames are stable.
+    by_voice = {}
+    for i, (c, t) in enumerate(corpus):
+        by_voice.setdefault(args.voices[i % len(args.voices)], []).append((i, c, t))
     with cf.ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = [pool.submit(synth, i, c, t, args) for i, (c, t) in enumerate(corpus)]
-        for future in cf.as_completed(futures):
-            name, line = future.result()
-            if name is None:
-                failures.append(line)
-            else:
-                written += 1
+        for voice in args.voices:
+            jobs = by_voice.get(voice, [])
+            if not jobs:
+                continue
+            futures = [pool.submit(synth, i, c, t, voice, args) for (i, c, t) in jobs]
+            for future in cf.as_completed(futures):
+                name, line = future.result()
+                if name is None:
+                    failures.append(line)
+                else:
+                    written += 1
 
     for line in failures:
         print(" ", line)

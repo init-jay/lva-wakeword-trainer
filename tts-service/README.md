@@ -65,7 +65,7 @@ actually is.
 |---|---|---|---|---|
 | `engines/kokoro_mlx` | Kokoro-82M in-process via the mlx fork (word timestamps) | **Apple Silicon host** (the MLX runtime), `uv` project | 8900 | `tcp://<mac>:8900` |
 | `engines/piper` | Piper in-process via piper-tts 1.7.0 (serial, one voice resident) | **Apple Silicon host AND Docker** - the SAME code in both | 8898 | `tcp://<box>:8898` |
-| `docker/tts_engines/kokoro_http` | Kokoro-FastAPI behind a protocol wrapper | **Docker** (CPU or CUDA), FastAPI on 8880 in the same container | 8899 | `tcp://<box>:8899` |
+| `docker/tts_engines/kokoro_http_engine` | Kokoro-FastAPI behind a protocol wrapper | **Docker** (CPU or CUDA), FastAPI on 8880 in the same container | 8899 | `tcp://<box>:8899` |
 
 **Apple Silicon launch mode is the two uv projects.** No Docker, no Wyoming
 process: the trainer's host run talks to `kokoro_mlx` (8900) and `piper` (8898)

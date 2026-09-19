@@ -237,7 +237,9 @@ def produce(job, args, rng, rendered):
     filename, voice, speed, post, text = job
     data = rendered.get((voice, speed, text))
     if data is None:
-        return None, f"FAIL {filename}: {args.engine.name} returned no audio"
+        return None, (f"FAIL {filename}: "
+                      f"{args.engine.server_engine or args.engine.name} "
+                      f"returned no audio")
 
     if post and post[0] == "level":
         data = set_level(data, post[1])
@@ -321,8 +323,13 @@ def main():
     out = Path(args.out).expanduser()
     out.mkdir(parents=True, exist_ok=True)
     args.out = out
+    # The catalog reply carries the engine's own name (wire.py): a URL pointed
+    # at the wrong server says so at the top of the run, not at its end. One
+    # cheap exchange, cached for life.
+    args.engine.voices()
     print(f'generating {len(jobs)} positives for "{args.wake_word}" -> {out} '
-          f"({args.engine.name}, {len(args.voices)} voices)")
+          f"({args.engine.server_engine or args.engine.name}, "
+          f"{len(args.voices)} voices)")
 
     # Render first, in engine order (voice-outer for Piper), then post-process in
     # parallel as before - the sweeps differ only in post-processing, so one

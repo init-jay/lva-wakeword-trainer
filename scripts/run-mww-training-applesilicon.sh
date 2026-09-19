@@ -185,21 +185,33 @@ fi
 [[ "${PIPER_URL}" != tcp://* ]] && PIPER_URL="tcp://${PIPER_URL}"
 export PIPER_URL
 
-# KOKORO_URL: same treatment. The Mac's Kokoro is the in-process kokoro-mlx
-# engine (tts-service/engines/kokoro_mlx, port 8900); the old http:// form (the
-# Kokoro-FastAPI host server) and the old mlx:// form both mean the same thing
-# now - a protocol server that runs MLX in-process - so both are coerced.
+# KOKORO_URL: same treatment, with one exception. The Mac's Kokoro is the
+# in-process kokoro-mlx engine (tts-service/engines/kokoro_mlx, port 8900);
+# the old mlx:// form named that same engine, so it is still coerced. The old
+# http:// form is NOT: it meant a raw Kokoro-FastAPI host server, which does
+# not speak the protocol - coercing it to tcp:// just moved the failure from
+# connect time to every single render. Reject it and name the two real
+# options instead of guessing a port.
 KOKORO_URL="${KOKORO_URL:-tcp://127.0.0.1:8900}"
 if [[ "${KOKORO_URL}" == *host.docker.internal* ]]; then
     KOKORO_URL="${KOKORO_URL//host.docker.internal/127.0.0.1}"
     echo "=== note: rewrote KOKORO_URL to $KOKORO_URL - host.docker.internal"
     echo "          only resolves inside a container."
 fi
-if [[ "${KOKORO_URL}" == http://* || "${KOKORO_URL}" == mlx://* ]]; then
+if [[ "${KOKORO_URL}" == http://* ]]; then
+    echo "ERROR: KOKORO_URL=${KOKORO_URL} is a raw http:// Kokoro-FastAPI URL." >&2
+    echo "       The protocol client speaks only tcp://, and a raw FastAPI port" >&2
+    echo "       does not speak the protocol - no port rewrite can fix that." >&2
+    echo "       Point KOKORO_URL at one of:" >&2
+    echo "         tcp://127.0.0.1:8900   the mlx engine, in-process on this Mac" >&2
+    echo "           (uv run --project tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900)" >&2
+    echo "         tcp://<box>:8899       the Docker kokoro wrapper (docker-compose.yml)" >&2
+    exit 1
+fi
+if [[ "${KOKORO_URL}" == mlx://* ]]; then
     KOKORO_URL="tcp://${KOKORO_URL#*//}"
-    echo "=== note: rewrote KOKORO_URL to $KOKORO_URL - the protocol client"
-    echo "          speaks only tcp://, and the Mac's Kokoro is the mlx engine"
-    echo "          (uv run --project tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900)"
+    echo "=== note: rewrote KOKORO_URL to $KOKORO_URL - mlx:// named the mlx"
+    echo "          engine, which is now the protocol server on 8900"
 fi
 [[ "${KOKORO_URL}" != tcp://* ]] && KOKORO_URL="tcp://${KOKORO_URL}"
 export KOKORO_URL
@@ -253,11 +265,10 @@ url = sys.argv[1]
 try:
     c = TtsClient(url)
     voices = c.voices()
-    msg = c._request({"op": "voices"})
 except Exception as e:
     print(f"  Kokoro unreachable: {e}", file=sys.stderr)
     sys.exit(1)
-engine = msg.get("engine", "?")
+engine = c.server_engine or "?"
 ts = "word timestamps yes" if c.supports_timestamps else "word timestamps NO"
 print(f"  Kokoro probe OK: engine={engine}, {len(voices)} voices, {ts} at {url}")
 PYEOF

@@ -25,7 +25,13 @@ services:
     <<: *kokoro
     ports:
       - "8881:8880"
-      - "8900:8899"   # same wrapper, second process; host port kept off 8899
+      # Same wrapper, second process. The published protocol port must dodge
+      # both 8899 (kokoro's) and 8900 - the Mac's in-process mlx engine's
+      # default (tts-service/engines/kokoro_mlx), which is THE Kokoro on a
+      # Mac and takes precedence: a Mac that runs compose at all does not
+      # run docker kokoro, and publishing 8900 only collided with it
+      # (2026-09-17 review). 8901 is unused elsewhere in this repo.
+      - "8901:8899"
 
   piper:
     <<: *piper
