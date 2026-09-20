@@ -88,9 +88,13 @@ DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
 
 import argparse
 import os
+import random
 import shutil
 import sys
+import time
 from pathlib import Path
+
+import numpy as np
 
 # The REPO ROOT. This package sits at train/mww/ since the reorg, so the root is
 # two levels up, not one - the old value now points at train/.
@@ -107,6 +111,8 @@ from train.corpus.piper import (generate_piper_samples,  # noqa: E402
 from train.corpus.positives import (PLAIN_SPEED_GRID,  # noqa: E402
                                     plain_positive_texts)
 from train.corpus.real import copy_real_samples  # noqa: E402
+from train.corpus import manifest as corpus_manifest  # noqa: E402
+from wordlists import path_for  # noqa: E402
 
 
 def main():
@@ -146,15 +152,73 @@ def main():
                    help="delete an existing corpus first. Required to regenerate - "
                         "appending merges two runs and keeps clips from voices "
                         "excluded since.")
+    p.add_argument("--skip", action="store_true",
+                   help="reuse the existing corpus instead of building one, for a "
+                        "run whose corpus is a held-fixed variable. Requires the "
+                        "corpus to exist; when a corpus.json manifest exists it is "
+                        "checked against the shaping flags this invocation would "
+                        "use, and a mismatch exits with a diff - silently reusing a "
+                        "differently-shaped corpus is the failure this refuses. "
+                        "Needs no TTS servers, so it runs before the probes.")
     p.add_argument("--no-trim", action="store_true",
                    help="skip silence trimming. Almost certainly wrong: Piper "
                         "renderings carry a median 248 ms of trailing silence "
                         "(p90 555 ms), against 0 ms for real recordings.")
+    p.add_argument("--seed", type=int, default=0,
+                   help="seed the drawing/sampling of the corpus (default: "
+                        "%(default)s = unseeded). Seeds which voices, speakers, "
+                        "phrases and speeds get chosen - NOT how they are rendered: "
+                        "the TTS engines sample noise per call and cannot be "
+                        "seeded, so a same-seed rebuild is a same-shape corpus with "
+                        "different audio. That is why a sweep REUSES this corpus "
+                        "(the manifest written at the end of this stage) rather "
+                        "than rebuilding it.")
     args = p.parse_args()
+
+    if args.seed:
+        # BEFORE any draw below: the whole stage must be a function of the seed,
+        # not of the clock. numpy carries the corpus helpers' draws (piper speed
+        # choice, child-stretch draws, trim jitter); random is seeded too because
+        # the helpers are allowed to use either.
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        print(f"[seed] {args.seed} (drawing is seeded; rendering is not - the "
+              f"TTS engines cannot be)")
+
+    t_start = time.time()
 
     safe = args.wake_word.replace(" ", "_").lower()
     root = Path(args.corpus_root) / safe / "mww"
     positives, negatives = root / "positives", root / "negatives"
+
+    # REUSE MODE: the sweep's front door. Decided before the TTS probes - a reuse
+    # run must work with the engines down, exactly as an oww --skip-corpus run does.
+    if args.skip:
+        existing = {d: len(list(d.glob("*.wav"))) for d in (positives, negatives)
+                    if d.is_dir()}
+        if not any(existing.values()):
+            sys.exit(f"\n--skip, but no corpus at {root} - build it first "
+                     f"(drop --skip)")
+        manifest = corpus_manifest.load_manifest(root)
+        if manifest is not None:
+            corpus_manifest.check_reuse(root, {
+                "samples_per_voice": args.samples_per_voice,
+                "negatives_per_voice": args.negatives_per_voice,
+                "kokoro_fraction": args.kokoro_fraction,
+                "child_fraction": args.child_fraction,
+                "real_copies": args.real_copies,
+                "piper_speakers": args.piper_speakers,
+                "piper_languages": args.piper_languages,
+                "negatives_file": args.negatives_file,
+                "no_trim": args.no_trim,
+            })
+        else:
+            print(f"  NOTE: no corpus.json manifest at {root} - the corpus predates "
+                  f"the manifest stage, so its shaping cannot be verified. Reusing "
+                  f"as-is; a rebuild would write one.")
+        for d, n in existing.items():
+            print(f"  reusing {d} ({n} wav)")
+        return
 
     # REFUSE TO APPEND TO AN EXISTING CORPUS. Generating into a non-empty directory
     # silently merges two runs, and the merge is worse than it sounds:
@@ -282,6 +346,35 @@ def main():
 
     n_pos = len(list(positives.glob("*.wav")))
     n_neg = len(list(negatives.glob("*.wav")))
+
+    # FREEZE THE CORPUS: the manifest is the identity the run tag hashes and the
+    # check a later `--corpus reuse` (or the sweep runner) validates against. It
+    # is written last, after trimming and the child copies, so its digest covers
+    # the final tree - the state training will actually consume.
+    corpus_manifest.write_manifest(
+        root, args.wake_word, "mww",
+        seed=args.seed,
+        shaping={
+            "samples_per_voice": args.samples_per_voice,
+            "negatives_per_voice": args.negatives_per_voice,
+            "kokoro_fraction": args.kokoro_fraction,
+            "child_fraction": args.child_fraction,
+            "real_copies": args.real_copies,
+            "piper_speakers": args.piper_speakers,
+            "piper_languages": args.piper_languages,
+            "negatives_file": args.negatives_file,
+            "no_trim": args.no_trim,
+        },
+        engines={
+            "piper": {"url": args.piper_url, "version": None},
+            **({"kokoro": {"url": args.kokoro_url, "version": None}}
+               if args.kokoro_fraction > 0 else {}),
+        },
+        voices={"kokoro": kokoro_voices, "piper": voices},
+        per_voice_counts={"positives": n_pos, "negatives": n_neg},
+        wordlist_path=path_for(args.wake_word),
+        wall_time_s=time.time() - t_start)
+
     print(f"\nDONE  {n_pos} positives, {n_neg} negatives under {root}")
     print("\nNext - FEATURES, not config: the config points at "
           "features/positives, which the next step creates.")

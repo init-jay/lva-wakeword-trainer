@@ -12,7 +12,9 @@ Docker:
 """
 
 import argparse
+import json
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -53,12 +55,19 @@ from train.corpus.piper import (generate_piper_samples,  # noqa: E402
 from train.corpus.positives import (PLAIN_SPEED_GRID, PLAIN_SPEEDS,  # noqa: E402
                                     plain_positive_texts)
 from train.corpus.real import copy_real_samples  # noqa: E402
-from train import ownership  # noqa: E402
+from train import ownership, provenance  # noqa: E402
+from train.corpus import manifest as corpus_manifest  # noqa: E402
 
 warnings.filterwarnings("ignore", message="Reached EOF prematurely")
 
 WORK_DIR = REPO_ROOT
 os.chdir(WORK_DIR)
+
+# The run's seed, set in main() from --seed. Module-level because the two
+# subprocess launchers (run_augmentation / run_training) pass it to the
+# openwakeword train.py subprocess as PYTHONHASHSEED without it being threaded
+# through every call site.
+_SEED: int = 0
 
 # Speed coverage of the positives, widened at the top for run 9.
 #
@@ -277,6 +286,20 @@ def generate_runon_samples(pool: "KokoroPool", voices: list, output_dir: Path,
 # trim_silence and trim_directory live in corpus/real.py and corpus/augment.py.
 
 
+def _tag_input(resolved):
+    """The config half of the run tag: every hyperparameter, no paths.
+
+    Paths describe the machine, not the run: hashing an absolute path would move
+    the tag when the repo moves, and the corpus paths are the corpus half's job
+    anyway. What remains is exactly what a sweep point varies - steps, geometry,
+    weights, the augmentation rounds, and the seed.
+    """
+    not_hyper = {"output_dir", "corpus_dir", "rir_paths", "background_paths",
+                 "feature_data_files", "false_positive_validation_data_path",
+                 "target_phrase", "model_name"}
+    return {k: v for k, v in resolved.items() if k not in not_hyper}
+
+
 def convert_to_tflite(model_path: Path):
     """Convert the exported .onnx with this repo's converter. Returns the path or None.
 
@@ -361,7 +384,13 @@ def setup_training_dirs(wake_word: str, skip_corpus: bool = False) -> Path:
 
 def create_config(wake_word: str, n_samples: int, training_steps: int,
                   layer_size: int, data_dir: str, augmentation_rounds: int = 3,
-                  max_negative_weight: int = 2000):
+                  max_negative_weight: int = 2000, seed: int = 0,
+                  lr: float = 0.0001, batch_n_per_class: int = 1024,
+                  target_fp_per_hour: float = 0.1,
+                  target_accuracy: float = 0.7, target_recall: float = 0.5,
+                  n_samples_val: int = None,
+                  augmentation_batch_size: int = 16,
+                  overrides: list = None):
     """Create training configuration."""
     safe_name = wake_word.replace(" ", "_").lower()
 
@@ -373,12 +402,43 @@ def create_config(wake_word: str, n_samples: int, training_steps: int,
     config["target_phrase"] = [safe_name]
     config["model_name"] = safe_name
     config["n_samples"] = n_samples
-    config["n_samples_val"] = max(1000, n_samples // 10)
+    # None = the pre-P1.5 behaviour: validation set is a tenth of training, floored
+    # at 1000. An explicit value is what a sweep point moves.
+    config["n_samples_val"] = (n_samples_val if n_samples_val is not None
+                               else max(1000, n_samples // 10))
     config["steps"] = training_steps
     config["layer_size"] = layer_size
-    config["target_accuracy"] = 0.7
-    config["target_recall"] = 0.5
-    config["target_false_positives_per_hour"] = 0.1
+    config["target_accuracy"] = target_accuracy
+    config["target_recall"] = target_recall
+    # Two consumers inside auto_train: checkpoint selection, and the weight
+    # doubling - each sequence that ends with best_val_fp above this target
+    # doubles max_negative_weight (it can fire twice, so a run requesting 2000
+    # can train at 8000). Upstream's default is 0.2; this repo wrote 0.1 at
+    # creation and has never measured the departure.
+    config["target_false_positives_per_hour"] = target_fp_per_hour
+    # auto_train's base learning rate. Upstream hardcoded 0.0001 inside the
+    # method - not a config key, not a flag - so this key and
+    # patches/configurable-lr.py exist for it: the method now reads
+    # config.get("lr", 0.0001) and the per-sequence /10 lines scale from it.
+    # 0.0001 is upstream's value, untouched in this repo, so the default is a
+    # no-change.
+    config["lr"] = lr
+    # Per-batch class balance: every step draws this many ACAV100M negatives
+    # against 50 positives and 50 adversarial negatives (the latter two stay at
+    # custom_model.yml's values; --set batch_n_per_class={...} is how a sweep
+    # moves those). 1024/50/50 is upstream's number, never touched here - the
+    # balance is a major lever and the key had to match feature_data_files
+    # (custom_model.yml's batch_n_per_class, not a top-level int). The total
+    # batch size is the sum of the dict values.
+    config["batch_n_per_class"] = {
+        "ACAV100M_sample": batch_n_per_class,
+        "adversarial_negative": 50,
+        "positive": 50,
+    }
+    # Explicit rather than riding the yml default (16): a config value a sweep
+    # can see is a config value it can move, and the yml's own comment cautions
+    # against making it large - variety in the augmentation is the point.
+    config["augmentation_batch_size"] = augmentation_batch_size
     # MODELS OUT, CORPUS ELSEWHERE. Upstream uses output_dir for exactly three things
     # (openwakeword/train.py:652, 905, 909): the .onnx export, the .tflite conversion
     # beside it, and an empty <output_dir>/<model_name>/ it creates unconditionally -
@@ -443,6 +503,30 @@ def create_config(wake_word: str, n_samples: int, training_steps: int,
     config["feature_data_files"] = {"ACAV100M_sample": f"{data_dir}/openwakeword_features_ACAV100M_2000_hrs_16bit.npy"}
     config.pop("piper_sample_generator_path", None)  # We use Kokoro, not Piper
 
+    # SEED THE SUBPROCESS. openwakeword's train.py (via patches/seed-augment.py)
+    # seeds its random/numpy/torch from this key and passes it to augment_clips.
+    # 0 = unseeded = upstream behaviour, which is what a config without the patch
+    # also does, so the two cannot diverge.
+    config["seed"] = seed
+
+    # The --set escape hatch, applied LAST: it overrides every key set above,
+    # so a sweep runner needs no per-knob plumbing for anything in this config.
+    # Values parse as JSON, falling back to the raw string when that fails
+    # ("--set target_phrase=hey seeree" keeps the spaces). Whatever lands here
+    # is part of the resolved config, so _tag_input hashes it into the run tag
+    # and it is filed verbatim in <tag>.config.json - a --set point is a
+    # first-class sweep point, named like the explicit flags.
+    if overrides:
+        for item in overrides:
+            key, sep, raw = item.partition("=")
+            if not sep or not key:
+                sys.exit(f"--set takes key=value, got {item!r}")
+            try:
+                config[key] = json.loads(raw)
+            except ValueError:
+                config[key] = raw
+        print(f"Config overrides applied last: {', '.join(overrides)}")
+
     config_path = WORK_DIR / "training_config.yaml"
     with open(config_path, 'w') as f:
         yaml.dump(config, f)
@@ -451,18 +535,37 @@ def create_config(wake_word: str, n_samples: int, training_steps: int,
     return config
 
 
-def run_augmentation():
-    """Run OpenWakeWord augmentation pipeline."""
+def run_augmentation(overwrite: bool = False):
+    """Run OpenWakeWord augmentation pipeline.
+
+    `overwrite` passes upstream's --overwrite: the feature arrays get recomputed
+    even though they exist. The caller decides from the features.json sidecar
+    (see main): the .npy files are keyed on (corpus, rounds, total_length, seed),
+    and a sidecar that does not match is stale, not a cache hit.
+    """
     print("\n" + "=" * 60)
     print("Running augmentation pipeline...")
     print("=" * 60)
 
     train_script = str(WORK_DIR / "openwakeword/openwakeword/train.py")
-    subprocess.run([
-        sys.executable, train_script,
-        "--training_config", "training_config.yaml",
-        "--augment_clips"
-    ], check=True)
+    cmd = [sys.executable, train_script,
+           "--training_config", "training_config.yaml",
+           "--augment_clips"]
+    if overwrite:
+        cmd.append("--overwrite")
+    subprocess.run(cmd, check=True, env=_trainer_env())
+
+
+def _trainer_env():
+    """The subprocess environment: PYTHONHASHSEED pinned to the run's seed.
+
+    hash() randomization is on by default and changes dict/set iteration order
+    per process, which upstream's generators turn into a different draw order. 0
+    (the deterministic value) when the run itself is unseeded is still a choice:
+    two unseeded runs should at least not differ in the one place they can be
+    made to agree for free.
+    """
+    return {**os.environ, "PYTHONHASHSEED": str(_SEED)}
 
 
 def wait_for_kokoro_shutdown(timeout: int = 120):
@@ -529,7 +632,7 @@ def run_training():
         sys.executable, train_script,
         "--training_config", "training_config.yaml",
         "--train_model"
-    ])
+    ], env=_trainer_env())
     return result.returncode
 
 
@@ -569,12 +672,24 @@ def main():
                         help="Reuse data/corpus/<wake>/oww/ instead of regenerating it. "
                              "For resuming a run that failed AFTER generation - the "
                              "CUDA OOM at the feature array is the usual reason. Skips "
-                             "TTS, real-clip copying and trimming; still re-runs "
-                             "augmentation and training, so --training-steps and the "
-                             "model geometry are still yours to change. Sample-shaping "
-                             "flags (--samples-per-voice, --piper-fraction, "
+                             "TTS, real-clip copying and trimming. Augmentation and the "
+                             "feature arrays are reused TOO when the .npy files exist "
+                             "and the features.json sidecar matches this run's "
+                             "(corpus, augmentation_rounds, seed) - use "
+                             "--rebuild-features to force recomputation. "
+                             "Sample-shaping flags (--samples-per-voice, --piper-fraction, "
                              "--child-fraction, --runon-fraction) are IGNORED: the clips "
-                             "already exist and this does not rebuild them.")
+                             "already exist and this does not rebuild them. When a "
+                             "corpus.json manifest exists it is CHECKED against the "
+                             "requested shaping flags and a mismatch refuses the run - "
+                             "reusing a differently-shaped corpus silently would be "
+                             "the measurement the flag exists to prevent.")
+    parser.add_argument("--rebuild-features", action="store_true",
+                        help="Recompute the augmentation/feature .npy arrays even "
+                             "though they exist and their sidecar matches. Needed "
+                             "after a code change to the feature path; the sidecar "
+                             "keys on (corpus digest, augmentation_rounds, seed), not "
+                             "on the code, which the run tag's code half covers.")
     parser.add_argument("--negatives-file",
                         help="Text file of confusable negative phrases, one per line "
                              "(# comments allowed). Overrides the built-in list for "
@@ -605,6 +720,66 @@ def main():
                         help="How many differently-augmented copies of each clip to "
                              "compute features for (default: %(default)s). Multiplies "
                              "training data at no TTS cost.")
+    parser.add_argument("--lr", type=float, default=0.0001,
+                        help="Base learning rate for auto_train's first sequence "
+                             "(default: %(default)s). Upstream hardcodes it inside "
+                             "the method - not a config key, not a flag - until "
+                             "patches/configurable-lr.py, so it was the one "
+                             "hyperparameter a sweep had no flag for. The "
+                             "per-sequence /10 decay is kept: sequence 2 trains at "
+                             "lr/10 and sequence 3 at lr/100, so this moves the "
+                             "whole schedule, not just the first third. "
+                             "0.0001 is upstream's value, never touched in this "
+                             "repo, so the default is a no-change. The resolved "
+                             "value is part of the run tag (provenance.config_tag).")
+    parser.add_argument("--batch-n-per-class", type=int, default=1024,
+                        help="ACAV100M negative draws per training batch (default: "
+                             "%(default)s, the upstream custom_model.yml value). "
+                             "Every step draws this many background negatives "
+                             "against 50 positives and 50 adversarial negatives - "
+                             "the per-batch class balance is a major lever nobody "
+                             "in this repo has touched. Those two stay at the "
+                             "yml's 50/50; move them with "
+                             "--set batch_n_per_class={\"positive\": N} - the "
+                             "total batch size is the sum of the three.")
+    parser.add_argument("--target-fp-per-hour", type=float, default=0.1,
+                        help="Target false accepts per hour on the validation set "
+                             "(default: %(default)s). auto_train uses it two ways: "
+                             "it gates checkpoint selection, and a sequence that "
+                             "ends with best_val_fp above it DOUBLES "
+                             "max_negative_weight - it can fire twice, so a run "
+                             "requesting --max-negative-weight 2000 can train at "
+                             "8000. Upstream's default is 0.2; this repo's 0.1 "
+                             "is an unmeasured departure from it.")
+    parser.add_argument("--target-accuracy", type=float, default=0.7,
+                        help="Checkpoint-merge gate for validation accuracy "
+                             "(default: %(default)s, the value this repo has "
+                             "always written).")
+    parser.add_argument("--target-recall", type=float, default=0.5,
+                        help="Checkpoint-merge gate for validation recall "
+                             "(default: %(default)s, the value this repo has "
+                             "always written).")
+    parser.add_argument("--n-samples-val", type=int, default=None,
+                        help="Validation clips to generate (default: "
+                             "%(default)s = max(1000, n_samples/10), the "
+                             "pre-P1.5 behaviour).")
+    parser.add_argument("--augmentation-batch-size", type=int, default=16,
+                        help="Batch size for the augmentation pass over the "
+                             "generated clips (default: %(default)s, the upstream "
+                             "yml value). Upstream's comment cautions against "
+                             "making it large - variety in the augmentation is "
+                             "the point.")
+    parser.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                        help="Generic override, repeatable: KEY=VALUE merged into "
+                             "the generated config LAST, so it overrides every "
+                             "flag above. VALUE parses as JSON (true, 3, [1, 2], "
+                             "{\"a\": 1}), falling back to the raw string when "
+                             "that fails. Escape hatch: a sweep runner needs no "
+                             "per-knob plumbing - the resolved result is what "
+                             "gets hashed into the run tag (provenance.config_tag) "
+                             "and filed as <tag>.config.json, so a --set point is "
+                             "a first-class sweep point, named like the explicit "
+                             "flags.")
     parser.add_argument("--runon-fraction", type=float, default=0.4,
                         help="Fraction of positives where the phrase runs straight "
                              "into a command instead of being followed by quiet "
@@ -652,10 +827,94 @@ def main():
                              "would swamp the corpus with one model's g2p.")
     parser.add_argument("--piper-languages", default="en_US,en_GB",
                         help="Language prefixes to include (default: %(default)s)")
+    parser.add_argument("--corpus", choices=["auto", "reuse", "rebuild"], default="auto",
+                        help="Whether to rebuild the TTS corpus or reuse the one on "
+                             "disk. auto (default): reuse when a corpus.json manifest "
+                             "exists and matches the requested shaping flags - during "
+                             "a sweep the corpus is a held-fixed independent variable, "
+                             "and regenerating it redraws the TTS noise every point. "
+                             "reuse: require that (a mismatch exits with a diff, no "
+                             "silent rebuild). rebuild: regenerate unconditionally. "
+                             "Replaces --skip-corpus as the front door; that flag "
+                             "still works and means reuse.")
+    parser.add_argument("--seed", type=int, default=0,
+                        help="Seed for every stage of the run: corpus drawing, "
+                             "augmentation, model init (default: %(default)s = "
+                             "unseeded, and the log says so). Two runs at the same "
+                             "seed, same corpus and same config must be comparable "
+                             "bit for bit - until this landed, the 10-point "
+                             "run-to-run variance measured at an identical config "
+                             "was the seed, not the run. The seed is part of the "
+                             "run's tag (provenance.config_tag). Note: the TTS "
+                             "engines are NOT seedable, so a seeded run still "
+                             "renders different audio - reuse the corpus instead "
+                             "(--skip-corpus / --corpus reuse).")
     args = parser.parse_args()
 
     wake_word = args.wake_word
     safe_name = wake_word.replace(" ", "_").lower()
+
+    # Seed the parent process's draws (corpus stage: run-on tail jitter, child
+    # stretch, Piper speed draws) BEFORE the corpus stage, so the drawing is a
+    # function of the seed rather than of the clock. The openwakeword train.py
+    # subprocess seeds itself from config["seed"] (patches/seed-augment.py); the
+    # rendering is not covered - the TTS engines cannot be seeded, and that is
+    # why a sweep reuses the corpus rather than regenerating it.
+    global _SEED
+    _SEED = args.seed
+    if args.seed:
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+
+    # === CORPUS MODE: reuse the frozen corpus or rebuild it =====================
+    # P0.3: during a sweep the corpus is a HELD-FIXED INDEPENDENT VARIABLE. The
+    # default (auto) reuses it whenever a corpus.json manifest exists and matches
+    # the requested shaping flags, so a tuning loop does not redraw the TTS noise
+    # on every point; rebuilding is explicit (--corpus rebuild), and so is reuse
+    # (which refuses rather than falling back to a rebuild on a mismatch).
+    # --skip-corpus is kept as the legacy spelling of reuse-for-resume.
+    corpus_dir = WORK_DIR / "data" / "corpus" / safe_name / "oww"
+    corpus_shaping = {
+        "samples_per_voice": args.samples_per_voice,
+        "runon_fraction": args.runon_fraction,
+        "child_fraction": args.child_fraction,
+        "piper_fraction": args.piper_fraction,
+        "real_copies": args.real_copies,
+        "piper_speakers": args.piper_speakers,
+        "piper_languages": args.piper_languages,
+        "negatives_file": args.negatives_file,
+        "exclude_voices": args.exclude_voices,
+        "include_legacy_voices": args.include_legacy_voices,
+        "no_trim": args.no_trim,
+    }
+    if args.skip_corpus:
+        args.corpus = "reuse"
+    if args.corpus == "rebuild":
+        args.skip_corpus = False
+        print("Corpus mode: REBUILD (--corpus rebuild - the manifest, if any, is ignored)")
+    elif args.corpus == "reuse":
+        # check_reuse exits with a diff when the shaping does not match; a missing
+        # manifest is an error in EXPLICIT mode, because silently rebuilding is the
+        # fallback this flag exists to make impossible.
+        corpus_manifest.check_reuse(corpus_dir, corpus_shaping)
+        args.skip_corpus = True
+    else:  # auto
+        manifest = corpus_manifest.load_manifest(corpus_dir)
+        if manifest is not None:
+            diffs = corpus_manifest.matches_requested(manifest, corpus_shaping)
+            if not diffs:
+                print("Corpus mode: REUSE (manifest matches the requested shaping) - "
+                      "the corpus is a held-fixed variable for this run")
+                args.skip_corpus = True
+            else:
+                for line in diffs:
+                    print(f"  corpus manifest: {line}")
+                print("Corpus mode: REBUILD (the manifest does not match the "
+                      "requested shaping - reusing a differently-shaped corpus "
+                      "silently would be the measurement this check prevents)")
+        else:
+            print("Corpus mode: REBUILD (no corpus.json manifest - the corpus will "
+                  "be built and the manifest written)")
 
     print("=" * 60)
     print("OpenWakeWord Training")
@@ -664,6 +923,11 @@ def main():
     print(f"Samples per voice: {args.samples_per_voice}")
     print(f"Training steps: {args.training_steps}")
     print(f"Layer size: {args.layer_size}")
+    if args.seed:
+        print(f"Seed: {args.seed}")
+    else:
+        print("Seed: 0 (unseeded - this run is not reproducible bit for bit, and")
+        print("      sweep points should be, so pass --seed for tuning runs)")
     print()
 
     print("[Compute]")
@@ -723,6 +987,7 @@ def main():
 
     # THE WHOLE CORPUS STAGE. Skipped wholesale rather than per-call, so a
     # --skip-corpus run cannot half-generate into a corpus it did not build.
+    corpus_start = time.time()
     if not args.skip_corpus:
         # Text variations for positive samples.
         #
@@ -914,10 +1179,77 @@ def main():
             n_trimmed, mean_ms = trim_directory(directory, f"Trim {label}")
             print(f"  {label}: trimmed {n_trimmed} clips (mean {mean_ms:.0f}ms removed)")
 
-    # Create config and run training
+    # === FREEZE THE CORPUS ===
+    # The manifest is written only on a REBUILD, after trimming (its digest must
+    # cover the final tree). It is what --corpus reuse validates against on the
+    # next run, and what provenance hashes into the run tag's corpus half.
+    if not args.skip_corpus:
+        from wordlists import path_for  # recorded, not gated: the training confusables
+        corpus_manifest.write_manifest(
+            corpus_dir, wake_word, "oww",
+            seed=args.seed,
+            shaping=corpus_shaping,
+            engines={
+                "kokoro": {"url": args.kokoro_url, "version": None},
+                **({"piper": {"url": args.piper_url, "version": None}}
+                   if piper_voices else {}),
+            },
+            voices={"kokoro": kokoro_voices, "piper": piper_voices},
+            per_voice_counts={"positive_train": n_pos_train,
+                              "positive_test": n_pos_test,
+                              "negative_train": n_neg_train,
+                              "negative_test": n_neg_test},
+            wordlist_path=path_for(wake_word),
+            wall_time_s=time.time() - corpus_start)
+
+    # Create config and run training. The training-stage hyperparameters that
+    # are not also corpus shaping arrive as keywords; --set (args.set) is the
+    # last word, applied after everything else inside create_config.
     create_config(wake_word, n_pos_train, args.training_steps, args.layer_size,
-                  args.data_dir, args.augmentation_rounds, args.max_negative_weight)
-    run_augmentation()
+                  args.data_dir, args.augmentation_rounds, args.max_negative_weight,
+                  seed=args.seed, lr=args.lr,
+                  batch_n_per_class=args.batch_n_per_class,
+                  target_fp_per_hour=args.target_fp_per_hour,
+                  target_accuracy=args.target_accuracy,
+                  target_recall=args.target_recall,
+                  n_samples_val=args.n_samples_val,
+                  augmentation_batch_size=args.augmentation_batch_size,
+                  overrides=args.set)
+
+    # === FEATURE CACHE GUARD ===
+    # The .npy arrays are keyed on (corpus digest, augmentation_rounds, seed) in a
+    # features.json sidecar. Upstream reuses a positive_features_train.npy whenever
+    # it exists and knows nothing about why it was built - so changing
+    # --augmentation-rounds on a --skip-corpus run was a no-op that looked like a
+    # measurement. The sidecar makes the hit a decision: match = reuse, anything
+    # else = recompute (and a missing sidecar is a recompute too - pre-manifest
+    # caches have no identity to trust). The corpus digest is manifest-aware, so a
+    # frozen corpus keys cheaply without re-hashing the tree.
+    _short, _mp, corpus_hex, _n, _b = provenance.corpus_tag(wake_word, "oww")
+    sidecar_path = corpus_dir / "features.json"
+    sidecar = {"corpus": corpus_hex or _short,
+               "augmentation_rounds": args.augmentation_rounds,
+               "seed": args.seed}
+    overwrite = args.rebuild_features
+    feature_cache = base_dir / "positive_features_train.npy"
+    if feature_cache.exists() and not overwrite:
+        old = (json.loads(sidecar_path.read_text())
+               if sidecar_path.exists() else None)
+        if old and all(old.get(k) == v for k, v in sidecar.items()):
+            print(f"Reusing cached feature arrays (features.json matches: "
+                  f"corpus {sidecar['corpus'][:7]}, "
+                  f"rounds {sidecar['augmentation_rounds']}, "
+                  f"seed {sidecar['seed']})")
+        else:
+            reason = ("no features.json sidecar - a cache with no identity is a "
+                      "recompute, not a hit)" if old is None else
+                     f"features.json disagrees with this run "
+                     f"(corpus/rounds/seed moved: {old})")
+            print(f"Cached feature arrays are STALE ({reason}) - recomputing. "
+                  f"Pass --rebuild-features to say this out loud.")
+            overwrite = True
+    run_augmentation(overwrite=overwrite)
+    sidecar_path.write_text(json.dumps(sidecar, indent=2) + "\n")
 
     # Note the existing model before training. setup_training_dirs clears the corpus
     # but NOT the exported model, so a previous run's model survives here - and if
@@ -961,6 +1293,26 @@ def main():
 
     print("TRAINING COMPLETE!")
     print("=" * 60)
+
+    # === RUN TAG + RESOLVED CONFIG ===
+    # The corpus half of the tag reads the manifest written above (cheap, and it
+    # names the audio this run consumed); the config half hashes the resolved
+    # hyperparameters + seed, so two sweep points at the same commit and corpus
+    # get different names and can both be filed - today they share a tag and the
+    # second one overwrites the first. The FULL resolved config (paths included)
+    # is what the ledger reads, and it is filed under the tag that identifies it.
+    resolved = yaml.safe_load((WORK_DIR / "training_config.yaml").read_text())
+    tag = provenance.run_tag(wake_word, target="oww",
+                             config=_tag_input(resolved),
+                             fallback=time.strftime("%Y%m%d-%H%M%S"))
+    config_json = model_path.parent / f"{tag}.config.json"
+    config_json.write_text(json.dumps(resolved, indent=2, default=str) + "\n")
+    # The wrapper scripts name the archived model after this same tag; reading it
+    # from here (rather than recomputing it in the shell) keeps the two from
+    # drifting apart, which would leave the archive and its config named apart.
+    (model_path.parent / ".last_run_tag").write_text(tag + "\n")
+    print(f"Run tag: {tag}")
+    print(f"Resolved config: {config_json}")
 
     tflite_path = convert_to_tflite(model_path)
     ownership.hand_back(WORK_DIR / "output", work_dir=WORK_DIR)

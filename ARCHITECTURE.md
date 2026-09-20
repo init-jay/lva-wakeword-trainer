@@ -150,3 +150,7 @@ far.
 ├── train-applesilicon/           host uv env for the oww trainer - SPEED.md
 └── train-mww-applesilicon/       host uv env for the mww trainer - SPEED.md
 ```
+
+The host envs are Python 3.12 uv venvs (`train-applesilicon/`,
+`train-mww-applesilicon/`) and eval runs under its own pinned env; `cpython-311`/`314`
+bytecode in any `__pycache__/` is from one-off interpreters and is not canonical.

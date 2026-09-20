@@ -47,6 +47,14 @@ replacements = [
      'ncpu=1 if _onnx_has_gpu() else n_cpus)'),
 ]
 
+# The helper is inserted last on application, so its presence means both rewires
+# are in place too (the file is written once, atomically, at the end). Checking it
+# first stops re-application misreporting "target not found": after the rewires
+# land, neither `torch.cuda.is_available()` argument string is left to match.
+if "def _onnx_has_gpu" in content:
+    print("Already patched:", path)
+    sys.exit(0)
+
 if all(old not in content for old, _ in replacements):
     print("WARNING: patch target not found in", path)
     sys.exit(0)

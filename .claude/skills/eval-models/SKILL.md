@@ -228,6 +228,35 @@ sets, not on this repo's adversarial negatives, so `extend` false accepts are no
 at all. Confirm any cutoff with `compare_models.py` against the holdout before
 deploying it.
 
+## Check the ledger before comparing two models
+
+Before spending an eval — and before making any "this one is better" claim — look at
+what has already been measured. Every completed run is appended to
+`output/<wake_word>/runs.jsonl` (the sweep runner `scripts/sweep.py` files each grid
+point there; a manual run files a line the same way), and
+`train-mww-applesilicon/.venv/bin/python train/ledger.py --wake-word "X"` (any python
+with PyYAML; the system `python3` works too) prints each `(target, setting)` group's
+false-accept and detection rates as mean [min–max] across repeats, grouped by corpus
+ID. If both models you are about to compare are already in the ledger, the answer is
+in the file — read it instead of re-measuring. And remember what the min–max column
+is: two runs of an *identical* config measured 77% and 67%, so the spread on a line is
+the resolution of the measurement, not noise to average away. A candidate whose mean
+lands inside the spread of an earlier config is inside the noise floor, and
+"replacing the candidate in `deploy/` requires a measured win" holds across sessions,
+not just within one.
+
+The corpus-ID column is the independent variable, read before anything else: two runs
+are comparable at all only if they share one (same corpus half of the tag). Different
+corpus ID means different audio, and a "win" between the two can only have been caused
+by the corpus, not the setting — exactly the uncontrolled variable the gates exist to
+keep out of a comparison.
+
+And never edit the file. It is append-only history: deleting or rewriting the
+"not better" result is the same failure this whole section exists to stop, just with a
+longer shelf life. A record with a null eval block means the eval did not run — it is
+not a failed measurement and not a bad result, and it is deliberately distinguishable
+from both.
+
 ## When a model is not better
 
 The pipeline is the loop, and the rule is **change ONE thing**. Two runs of an

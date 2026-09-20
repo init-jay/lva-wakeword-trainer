@@ -218,7 +218,8 @@ fi
 SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
 MODEL="output/${SAFE_NAME}/oww/${SAFE_NAME}.onnx"
 STAMP="$(date +%Y%m%d-%H%M%S)"
-LOG="training-${SAFE_NAME}-macos-${STAMP}.log"
+mkdir -p logs
+LOG="logs/training-${SAFE_NAME}-macos-${STAMP}.log"
 
 # THE CONTAINER MAY OWN THESE FILES. Both paths write data/corpus/ and output/, and
 # the trainer images run as root - train/ownership.py hands output/ back afterwards,

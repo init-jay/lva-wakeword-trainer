@@ -65,10 +65,13 @@ all of it and runs on the Mac:
 """
 
 import argparse
+import json
+import math
 import re
 import sys
 import zlib
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -104,6 +107,29 @@ def read_wav(path):
     if sr != SR:
         return None
     return data.astype(np.int16)
+
+
+def wilson_interval(k, n, z=1.959964):
+    """95% Wilson interval on a proportion k/n, as (low, high). None when n=0.
+
+    The Wilson interval is the right one here because the holdout is TINY: ryan is
+    n=6, so one clip is 16.7 points, and jen n=10, one clip is 10 points. A bare
+    rate on that n swings 16.7 points per clip, which is exactly the scale of the
+    10-point run-to-run variance this repo has measured at an identical config - so
+    without the interval a tuning loop will chase a 10-point 'win' that is one clip.
+    Wilson rather than the normal approximation because it stays sane at small n
+    and at 0/100 (the normal interval goes negative).
+    """
+    if n == 0:
+        return None
+    z2 = z * z
+    p = k / n
+    denom = 1 + z2 / n
+    centre = p + z2 / (2 * n)
+    spread = z * math.sqrt(p * (1 - p) / n + z2 / (4 * n * n))
+    # The interval is on a proportion, so it cannot leave [0, 1]; the formula can
+    # overshoot by a rounding hair (which prints as "-0%"), so clamp it back.
+    return (max(0.0, (centre - spread) / denom), min(1.0, (centre + spread) / denom))
 
 
 def speech_end(data):
@@ -220,9 +246,13 @@ def report_by_speaker(rows, spans):
         lats = [e[2] for e in entries if e[2] is not None]
         peaks = np.array([e[3] for e in entries])
         lat = f"{np.median(lats):.0f}ms" if lats else "-"
+        # n= and the Wilson CI travel with the rate (wilson_interval for why).
+        ci = wilson_interval(ok, len(entries))
+        ci_text = (f" (n={len(entries)}, 95% CI {ci[0]:.0%}-{ci[1]:.0%})"
+                   if ci else " (n=0)")
         print(f"  {speaker[:19]:<20}{len(entries):>4}{f'{ok}/{len(entries)}':>12}"
-              f"{np.median(peaks):>14.3f}{lat:>16}")
-        rates.append((ok / len(entries), speaker, ok, len(entries)))
+              f"{np.median(peaks):>14.3f}{lat:>16}  {ci_text}")
+        rates.append((ok / len(entries), speaker, ok, len(entries), ci))
 
     if len(rates) > 1:
         worst, best = min(rates), max(rates)
@@ -330,6 +360,10 @@ def main():
                              "thresholding, as the runtime does. A cutoff is only "
                              "meaningful alongside this. Default: whatever the "
                              "manifest says, so the manifest is under test too")
+    parser.add_argument("--json", dest="json_path", default=None, metavar="PATH",
+                        help="Also write every number printed here as machine-readable "
+                             "JSON to PATH (same values, for the run ledger - see "
+                             "improvement.md P0.5). Does not change the report.")
     args = parser.parse_args()
 
     # The backend picks itself by inspecting the model, so the gates can be scored on
@@ -472,7 +506,7 @@ def main():
     # that reads PASS pooled while failing one voice is not shippable to that person,
     # and the pooled row cannot show it - which is the whole reason this gate exists.
     if speaker_rates:
-        rate, speaker, ok_n, total = min(speaker_rates)
+        rate, speaker, ok_n, total, _ci = min(speaker_rates)
         checks.append((f"weakest speaker ({speaker[:14]})".ljust(32)
                        + f"{ok_n}/{total} ({rate:.0%})",
                        f">= {GATE_POSITIVE:.0%}", rate >= GATE_POSITIVE))
@@ -487,6 +521,64 @@ def main():
     for text, gate, ok in checks:
         print(f"  [{verdict(ok)}]  {text:<48}{gate}")
     print("=" * 70)
+
+    # --- machine-readable copy of the same numbers -------------------------------
+    # --json is the hook the run ledger (improvement.md P0.5) reads; the values are
+    # exactly what the report above printed, nothing recomputed a second way.
+    if args.json_path:
+        per_speaker = {}
+        for speaker, start, end in speaker_spans:
+            entries = rows[start:end]
+            ok = sum(1 for e in entries if e[1])
+            ci = wilson_interval(ok, len(entries))
+            lats = [e[2] for e in entries if e[2] is not None]
+            per_speaker[speaker] = {
+                "n": len(entries),
+                "detected": ok,
+                "rate": ok / len(entries),
+                "ci95": [round(x, 4) for x in ci] if ci else None,
+                "median_latency_ms": float(np.median(lats)) if lats else None,
+            }
+        out = {
+            "model": str(args.model),
+            "threshold": args.threshold,
+            "backend": backend.describe(),
+            "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "false_accepts_by_category": {
+                c: {
+                    "n": len(r),
+                    "fired": int((np.array([p for _, p in r]) >= args.threshold).sum()),
+                    "rate": float((np.array([p for _, p in r]) >= args.threshold).mean()),
+                    "median_peak": float(np.median([p for _, p in r])),
+                    "worst_peak": float(max(p for _, p in r)),
+                }
+                for c, r in by_category.items()
+            },
+            "adversarial": {
+                "n": adversarial_n, "fired": adversarial_fired,
+                "rate": adversarial_fired / adversarial_n if adversarial_n else None,
+            },
+            "positives": {
+                "n": len(positives), "detected": detected,
+                "rate": detected / len(positives),
+                "latency_median_ms": float(np.median(latencies)) if latencies else None,
+                "latency_p90_ms": float(np.percentile(latencies, 90)) if latencies else None,
+                "missed": [n for n, _ in misses],
+            },
+            "per_speaker": per_speaker,
+            "command_following": (
+                {"n": len(positives),
+                 "immediately_after": detected_cmd,
+                 "pause_then_command": detected_gap,
+                 "pause_ms": args.command_gap_ms}
+                if detected_cmd is not None else None
+            ),
+            "gates": [{"check": text, "gate": gate, "pass": ok} for text, gate, ok in checks],
+        }
+        path = Path(args.json_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(out, indent=2) + "\n")
+        print(f"\nJSON written to {path}")
 
 
 if __name__ == "__main__":

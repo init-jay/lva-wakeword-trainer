@@ -82,6 +82,15 @@ DEFAULT_BATCH_SIZE = 128
 DEFAULT_EVAL_STEP_INTERVAL = 500
 DEFAULT_POSITIVE_CLASS_WEIGHT = [1]
 DEFAULT_NEGATIVE_CLASS_WEIGHT = [20]
+# The per-set sampling / penalty weights, previously hardcoded inside build()'s
+# feature-set dicts and wired to nothing (see the comment there). 2.0/1.0 is the
+# positives value, 2.0/1.0 the adversarial negatives, 1.0/1.0 the ambient sets.
+DEFAULT_POSITIVE_SAMPLING_WEIGHT = 2.0
+DEFAULT_POSITIVE_PENALTY_WEIGHT = 1.0
+DEFAULT_NEGATIVE_SAMPLING_WEIGHT = 2.0
+DEFAULT_NEGATIVE_PENALTY_WEIGHT = 1.0
+DEFAULT_AMBIENT_SAMPLING_WEIGHT = 1.0
+DEFAULT_AMBIENT_PENALTY_WEIGHT = 1.0
 
 
 def clips_feature_set(directory, truth, sampling_weight, penalty_weight,
@@ -145,11 +154,34 @@ def mmap_feature_set(features_dir, truth, sampling_weight, penalty_weight,
 
 def build(wake_word, positives_dir, negatives_dir, ambient_dirs, output_dir,
           data_dir=".", training_steps=None, learning_rates=None,
-          batch_size=DEFAULT_BATCH_SIZE, negative_class_weight=None, run_tag=None):
+          batch_size=DEFAULT_BATCH_SIZE, negative_class_weight=None,
+          positive_class_weight=None, eval_step_interval=None,
+          positive_sampling_weight=DEFAULT_POSITIVE_SAMPLING_WEIGHT,
+          positive_penalty_weight=DEFAULT_POSITIVE_PENALTY_WEIGHT,
+          negative_sampling_weight=DEFAULT_NEGATIVE_SAMPLING_WEIGHT,
+          negative_penalty_weight=DEFAULT_NEGATIVE_PENALTY_WEIGHT,
+          ambient_sampling_weight=DEFAULT_AMBIENT_SAMPLING_WEIGHT,
+          ambient_penalty_weight=DEFAULT_AMBIENT_PENALTY_WEIGHT,
+          run_tag=None):
     safe = wake_word.replace(" ", "_").lower()
     # Augmentation now happens in mww/features.py, when the spectrograms are
     # written, so no augmentation settings appear in this config at all.
     del data_dir
+
+    # Callers (the CLI) pass None for "use the default" - an explicit None would
+    # otherwise override the defaults above and land in the YAML and the tag.
+    positive_sampling_weight = (positive_sampling_weight
+                                or DEFAULT_POSITIVE_SAMPLING_WEIGHT)
+    positive_penalty_weight = (positive_penalty_weight
+                               or DEFAULT_POSITIVE_PENALTY_WEIGHT)
+    negative_sampling_weight = (negative_sampling_weight
+                                or DEFAULT_NEGATIVE_SAMPLING_WEIGHT)
+    negative_penalty_weight = (negative_penalty_weight
+                               or DEFAULT_NEGATIVE_PENALTY_WEIGHT)
+    ambient_sampling_weight = (ambient_sampling_weight
+                               or DEFAULT_AMBIENT_SAMPLING_WEIGHT)
+    ambient_penalty_weight = (ambient_penalty_weight
+                              or DEFAULT_AMBIENT_PENALTY_WEIGHT)
 
     features = [
         # Positives from mww/corpus.py: synthetic voices plus real recordings,
@@ -160,18 +192,28 @@ def build(wake_word, positives_dir, negatives_dir, ambient_dirs, output_dir,
         # globbing the directory once, so N copies become N augmented variants. mWW
         # augments on every read, so copies would only bias sampling - and
         # `sampling_weight` below is the honest knob for that. See corpus/real.py.
-        mmap_feature_set(positives_dir, truth=True, sampling_weight=2.0,
-                         penalty_weight=1.0, truncation_strategy="default"),
+        mmap_feature_set(positives_dir, truth=True,
+                         sampling_weight=positive_sampling_weight,
+                         penalty_weight=positive_penalty_weight,
+                         truncation_strategy="default"),
         # This repo's ADVERSARIAL negatives - "hey serious", "hey Sienna". ~100 clips
         # against ambient sets orders of magnitude larger, so they need a sampling
-        # weight that keeps them visible. This is the per-set lever openWakeWord did
-        # not have: there, max_negative_weight applied to the whole negative class.
-        mmap_feature_set(negatives_dir, truth=False, sampling_weight=2.0,
-                         penalty_weight=1.0, truncation_strategy="default"),
+        # weight that keeps them visible. This was the per-set lever openWakeWord
+        # did not have - there, max_negative_weight applied to the whole negative
+        # class - and it was wired to nothing: hardcoded here, unreachable from
+        # any CLI. It is a build() parameter now (the six *_sampling_weight /
+        # *_penalty_weight knobs, defaulting to their old constants), so a sweep
+        # can move one set's weight without touching the others, and the values
+        # hash into the run tag's config half.
+        mmap_feature_set(negatives_dir, truth=False,
+                         sampling_weight=negative_sampling_weight,
+                         penalty_weight=negative_penalty_weight,
+                         truncation_strategy="default"),
     ]
     for d in ambient_dirs:
-        features.append(mmap_feature_set(d, truth=False, sampling_weight=1.0,
-                                         penalty_weight=1.0))
+        features.append(mmap_feature_set(d, truth=False,
+                                         sampling_weight=ambient_sampling_weight,
+                                         penalty_weight=ambient_penalty_weight))
 
     return {
         "window_step_ms": WINDOW_STEP_MS,
@@ -179,9 +221,22 @@ def build(wake_word, positives_dir, negatives_dir, ambient_dirs, output_dir,
         "batch_size": batch_size,
         "training_steps": training_steps or DEFAULT_TRAINING_STEPS,
         "learning_rates": learning_rates or DEFAULT_LEARNING_RATES,
-        "positive_class_weight": DEFAULT_POSITIVE_CLASS_WEIGHT,
-        "negative_class_weight": negative_class_weight or DEFAULT_NEGATIVE_CLASS_WEIGHT,
-        "eval_step_interval": DEFAULT_EVAL_STEP_INTERVAL,
+        "positive_class_weight": (
+            positive_class_weight or DEFAULT_POSITIVE_CLASS_WEIGHT),
+        "negative_class_weight": (
+            negative_class_weight or DEFAULT_NEGATIVE_CLASS_WEIGHT),
+        "eval_step_interval": (
+            eval_step_interval or DEFAULT_EVAL_STEP_INTERVAL),
+        # The per-set weights, TOP LEVEL as well as in the feature dicts above:
+        # the tag's config half hashes the top level (tag_input drops features -
+        # their directories are machine layout), so without the copies here a
+        # sweep moving one set's weight would share its tag with the default.
+        "positive_sampling_weight": positive_sampling_weight,
+        "positive_penalty_weight": positive_penalty_weight,
+        "negative_sampling_weight": negative_sampling_weight,
+        "negative_penalty_weight": negative_penalty_weight,
+        "ambient_sampling_weight": ambient_sampling_weight,
+        "ambient_penalty_weight": ambient_penalty_weight,
         # Upstream's two-step selection: get false accepts per hour under target
         # first, then maximise recall. The same shape as this repo's rule that
         # detection is only comparable at matched false accepts.
@@ -269,8 +324,8 @@ if __name__ == "__main__":
 #
 #     window_step_samples = stride * 16000 * window_step_ms / 1000
 #
-# so one frame is stride x window_step_ms = 60 ms here, not 20. Changing the clip
-# duration by 20 ms moves nothing; it takes 60 ms to move the length by one.
+# so one frame is stride x window_step_ms = 30 ms here, not 10. Changing the clip
+# duration by 10 ms moves nothing; it takes 30 ms to move the length by one.
 # ---------------------------------------------------------------------------
 
 PREPROCESSOR_SAMPLE_RATE = 16000

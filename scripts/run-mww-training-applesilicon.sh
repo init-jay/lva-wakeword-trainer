@@ -297,7 +297,8 @@ run() {
 }
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
-LOG="training-${SAFE_NAME}-macos-${STAMP}.log"
+mkdir -p logs
+LOG="logs/training-${SAFE_NAME}-macos-${STAMP}.log"
 
 # === 1. corpus ====================================================================
 #
@@ -314,8 +315,17 @@ CORPUS_EXTRA=()
 [[ -n "$SAMP_PER_VOICE" ]] && CORPUS_EXTRA+=(--samples-per-voice "$SAMP_PER_VOICE")
 [[ -n "$NEGATIVES_PER_VOICE" ]] && CORPUS_EXTRA+=(--negatives-per-voice "$NEGATIVES_PER_VOICE")
 if [[ "${SKIP_CORPUS:-}" == "1" ]]; then
-    echo
-    echo "=== $(date '+%H:%M:%S')  corpus (skipped)"
+    # --skip validates the corpus.json manifest against the shaping this stage
+    # would request and exits with a diff on a mismatch - SKIP_CORPUS used to be
+    # a blind reuse, and a corpus built with different depth than the one a
+    # resumed run thinks it asked for is the measurement that goes wrong
+    # silently. Same flags the build branch would use (CORPUS_EXTRA included),
+    # because those are exactly what the check has to see.
+    SKIP_CORPUS_ARGS=(--wake-word "$WAKE_WORD" --piper-url "$PIPER_URL" --piper-speakers 12 --skip)
+    [[ -n "${KOKORO_FRACTION:-}" ]] && SKIP_CORPUS_ARGS+=(--kokoro-url "$KOKORO_URL" --kokoro-fraction "$KOKORO_FRACTION")
+    run "verifying existing corpus (data/corpus/${SAFE_NAME}/mww)" \
+        "$ENV_DIR/.venv/bin/python" -m train.mww.corpus \
+            "${SKIP_CORPUS_ARGS[@]}" "${CORPUS_EXTRA[@]+"${CORPUS_EXTRA[@]}"}"
 elif [[ -n "${KOKORO_FRACTION:-}" ]]; then
     run "corpus (Piper ${PIPER_URL} + Kokoro ${KOKORO_URL}, fraction ${KOKORO_FRACTION})" \
         "$ENV_DIR/.venv/bin/python" -m train.mww.corpus \
@@ -360,11 +370,14 @@ fi
 # The tag is computed HERE, after the corpus exists and before training starts -
 # the same reason run-mww-training.sh documents: the corpus is part of the tag,
 # and model_train_eval refuses to train into an existing directory. The checksum
-# guard in train/mww/train.py still applies - it is in the code, not in the shell.TAG="$("$ENV_DIR/.venv/bin/python" -m train.provenance --wake-word "$WAKE_WORD" --tag --fallback "$STAMP")"
-DIRTY=""
-git diff --quiet 2>/dev/null || DIRTY="-dirty"
-run "run tag: $TAG"
-
+# guard in train/mww/train.py still applies - it is in the code, not in the shell.
+#
+# Computed THROUGH train.mww.train --print-tag, not through train.provenance: the
+# tag's config half (-h) is a hash of the resolved hyperparameters, which only
+# exists where the config is built. Computing it twice (here and in train.py) is
+# how the archive and the run directory would drift apart. Same arguments as the
+# real run below, so the tag is exactly the one the run will get.
+#
 # The ambient sets live under data/external/mww_ambient/ (download-external-data.sh),
 # in the same directory as the augmentation impulse/background sets the features
 # stage already used. Pass every subdirectory present: mWW's model_train_eval
@@ -375,6 +388,13 @@ if [[ -d data/external/mww_ambient ]]; then
         AMBIENT_ARGS+=("$dir")
     done < <(find data/external/mww_ambient -mindepth 1 -maxdepth 1 -type dir | sort)
 fi
+
+TAG="$("$ENV_DIR/.venv/bin/python" -m train.mww.train \
+    --wake-word "$WAKE_WORD" --print-tag \
+    --ambient "${AMBIENT_ARGS[@]+"${AMBIENT_ARGS[@]}"}" "$@" 2>&1 | tail -1)"
+DIRTY=""
+git diff --quiet 2>/dev/null || DIRTY="-dirty"
+run "run tag: $TAG"
 
 run "training"
 set +e

@@ -57,7 +57,8 @@ SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
 MODEL="output/${SAFE_NAME}/oww/${SAFE_NAME}.onnx"
 CORPUS="data/corpus/${SAFE_NAME}/oww"
 STAMP="$(date +%Y%m%d-%H%M%S)"
-LOG="training-${SAFE_NAME}-${STAMP}.log"
+mkdir -p logs
+LOG="logs/training-${SAFE_NAME}-${STAMP}.log"
 
 # Record the current model so a stale one cannot be mistaken for this run's output.
 BEFORE_SUM=""
@@ -339,9 +340,16 @@ if [[ $STATUS -ne 0 ]]; then
 fi
 
 # Name the output by the code AND the audio that produced it - see
-# train/provenance.py. Computed HERE, after training, on purpose: the synthetic
-# corpus is built by the run itself, so hashing it beforehand would name the model
-# after the previous run's audio.TAG="$(python3 -m train.provenance --wake-word "$WAKE_WORD" --tag --fallback "$STAMP")"
+# train/provenance.py. train.py files the tag itself - corpus half from the
+# manifest written this run, config half from the resolved config - so the
+# archive and the <tag>.config.json beside it are named by one number. Reading it
+# back here rather than recomputing it in the shell is what keeps the two from
+# drifting apart; the fallback only runs if the run died before filing it.
+TAG="$(cat "output/${SAFE_NAME}/oww/.last_run_tag" 2>/dev/null)"
+if [[ -z "$TAG" ]]; then
+    echo "    NOTE: no run tag filed by train.py - computing it here (corpus half only)"
+    TAG="$(python3 -m train.provenance --wake-word "$WAKE_WORD" --target oww --tag --fallback "$STAMP")"
+fi
 DIRTY=""
 git diff --quiet 2>/dev/null || DIRTY="-dirty"
 TAGGED="output/${SAFE_NAME}/oww/${SAFE_NAME}_${TAG}.onnx"

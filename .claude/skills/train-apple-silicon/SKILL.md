@@ -90,7 +90,7 @@ check exists:
   do not hand-patch — re-run `./scripts/setup-applesilicon-trainer.sh`; nothing
   in the run script ever writes to the clone.
 
-The log lands in the **repo root** as `training-<word>-macos-YYYYMMDD-HHMMSS.log`
+The log lands in the repo's **logs/** as `training-<word>-macos-YYYYMMDD-HHMMSS.log`
 (three stages to watch: corpus generation, feature extraction, training).
 
 **The real signal is the footer, not the exit code.** Whether the model was
@@ -151,8 +151,8 @@ drops it from the wheel. The run script preflights a real `describe` / voices
 round trip to each TTS server it will use before spending the run, checks the shared `data/corpus`/`output`
 directories are writable (the Docker trainers run as root), and verifies the
 clone is still at the pinned commit. Same knobs as the container path:
-`SKIP_CORPUS=1`, `SKIP_FEATURES=1`, `MAX_FAPH=…`. The log lands in the repo
-root as `training-<word>-macos-<stamp>.log`.
+`SKIP_CORPUS=1`, `SKIP_FEATURES=1`, `MAX_FAPH=…`. The log lands in the repo's
+logs/ dir as `training-<word>-macos-<stamp>.log`.
 
 
 ## What survives a run, and what doesn't
