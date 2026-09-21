@@ -13,7 +13,7 @@ PY_MWW := train-mww-applesilicon/.venv/bin/python
 
 .DEFAULT_GOAL := help
 
-.PHONY: help smoke-oww smoke-mww test fleet eval corpus-oww corpus-mww
+.PHONY: help smoke-oww smoke-mww test fleet eval eval-docker corpus-oww corpus-mww
 
 help:
 	@echo "make help           this list"
@@ -23,8 +23,11 @@ help:
 	@echo "make test           the test suite (45 tests); seconds, no data needed"
 	@echo "make fleet N=<n>    start N Piper TTS instances and print PIPER_URLS for the corpus runs;"
 	@echo "                    needs data/external (download-external-data.sh), the processes stay up until killed"
-	@echo "make eval           builds the eval Docker image; scoring NEEDS Docker on a Mac (the host path,"
-	@echo "                    improvement.md P2.4, is not built yet) plus the Kokoro engine on 8900"
+	@echo "make eval           scoring on the HOST env (the Mac default, P2.4): sets it up if"
+	@echo "                    missing, then eval/.venv/bin/python eval/src/eval_model.py --model ..."
+	@echo "                    no Docker, no TTS - scoring reads the rendered corpus (Kokoro on 8900"
+	@echo "                    is for generation only)"
+	@echo "make eval-docker    the container route - right on a CUDA box or an eval-only machine"
 	@echo "make corpus-oww     a FULL oww run: the oww corpus is generated inside the trainer, so there is"
 	@echo "                    no corpus-only step; ~35-90 min on a Mac (TTS dominates), needs Kokoro on 8900"
 	@echo "make corpus-mww     the standalone mww corpus stage; ~5-10 min of TTS (faster with a fleet),"
@@ -55,12 +58,26 @@ fleet:
 	@test -n "$(N)" || { echo "usage: make fleet N=<number of Piper instances>"; exit 1; }
 	./scripts/start-tts-fleet.sh $(N)
 
-# The eval-models skill's path is the Docker image; there is no host invocation
-# yet (P2.4), so this builds it and points at the scoring commands.
+# The Mac default (P2.4): the host uv env in eval/, no Docker and no TTS -
+# scoring reads the already-rendered negatives; only corpus generation speaks to
+# Kokoro. The setup script runs only when the venv is missing; it is idempotent.
+# The model directories are keyed hey seeree -> hey_seeree; $(subst  ,_,...) cannot
+# do that - Make trims the leading space out of subst's first argument - so the
+# conversion runs in shell.
 eval:
-	@echo "eval scoring needs the Docker image on a Mac (no host path yet - P2.4)."
+	@test -d eval/.venv || ./scripts/setup-eval-host.sh
+	@WAKE_DIR=$$(echo "$(WAKE)" | tr ' ' '_') ; \
+	echo "Score:   eval/.venv/bin/python eval/src/eval_model.py --model output/$$WAKE_DIR/oww/<model>.onnx"
+	@echo "Compare: eval/.venv/bin/python eval/src/compare_models.py --models <new> <previous-best>"
+
+# The container route: the right one on a CUDA box or an eval-only machine, and
+# on a Mac the alternative to the host env. It pins the same deployment-runtime
+# wheels as eval/pyproject.toml (they must stay equal), so the numbers check
+# against each other.
+eval-docker:
 	cd eval && docker compose build
-	@echo "Score: cd eval && docker compose run --rm eval python -m eval.eval_model --model output/$(WAKE)/oww/<model>.onnx"
+	@WAKE_DIR=$$(echo "$(WAKE)" | tr ' ' '_') ; \
+	echo "Score: cd eval && docker compose run --rm eval python -m eval.eval_model --model output/$$WAKE_DIR/oww/<model>.onnx"
 
 # oww has no standalone corpus module: generation is the first stage of
 # train/oww/train.py, so "the real corpus stage" here is a full run (TTS

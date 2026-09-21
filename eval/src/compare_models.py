@@ -46,6 +46,10 @@ Usage, from the repo root:
         output/hey_seeree/oww/hey_seeree_705c23b.onnx \\
         output/hey_seeree/mww/hey_seeree_705c23b.json
 
+    # the same, on the host env (scripts/setup-eval-host.sh) - plain-path form,
+    # from the repo root: the `-m eval.X` module form is the image's mount
+    eval/.venv/bin/python eval/src/compare_models.py --models M M2
+
 POSITIVES MUST BE RECORDINGS THE MODEL HAS NOT TRAINED ON, which is why the defaults
 come from `eval/src/paths.py` rather than being spelled out here: the trainer globs
 data/recordings/samples/ recursively, so scoring against that tree reports training
@@ -53,8 +57,9 @@ accuracy - it overstated detection by ~10 points during this work. Passing a
 directory inside samples/ anyway is warned about, not blocked.
 
 Needs onnxruntime and an importable openwakeword for .onnx, plus a TFLite runtime
-and pymicro-features for microWakeWord. The `eval` compose service carries all of it
-and builds native on the Mac.
+and pymicro-features for microWakeWord. The `eval` compose service carries all of
+it and builds native on the Mac; the host env (eval/pyproject.toml) carries the
+same pins.
 """
 
 import argparse
@@ -69,7 +74,14 @@ import numpy as np
 
 # Reuse the scoring path from eval_model.py so both tools agree exactly: same
 # streaming, same noise-floor padding, same per-clip RNG seed.
-from eval import backends, eval_model as ev, paths
+# Runnable as `python eval/src/compare_models.py` as well as `python -m
+# eval.compare_models` - the plain-path form is the host invocation
+# (scripts/setup-eval-host.sh). The try/except is the same guard the other
+# scripts here carry.
+try:
+    from eval import backends, eval_model as ev, paths
+except ImportError:
+    import backends, eval_model as ev, paths
 
 ADVERSARIAL_PREFIXES = ("extend_", "hey_other_")
 FA_POINTS = (2, 4, 6, 8, 10, 12)

@@ -53,7 +53,8 @@ builds its own command-following case by concatenating a command onto a plain cl
 so a real run-on recording among the positives would be scored as the phrase alone.
 
 Usage, from the repo root:
-    python -m eval.eval_model --model output/hey_seeree/oww/hey_seeree_705c23b.onnx
+    python -m eval.eval_model --model output/hey_seeree/oww/hey_seeree_705c23b.onnx   # the eval image
+    eval/.venv/bin/python eval/src/eval_model.py --model output/hey_seeree/oww/hey_seeree_705c23b.onnx   # the host env
     python -m eval.eval_model --model M --positives data/recordings/holdout/speaker1
     python -m eval.eval_model --model M --threshold 0.7 --verbose
 
@@ -77,7 +78,15 @@ from pathlib import Path
 import numpy as np
 import scipy.io.wavfile
 
-from eval import backends, paths
+# Runnable as `python eval/src/eval_model.py` as well as `python -m
+# eval.eval_model`. The module form is the eval image's: src/ is mounted as the
+# `eval` package, so the package is importable. The plain-path form - the host
+# invocation, scripts/setup-eval-host.sh - only has this directory on
+# sys.path, so try both. The same guard the other scripts here carry.
+try:
+    from eval import backends, paths
+except ImportError:
+    import backends, paths
 
 SR = 16000
 NOISE_FLOOR = 30.0          # std dev in 16-bit counts; stands in for room tone

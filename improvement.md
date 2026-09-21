@@ -352,7 +352,30 @@ so the question is closed properly rather than by assumption.
 sweep point, and SPEED.md already explains that oww is pure-GEMM and Accelerate already
 wins that half.
 
-### P2.4 Finish the Mac story: a host eval environment
+### P2.4 Finish the Mac story: a host eval environment — DONE 2026-09-22
+
+Implemented: `eval/pyproject.toml` (+ uv.lock, .dockerignore) - the fifth host uv env
+(`eval/.venv`, Python 3.11, the image's base) with the Dockerfile's exact pins: it
+resolved to pymicro-wakeword 2.5.0, pyopen-wakeword 1.1.0, numpy 2.4.6, scipy 1.17.1,
+PyYAML 6.0.3, onnxruntime 1.30.0 + tqdm/requests/scikit-learn (the .onnx path's
+declared-but-undeclared imports). `scripts/setup-eval-host.sh` - idempotent
+(verified: second run changes no package list and no .pth) - reuses the
+openwakeword/ clone `uv pip --no-deps -e` like the trainers, writes a path .pth and
+asserts `openwakeword.__file__` against the PEP 660 shadowing (verified live against
+train-applesilicon/.venv, which has exactly that bug: `__file__` is None). The host
+invocation is the PLAIN-PATH form from the repo root (`eval/.venv/bin/python
+eval/src/eval_model.py`) - `python -m eval.src.X` fails, and so does `python -m eval.X`
+on a host checkout, because the `eval` package only exists inside the image's mount;
+eval_model.py/compare_models.py gained the try/except import guard the other four
+scripts already carry, and both forms were proven (module form via a simulated mount).
+Verified end-to-end with no Docker: hey_seeree.onnx (md5
+fdc78d06c42028d7100c596074f3ffaf) 84% detection, weakest speaker ryan 33%; newest mww
+run hey_seeree_ecbf160-dirty-da01854d 47%, weakest jen 10%; compare_models on two mww
+runs (matched-FA table, per-speaker, 1000-resample bootstrap CI, "not a result"
+verdict); --json writes. Makefile `eval` is the host path, `eval-docker` keeps the
+container route; SKILL.md's invocation section is host-first. Left: the mww run
+script's closing "Evaluate (Docker)" pointer (run scripts were out of scope for this
+change).
 
 Eval is the last step that still requires Docker on a Mac
 (`run-mww-training-applesilicon.sh` ends by telling you to `cd eval && docker compose
@@ -523,9 +546,15 @@ config half.
   editable install shadowed by a namespace package from the repo root (now
   a path .pth + __file__ asserts in setup/run), and get_default taking the
   dest, not the option string, on recent 3.12.
+- P2.4 host eval env: DONE 2026-09-22 - eval/pyproject.toml + uv.lock +
+  .dockerignore, scripts/setup-eval-host.sh (idempotent, reuses the
+  openwakeword/ clone), plain-path import guards in eval_model.py / compare_models.py,
+  Makefile eval -> host (eval-docker keeps the image), SKILL.md host-first.
+  Proven on this Mac with no Docker: oww + newest mww scorecards, matched-FAR
+  comparison, --json, both invocation forms (full note at P2.4).
 
 **Still open:**
-- P2.4 (host eval env), P2.2 (parallel trim), P2.3 (CoreML probe), P1.3
+- P2.2 (parallel trim), P2.3 (CoreML probe), P1.3
   re-measurement of the weight lever, P1.2 (held-out-voice set), the Docker
   image rebuild (new patches only live in the host route until then).
 - P0.1 bar test (two same-seed runs → byte-identical .onnx) — the gate before any sweep.
