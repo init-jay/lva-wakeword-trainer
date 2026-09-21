@@ -13,6 +13,15 @@ tuned phrase texts and speed grid. Two corpora built by one set of rules.
         --piper-url tcp://127.0.0.1:8898 \
         --kokoro-url tcp://127.0.0.1:8900 --kokoro-fraction 0.3
 
+A Piper FLEET is one comma-separated --piper-url
+(tcp://127.0.0.1:8898,tcp://127.0.0.1:8899,... - the list scripts/
+start-tts-fleet.sh prints): the corpus shards it BY VOICE, each model pinned to
+one instance for the whole run, so an instance loads each of its models once
+rather than reloading on most requests (corpus/piper.py, PiperFleet). One
+instance is one serial lane - the lane is the engine's lock, not the client's -
+so throughput scales with instances, and this is the fast path for the corpus
+stage (improvement.md P2.1).
+
 DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
 
 1. REAL RECORDINGS ARE COPIED ONCE, not ten times. openWakeWord's --real-copies 10
@@ -120,7 +129,11 @@ def main():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--wake-word", default="hey seeree")
     p.add_argument("--piper-url", default=os.environ.get("PIPER_URL", "tcp://127.0.0.1:8898"),
-                   help="Piper protocol server, tcp://host:port (default: %%(default)s)")
+                   help="Piper protocol server(s), tcp:// URLs, comma-separated "
+                        "to run a fleet (sharded by VOICE - every model pinned "
+                        "to one instance for the run, so an instance never "
+                        "reloads a model per request; scripts/start-tts-fleet.sh "
+                        "N launches N on this Mac) (default: %%(default)s)")
     p.add_argument("--piper-speakers", type=int, default=12,
                    help="speakers sampled per multi-speaker voice (default: "
                         "%(default)s). libritts_r alone carries 904.")

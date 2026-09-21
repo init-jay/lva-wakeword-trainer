@@ -295,7 +295,18 @@ Order matters: with P0.3 in place the corpus stage is *out* of the iteration loo
 these mostly buy faster **cold** runs and faster corpus re-rolls, not faster sweep
 points. Do them after P0/P1.
 
-### P2.1 Shard Piper across processes — the biggest single win left
+### P2.1 Shard Piper across processes — the biggest single win left — DONE 2026-09-21
+
+Implemented: `PiperFleet` in train/corpus/piper.py (probe requires every instance to serve an identical
+voices catalog; `shard()` pins each model - all its speakers - to one instance,
+least-loaded by job count, so no instance reloads a model mid-run; per-stage
+`piper/jobs.json` records which instance rendered what). Comma-separated
+`--piper-url` on both trainers; `scripts/start-tts-fleet.sh N` (idempotent,
+pidfile-managed, comma-joined URL on stdout for `$(...)` capture); `PIPER_URLS`
+in both Apple-Silicon run scripts. Verified with a live 2-instance fleet:
+every model pinned to exactly one instance, 40/40 clips, single-URL backward
+compat intact. NOT yet measured: real N-way throughput (the N x 21.66 clips/s
+hypothesis from fact 10) - the next real corpus stage lands it.
 
 Fact 10. `generate_piper_samples` is a serial loop; the engine serialises by design
 (one model resident, one lock); the docstring already specifies the fix.

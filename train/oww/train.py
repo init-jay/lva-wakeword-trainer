@@ -902,9 +902,15 @@ def main():
                              "alignment regression waiting to happen.")
     parser.add_argument("--piper-url",
                         default=os.environ.get("PIPER_URL", "tcp://127.0.0.1:8898"),
-                        help="Piper protocol server, tcp://host:port - the port a "
-                             "Piper engine publishes (in-process on a Mac, wrapped "
-                             "Wyoming in Docker) (default: %(default)s)")
+                        help="Piper protocol server(s), tcp:// URLs, "
+                             "comma-separated to run a fleet (scripts/"
+                             "start-tts-fleet.sh N launches N on this Mac): "
+                             "the corpus is sharded BY VOICE, each model pinned "
+                             "to one instance for the whole run, because an "
+                             "instance holds one model resident and reloads on "
+                             "a switch - round-robin would buy nothing "
+                             "(corpus/piper.py, PiperFleet) "
+                             "(default: %%(default)s)")
     parser.add_argument("--piper-speakers", type=int, default=12,
                         help="Speakers to sample per multi-speaker Piper voice, "
                              "evenly spaced (default: %(default)s). "

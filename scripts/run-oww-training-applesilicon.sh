@@ -31,6 +31,17 @@
 # engine above (PIPER_URL defaults to tcp://127.0.0.1:8898). For the measurement
 # a full run is the wrong thing to include anyway: TTS is the same work either
 # way and would bury the difference under 49 minutes of noise.
+#
+# PIPER FLEET (the fast path for the corpus stage): one Piper instance is one
+# serial lane - the engine holds one model resident and takes every call under
+# one lock, so client threads queue instead of run (21.66 clips/s measured for
+# the single instance in tools/bench_tts.py, improvement.md P2.1). PIPER_URLS
+# takes the comma-joined list scripts/start-tts-fleet.sh N prints, and the
+# corpus shards the fleet BY VOICE - each model pinned to one instance for the
+# whole run (corpus/piper.py, PiperFleet):
+#
+#     PIPER_URLS="$(./scripts/start-tts-fleet.sh 4)" \
+#         ./scripts/run-oww-training-applesilicon.sh "hey seeree" --piper-fraction 0.3
 
 set -euo pipefail
 
@@ -121,8 +132,10 @@ unset KOKORO_EXTERNAL
 #
 # On a Mac the Piper engine is in-process (tts-service/engines/piper: piper-tts
 # 1.7.0 loaded directly, no Wyoming process at all) on protocol port 8898.
-# Bare host:port input is coerced to tcp:// like KOKORO_URL above.
-if [[ -n "${PIPER_URL:-}" && "${PIPER_URL}" != tcp://* ]]; then
+# Bare host:port input is coerced to tcp:// like KOKORO_URL above. A
+# comma-separated value is a fleet (start-tts-fleet.sh) and is normalised
+# element by element below, where the probe lives.
+if [[ -n "${PIPER_URL:-}" && "${PIPER_URL}" != tcp://* && "${PIPER_URL}" != *,* ]]; then
     PIPER_URL="tcp://${PIPER_URL}"
     export PIPER_URL
     echo "=== note: rewrote PIPER_URL to tcp:// form: $PIPER_URL"
@@ -167,35 +180,55 @@ if [[ -n "$PIPER_FRACTION" ]]; then
     done
 fi
 if [[ -n "$PIPER_FRACTION" ]]; then
+    # Precedence: --piper-url (the command line, the strongest statement),
+    # then PIPER_URLS (a comma list - an explicit fleet), then PIPER_URL,
+    # then the default engine port. Each element of a list is coerced to
+    # tcp:// individually: "a,b" must become tcp://a,tcp://b, not tcp://a,b.
     if [[ -n "$PIPER_URL_ARG" ]]; then
         PIPER_URL="${PIPER_URL_ARG}"
+    elif [[ -n "${PIPER_URLS:-}" ]]; then
+        PIPER_URL="${PIPER_URLS}"
     elif [[ -z "${PIPER_URL:-}" ]]; then
         PIPER_URL="tcp://127.0.0.1:8898"
     fi
-    [[ "$PIPER_URL" != tcp://* ]] && PIPER_URL="tcp://${PIPER_URL}"
+    IFS=',' read -r -a PURLS <<< "$PIPER_URL"
+    PIPER_URL=""
+    for part in "${PURLS[@]}"; do
+        part="${part// /}"
+        [[ -z "$part" ]] && continue
+        [[ "$part" != tcp://* ]] && part="tcp://$part"
+        PIPER_URL="${PIPER_URL:+$PIPER_URL,}$part"
+    done
+    [[ -n "$PIPER_URL" ]] || { echo "ERROR: PIPER_URL / PIPER_URLS resolved to nothing." >&2; exit 2; }
     export PIPER_URL
     # A voices round trip over the protocol, not a TCP connect: a bound port
     # owned by a dead or non-protocol listener passes a connect check and
     # still fails the corpus stage. This asks the question the corpus stage
-    # asks.
+    # asks - against EVERY URL of a fleet, since the corpus sends each voice
+    # to a different one.
     if ! "$ENV_DIR/.venv/bin/python" - "$PIPER_URL" <<'PYEOF'
 import sys
 sys.path.insert(0, ".")
 import train.corpus  # noqa: F401  (sys.path bootstrap for tts_protocol)
 from tts_protocol.client import TtsClient
-url = sys.argv[1]
-try:
-    pairs = TtsClient(url).voices(languages=["en_US", "en_GB"], max_speakers=0)
-except Exception as e:
-    print(f"  Piper unreachable: {e}", file=sys.stderr)
-    sys.exit(1)
-print(f"  Piper probe OK: {len(pairs)} (voice, speaker) pairs at {url}")
+urls = [u.strip() for u in sys.argv[1].split(",") if u.strip()]
+bad = []
+for url in urls:
+    try:
+        pairs = TtsClient(url).voices(languages=["en_US", "en_GB"], max_speakers=0)
+    except Exception as e:
+        print(f"  Piper unreachable at {url}: {e}", file=sys.stderr)
+        bad.append(url)
+        continue
+    print(f"  Piper probe OK: {len(pairs)} (voice, speaker) pairs at {url}")
+sys.exit(1 if bad else 0)
 PYEOF
     then
         echo "  No reachable Piper at $PIPER_URL - the corpus stage would fail at its" >&2
         echo "  first phrase-alone render, not now. Start the engine in another" >&2
         echo "  terminal:  uv run --project tts-service/engines/piper python -m piper_engine --port 8898"
         echo "  (it uses the voices under data/external/piper) or point PIPER_URL / --piper-url at an existing one." >&2
+        echo "  A fleet:  PIPER_URLS=\"\$(./scripts/start-tts-fleet.sh 4)\"" >&2
         exit 1
     fi
 fi

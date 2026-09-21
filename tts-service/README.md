@@ -99,6 +99,21 @@ Three reasons, and each one is load-bearing:
      replaceable without touching the others, and the probes in the run
      scripts ask each engine the question its stage asks.
 
+**Piper scales horizontally; Kokoro on a Mac mostly does not.** A Piper
+instance holds one model resident and takes every call under one lock, so one
+instance is one serial lane no matter how many client threads point at it -
+throughput scales with PROCESSES. `scripts/start-tts-fleet.sh N` starts N of
+them on 8898..8897+N-1 (all sharing `data/external/piper/voices`, all of them
+probed with a voices round trip), and the run scripts take the comma-joined
+list it prints as `PIPER_URLS`. The corpus layer (`train/corpus/piper.py`,
+`PiperFleet`) shards the fleet BY VOICE - each model, all of its speakers,
+pinned to one instance for the whole run - because round-robin would make
+every instance reload a model on most of its requests, and a reload (0.6 s)
+costs more than the synthesis it delays. Kokoro takes the same comma-list
+form on the client (round-robin, `KokoroPool`) but is a much weaker candidate
+on a Mac: MLX contends on one GPU, so measure before adding instances
+(improvement.md, P2.1).
+
 The engines' failure conventions survive the wire unchanged: Kokoro returns a
 null clip on a transient render miss (the generator retries that clip alone);
 Piper raises, because its caller reports *which* voice failed.
