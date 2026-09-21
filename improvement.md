@@ -325,12 +325,46 @@ Fact 10. `generate_piper_samples` is a serial loop; the engine serialises by des
   one GPU, so expect 2 instances to help and more to not. Measure, don't assume — and
   note SPEED.md's ±30% machine-load rule while doing it.
 
-### P2.2 Parallelise the two serial CPU passes over the corpus
+### P2.2 Parallelise the two serial CPU passes over the corpus — CLOSED 2026-09-22, negative result: neither pass is worth it
+
+Measured 2026-09-22 before deciding, per the item's own instruction. Box was under a
+background training sweep the whole time (load average ~11 on 10 cores), so all
+absolute numbers are inflated; serial runs were taken back-to-back on FRESH copies of
+the same 2,000-clip subset (500 per oww subdirectory, first 500 in sorted order,
+padded with 300 ms of trailing silence to recreate the pre-trim state — the frozen
+corpus is already trimmed in place, so re-trimming it would skip nearly all writes
+and flatter the number). Numbers, `train-applesilicon/.venv/bin/python`:
+
+- `trim_directory` serial: 0.33 s and 0.35 s wall for 2,000 clips, every one trimmed
+  and rewritten — **0.17-0.18 ms/clip** (clips are short: 0.4-2.5 s, 16 kHz mono,
+  so the RMS pass is trivial). Extrapolated over the full 22,144-clip oww corpus:
+  **~4 s** (0.06 min). That settles what the 2026-09-09 log left open: its 17m45s
+  "corpus+trim" was corpus generation, not trim. Caveat: measured on the host Mac;
+  a slow Docker/CPU box could be several times worse, but the per-clip work is
+  read + tiny RMS + write on short files, and even 10x is under a minute.
+- `add_child_range_copies` serial: 40 x 0.5 s runon clips, fraction=1.0 (every clip
+  through read + resample_poly + time_stretch + write): 0.09 s wall, **2.2 ms/clip**;
+  one 2.0 s synthetic clip (Piper-scale length) averaged **6.3 ms/clip** over 10 runs
+  (min 5.4, max 12.7 — the spread is the sweep's load). The frozen corpus's synthetic
+  positives are 2,904 runon clips, so at the default 0.5 fraction VTLP is ~1,452
+  clips, **~3 s** (pathological all-22,144-at-2 s would be ~70 s, still under the
+  ~2 min bar, and that composition does not exist).
+
+Both serial costs at full size are single-digit seconds, far under the "worth
+attacking (>~2 min at full size)" bar, and the per-clip work is dominated by
+opening and rewriting a ~40 KB file, which more threads buy little of. **No code
+change** — `trim_directory` and `add_child_range_copies` stay serial. A
+ProcessPoolExecutor version would add spawn/pickling machinery to the hottest
+shared module to save ~4 s of a 14-35 minute run; the byte-identity verification
+that would be required for it therefore has no implementation to verify.
 
 `trim_directory` (fact 11) and `add_child_range_copies` are per-clip, independent, and
 run over ~14k files on a 10-core machine. A `ProcessPoolExecutor` is mechanical. Worth
 a stopwatch first — the 2026-09-09 log shows corpus+trim at 17m45s without separating
 them, so nobody knows what trim actually costs. Measure, then decide.
+
+**Decision (2026-09-22): the stopwatch says no.** Trim is ~4 s at full size and VTLP
+~3 s (numbers above); the 17m45s figure was corpus generation. Closed, no change.
 
 ### P2.3 Measure CoreML for the oww feature stage
 
@@ -552,9 +586,13 @@ config half.
   Makefile eval -> host (eval-docker keeps the image), SKILL.md host-first.
   Proven on this Mac with no Docker: oww + newest mww scorecards, matched-FAR
   comparison, --json, both invocation forms (full note at P2.4).
+- P2.2 parallel trim: CLOSED 2026-09-22, negative result - measured first, per the
+  item: trim_directory 0.17-0.18 ms/clip (2,000-clip subset, load ~11 on 10 cores),
+  ~4 s at full 22,144; VTLP 2.2 ms/0.5 s clip, 6.3 ms/2 s clip, ~3 s over the actual
+  synthetic set. Both far under the ~2 min bar - no code change (full note at P2.2).
 
 **Still open:**
-- P2.2 (parallel trim), P2.3 (CoreML probe), P1.3
+- P2.3 (CoreML probe), P1.3
   re-measurement of the weight lever, P1.2 (held-out-voice set), the Docker
   image rebuild (new patches only live in the host route until then).
 - P0.1 bar test (two same-seed runs → byte-identical .onnx) — the gate before any sweep.
