@@ -483,7 +483,9 @@ config half.
   byte-identical .onnx (md5 fdc78d06c42028d7100c596074f3ffaf, tag
   5b09148-dirty-cf9c065b-h8b4b5fa); augmentation determinism separately probed
   (same-seed augment_clips batches byte-identical). Run C (independent
-  `--rebuild-features`) was launched to close the last link. Two real bugs were
+  `--rebuild-features`) **also passed ~19:45**: rebuilt .npy identical and .onnx
+  byte-identical - all three links (augment, features, train) are deterministic at a
+  fixed seed. Two real bugs were
   found and fixed the expensive way, both recorded at the site:
   (a) the first seed-augment version passed `seed=` to `augment_clips`, which takes
   no such parameter - fixed + self-heal pass in the patch; (b) `convert_to_tflite`
