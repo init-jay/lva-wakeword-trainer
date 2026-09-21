@@ -115,9 +115,12 @@ libc++abi: terminating due to uncaught exception of type
 
 That is a C++ thread-state failure after a long torch/OpenMP run, not a model
 problem; do not try to fix it inside the trainer venv. The `.onnx` is already
-written at this point. Convert in the Docker image that carries the full
-tensorflow + onnx2tf stack (multi-arch, native on Apple Silicon —
-`docker compose build oww-trainer` first if the image is absent):
+written at this point. Since 2026-09-21 this repo's wrapper runs the converter
+in a SUBPROCESS (`train/oww/train.py: convert_to_tflite`), so the SIGABRT dies
+with the child and the run still exits 0 with a WARNING — but the converter
+still cannot succeed in this venv (the onnx2tf stack aborts even on a cold
+import), so the .tflite still comes from Docker (multi-arch, native on Apple
+Silicon — `docker compose build oww-trainer` first if the image is absent):
 
 ```bash
 docker run --rm -v "$PWD:/work" -w /work lva-wakeword-trainer-oww-trainer:latest \

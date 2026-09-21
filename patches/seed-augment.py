@@ -8,13 +8,18 @@ randomization is on. This repo has already measured 10 points of run-to-run vari
 at an IDENTICAL config (SPEED.md, CLAUDE.md) - until this patch lands, a sweep point
 measures the seed, not the hyperparameter.
 
-The patch does two things, both keyed on config["seed"] (absent or 0 = untouched, so
-a config written by unpatched code behaves exactly as before):
-
-  1. right after the training config is loaded: seed random / numpy / torch from it;
-  2. at every augment_clips call: pass seed=... - augment_clips already TAKES a seed
-     (openwakeword/data.py) and seeds its own draws with it, and this repo never
-     passed one, so the four feature-computation draws stayed unseeded.
+The patch does ONE thing, keyed on config["seed"] (absent or 0 = untouched, so a
+config written by unpatched code behaves exactly as before): right after the
+training config is loaded, seed random / numpy / torch from it. That is all the
+augmentation pipeline needs: augment_clips (openwakeword/data.py) takes no seed
+parameter and draws from the GLOBAL RNGs only - Python `random` for the RIR /
+background choices, `np.random` for gains and jitter, torch for torch_audiomentations
+- so a global seed placed before the first call makes the four augment_clips
+generators deterministic in sequence. (The earlier version of this patch also
+appended `seed=config.get("seed", 0)` to the four call sites on the false premise
+that augment_clips accepts one; it does not - that is what the heal pass below
+removes. Caught the expensive way: a real run died in the augmentation stage with
+TypeError: augment_clips() got an unexpected keyword argument 'seed'.)
 
 The TTS engines are NOT seedable (Piper's VITS samples noise per call, Kokoro
 exposes nothing), so a same-seed run still renders different audio - which is why
@@ -27,12 +32,24 @@ path = sys.argv[1]
 with open(path) as f:
     content = f.read()
 
-SEED_CALL = 'seed=config.get("seed", 0)'
-if SEED_CALL in content:
-    print(f"Already patched: {path}")
+SENTINEL = "# PATCHED: seed every RNG from the config"
+BAD_KWARG = 'RIR_paths=rir_paths, seed=config.get("seed", 0))'
+
+if SENTINEL in content:
+    if BAD_KWARG not in content:
+        print(f"Already patched: {path}")
+        sys.exit(0)
+    # Heal the earlier version: the seed= keyword argument is not a parameter of
+    # augment_clips (data.py) and crashes the augmentation stage. The global RNG
+    # seed above the call sites makes the kwarg redundant anyway.
+    n = content.count(BAD_KWARG)
+    content = content.replace(BAD_KWARG, "RIR_paths=rir_paths)")
+    with open(path, 'w') as f:
+        f.write(content)
+    print(f"Repaired: {path} (removed {n} stray seed= kwargs from augment_clips call sites)")
     sys.exit(0)
 
-# 1. Seed the process RNGs once, right after the config is loaded. The load line is
+# Seed the process RNGs once, right after the config is loaded. The load line is
 # the anchor: it runs on both the --augment_clips and the --train_model paths, so
 # one insertion covers both subprocess invocations this repo makes.
 anchor = "    config = yaml.load(open(args.training_config, 'r').read(), yaml.Loader)"
@@ -53,14 +70,11 @@ replacement = (
 )
 content = content.replace(anchor, replacement, 1)
 
-# 2. augment_clips takes the seed (data.py:313); pass it at all four call sites.
-n = content.count("RIR_paths=rir_paths)")
-if n != 4:
-    print(f"WARNING: expected 4 augment_clips call sites, found {n} in {path}")
-    sys.exit(1)
-content = content.replace("RIR_paths=rir_paths)", f"RIR_paths=rir_paths, {SEED_CALL})")
+# Defensive: if a stale copy of the call-site kwarg is present, remove it.
+if BAD_KWARG in content:
+    content = content.replace(BAD_KWARG, "RIR_paths=rir_paths)")
 
 with open(path, 'w') as f:
     f.write(content)
 
-print(f"Patched: {path} (RNGs seeded from config['seed'], {n} augment_clips call sites)")
+print(f"Patched: {path} (RNGs seeded from config['seed'])")

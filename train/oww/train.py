@@ -324,11 +324,24 @@ def convert_to_tflite(model_path: Path):
     tflite_path = model_path.with_suffix(".tflite")
     print(f"Converting to tflite: {tflite_path.name}")
     try:
-        # Imported here, not at module scope: it pulls in tensorflow, which costs
-        # seconds and is needed by nothing else in this file.
-        from train.oww.onnx2tflite import convert
-        diff = convert(model_path, tflite_path)
-        print(f"  verified against the source ONNX, max diff {diff:.2e}")
+        # A SUBPROCESS, not an in-process import: the converter pulls in
+        # tensorflow, and loading it into this process after a long torch/OpenMP
+        # run aborts the whole process on macOS arm64 (measured twice: 2026-09-07
+        # 12:43 run, and the 2026-09-21 bar-test run A - "mutex lock failed" SIGABRT,
+        # which a try/except cannot catch). In a child the abort dies with the
+        # child; the .onnx is already what this run produced.
+        r = subprocess.run(
+            [sys.executable, "-m", "train.oww.onnx2tflite", str(model_path),
+             "-o", str(tflite_path)],
+            capture_output=True, text=True, cwd=str(Path(__file__).resolve().parents[2]))
+        if r.returncode != 0:
+            raise RuntimeError(
+                f"converter exited {r.returncode}: "
+                + (r.stderr.strip().splitlines() or ["no output"])[-1])
+        for line in reversed(r.stdout.strip().splitlines()):
+            if "max diff" in line:
+                print(f"  verified against the source ONNX, {line.split('max diff')[-1].strip()}")
+                break
         return tflite_path
     except Exception as exc:                                         # noqa: BLE001
         print(f"  WARNING: tflite conversion failed - {type(exc).__name__}: {exc}")

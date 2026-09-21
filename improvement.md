@@ -426,3 +426,76 @@ above ~327,000 overflows to negative validation steps with no error. If a sweep 
 reaches for very long runs, patch it to `int64` first. (SPEED.md's run-11 note already
 found 100k steps to be worse at matched false accepts, so this is a trap rather than a
 recommendation.)
+
+---
+
+## Status — 2026-09-20, committed as `5b09148`
+
+**P0: implemented.** What exists and how it hangs together:
+- **Seed (P0.1):** `--seed` on `train/oww/train.py`, `train/mww/{corpus,features,train}.py`
+  (default 0 = unseeded, said in the run header). oww subprocess seeded via
+  `patches/seed-augment.py` (global RNGs only - `augment_clips` in upstream data.py
+  takes NO seed parameter and draws from the global random/np/torch, so one global
+  seed before the first call covers it; the earlier kwarg-passing version of the
+  patch crashed the first real run in the augmentation stage and was fixed
+  2026-09-21, with a self-heal pass); mww TF subprocess via `TF_SET_RANDOM_SEED`;
+  `PYTHONHASHSEED` pinned in the oww subprocesses. Seed is in the
+  tag (config half). TTS engines remain unseeded — the corpus is frozen, not reproduced.
+- **Tag (P0.2):** `provenance.run_tag(wake_word, target, config, fallback)` →
+  `<code>[-dirty]-c<corpus7>[-h<config7>]`; legacy `-d` format kept for target=None.
+  Corpus half is manifest-aware (hash of `corpus.json` bytes, else scoped tree digest;
+  13.9 s → 1.6 s). mww tags come from `train.mww.train --print-tag` (Apple Silicon
+  script); the container script uses `provenance --target mww` (no config half — manual
+  collisions still fail loudly). oww files `.last_run_tag` + `<tag>.config.json` beside
+  the model; run-oww-training.sh reads the filed tag.
+- **Frozen corpus (P0.3):** `train/corpus/manifest.py` writes `corpus.json` after each
+  corpus stage (engines, voices, per-bucket counts, every shaping flag, seed, wall
+  time, content digest). oww: `--corpus auto|reuse|rebuild` (auto reuses on manifest
+  match); mww: `--skip`. Both run scripts' SKIP_CORPUS paths verify the manifest and
+  exit with a diff on mismatch.
+- **Caching (P0.4):** oww `features.json` sidecar keys the .npy cache on
+  (corpus digest, rounds, seed); mismatch → recompute loudly; `--rebuild-features`
+  forces it; `--skip-corpus` help corrected. `patches/honour-augmentation-rounds.py`
+  made idempotent (collapses N factors → 1) and the working clone's 3× state healed;
+  the other six patches sentinel-audited.
+- **Sweep + ledger (P0.5):** `scripts/sweep.py` (YAML grid × repeats, deterministic
+  seeds `base+1000·point+repeat`, frozen corpus, resumable, `--dry-run`), `train/ledger.py`
+  (append-only `output/<wake>/runs.jsonl`, duplicate-tag refusal, mean[min–max]
+  summarise, `python -m train.ledger`). `eval/src/{eval_model,compare_models}.py --json`.
+  eval-models skill reads the ledger first.
+
+**P1 (partial):** per-speaker n= + Wilson CIs and matched-FA bootstrap CIs with a
+NOT DISTINGUISHABLE gate (verified on two real models). All sweep knobs reachable:
+oww `--lr` (`patches/configurable-lr.py`), `--batch-n-per-class`,
+`--target-fp-per-hour/-accuracy/-recall`, `--n-samples-val`, `--augmentation-batch-size`,
+repeatable `--set k=v`; mww `--learning-rates`, `--positive/negative-class-weight`,
+`--eval-step-interval`, six per-set sampling/penalty weights, repeatable
+`--model-flag k=v` (merged before the quantization pre-check). All hash into the tag's
+config half.
+
+**P3:** `tests/` — 45 tests over the pure functions (no pytest in any venv; run via
+`train-applesilicon/.venv/bin/python tests/test_*.py`); logs → `logs/`; pycache cleared.
+
+**Still open:**
+- P0.1 bar test (two same-seed runs → byte-identical .onnx) — the gate before any sweep.
+  **MET at 2026-09-21 19:20**: run A (full corpus rebuild seed 1234 + augment + features
+  + train) and run B (`--skip-corpus`, features reused via the sidecar) produced
+  byte-identical .onnx (md5 fdc78d06c42028d7100c596074f3ffaf, tag
+  5b09148-dirty-cf9c065b-h8b4b5fa); augmentation determinism separately probed
+  (same-seed augment_clips batches byte-identical). Run C (independent
+  `--rebuild-features`) was launched to close the last link. Two real bugs were
+  found and fixed the expensive way, both recorded at the site:
+  (a) the first seed-augment version passed `seed=` to `augment_clips`, which takes
+  no such parameter - fixed + self-heal pass in the patch; (b) `convert_to_tflite`
+  imported TF in-process after the torch run and SIGABRT'd the whole trainer on
+  macOS arm64 - now a subprocess (the abort dies with the child, run exits 0).
+- A real (non-dry-run) `sweep.py` pass end to end.
+- Existing corpora have NO manifest (not backfilled on purpose — the mww corpus was
+  built with non-default flags). First rebuild writes one.
+- P2 (Piper fleet sharding, parallel trim, CoreML feature probe, host eval env,
+  Makefile), P1.1 (negatives 32 → ~300, needs TTS), P1.3/P1.4 (weight-doubling and
+  checkpoint-merge logging), P3.1 (`--smoke`).
+- The np.int16 `val_steps` overflow trap (>~327k steps) is unpatched; a sweep reaching
+  for long runs must patch it first.
+- Docker images are NOT rebuilt with the new patches (seed-augment, configurable-lr) —
+  host route only until the next container build.
