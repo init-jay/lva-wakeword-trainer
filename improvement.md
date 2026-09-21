@@ -503,7 +503,25 @@ config half.
 **P3:** `tests/` — 45 tests over the pure functions (no pytest in any venv; run via
 `train-applesilicon/.venv/bin/python tests/test_*.py`); logs → `logs/`; pycache cleared.
 
+**Progress 2026-09-21/22 (post bar test):**
+- P1.1 negative growth: DONE - wordlists/hey_seeree.yaml extend 20->148, hey_other
+  12->150; 298 clips rendered (kokoro-mlx, 18 voices) into
+  data/corpus/eval/negatives_tts, 12 stale pre-widening hey_other clips removed.
+  Scorecard baseline moves - the deploy candidate must be re-baselined before a
+  ship call (commit 73bb78d).
+- P2.1 Piper sharding: DONE (commit 7036f74) - PiperFleet with voice-pinned
+  sharding, start-tts-fleet.sh, PIPER_URLS in both run scripts. N>1 throughput
+  unmeasured.
+- P1.3/P1.4: DONE (commit 456e443) - WEIGHT_AUDIT/MERGE_AUDIT into config.json;
+  finding: the doubling is unconditional (best_val_fp never updated).
+- P3.1/P2.5: --smoke on both trainers + Makefile entry point - implemented,
+  under end-to-end verification (a mangled newline in
+  run-mww-training-applesilicon.sh found by the first mww smoke run and fixed).
+
 **Still open:**
+- P2.4 (host eval env), P2.2 (parallel trim), P2.3 (CoreML probe), P1.3
+  re-measurement of the weight lever, P1.2 (held-out-voice set), the Docker
+  image rebuild (new patches only live in the host route until then).
 - P0.1 bar test (two same-seed runs → byte-identical .onnx) — the gate before any sweep.
   **MET at 2026-09-21 19:20**: run A (full corpus rebuild seed 1234 + augment + features
   + train) and run B (`--skip-corpus`, features reused via the sidecar) produced

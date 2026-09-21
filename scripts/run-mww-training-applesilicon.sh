@@ -61,6 +61,16 @@
 # One server stays PIPER_URL, unchanged; PIPER_URLS wins over it when both are
 # set, because a comma list is an explicit statement and a bare PIPER_URL left
 # exported from another context is not.
+#
+# SMOKE=1: a few-minute end-to-end check that a changed train/ tree still runs the
+# whole pipeline: the corpus through the --skip path (no TTS servers; a
+# pre-manifest corpus is reused as-is), the pre-built features, 200-step
+# training, real tflite conversion. It implies SKIP_CORPUS=1 and appends --smoke
+# to both the tag computation and the train stage, so both resolve the same
+# smoke-<stamp> run directory (train/mww/train.py --smoke). The smoke-named model
+# files in output/<wake>/mww/ cannot be mistaken for a real run's archive:
+#
+#     SMOKE=1 ./scripts/run-mww-training-applesilicon.sh "hey seeree"
 
 set -euo pipefail
 
@@ -98,6 +108,10 @@ if [[ ! -x "$ENV_DIR/.venv/bin/python" ]]; then
 fi
 "$ENV_DIR/.venv/bin/python" - <<'PY' || exit 2
 import sys, numpy, microwakeword  # noqa: F401
+# __file__ is None when the clone ROOT shadows the package as a namespace
+# package (no editable install): the import above passes and the failure
+# surfaces two stages in, after the corpus TTS. 2026-09-22 smoke run.
+assert microwakeword.__file__, "microwakeword resolved as a namespace package"
 if numpy.__version__ < "2":
     print(f"numpy {numpy.__version__} in {sys.executable} - mWW needs >=2.", file=sys.stderr)
     print("A different venv is probably activated; re-run the setup script.", file=sys.stderr)
@@ -182,6 +196,16 @@ if [[ "$KOKORO_FRACTION" == "0" || "$KOKORO_FRACTION" == "0.0" ]]; then
 fi
 set -- "${TRAIN_ARGS[@]+"${TRAIN_ARGS[@]}"}"
 
+# SMOKE=1 (header): the corpus stage goes through --skip and --smoke is added to
+# the train stage. It must land BEFORE the TTS probes (they are gated on
+# SKIP_CORPUS - a smoke run needs no servers) and BEFORE the tag is computed
+# (--print-tag has to resolve the same smoke-<stamp> directory the train stage
+# will claim, or the run would die on 'directory already exists').
+if [[ "${SMOKE:-}" == "1" ]]; then
+    SKIP_CORPUS=1
+    set -- "$@" --smoke
+fi
+
 # PIPER_URL / PIPER_URLS
 #
 # PIPER_URL: same contract as the oww host script: this is the protocol URL of
@@ -251,7 +275,8 @@ export KOKORO_URL
 # THE CONTAINER MAY OWN THESE FILES. Both paths write data/corpus/ and output/,
 # and the trainer images run as root - train/ownership.py hands output/ back
 # afterwards, but data/corpus/ is left as root wrote it. A host run then fails on
-# permissions somewhere unhelpful, so check here where the fix is obvious.SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
+# permissions somewhere unhelpful, so check here where the fix is obvious.
+SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
 for d in "data/corpus/${SAFE_NAME}/mww" "output/${SAFE_NAME}/mww"; do
     if [[ -e "$d" && ! -w "$d" ]]; then
         echo "ERROR: $d is not writable by $(whoami) - a container run probably made it." >&2
@@ -510,6 +535,11 @@ echo "    $TAGGED_MODEL  ($(du -h "$TAGGED_MODEL" | cut -f1))"
 [[ -f "$TAGGED_MANIFEST" ]] && echo "    $TAGGED_MANIFEST  (model: $(basename "$TAGGED_MODEL"))"
 [[ -f "$TAGGED_ROC" ]] && echo "    $TAGGED_ROC"
 [[ -n "$DIRTY" ]] && echo "    NOTE: working tree was dirty - the code half of $TAG is not reproducible"
+if [[ "${SMOKE:-}" == "1" ]]; then
+    echo "    SMOKE RUN: the model is smoke-named, the results are not measurable,"
+    echo "    and no real run's archive was touched. Delete it when done:"
+    echo "      rm -rf output/${SAFE_NAME}/mww/${TAG}"
+else
 echo
 echo "    Compare the wall time against the container's 26m06s (this machine, 2026-09-06)"
 echo "    and the per-stage numbers against tools/tf_probe.py and tools/bench_tts.py."
@@ -519,3 +549,4 @@ echo "      cd eval && docker compose run --rm eval python -m eval.eval_model \\
 echo "          --model $TAGGED_MODEL"
 echo "    Confirm the cutoff against the held-out recordings before deploying it;"
 echo "    the per-speaker rows are the ones that decide it."
+fi

@@ -42,6 +42,15 @@
 #
 #     PIPER_URLS="$(./scripts/start-tts-fleet.sh 4)" \
 #         ./scripts/run-oww-training-applesilicon.sh "hey seeree" --piper-fraction 0.3
+#
+# SMOKE=1: a few-minute end-to-end check that a changed train/ tree still runs the
+# whole pipeline: corpus reuse, feature recompute, 200-step training, real tflite
+# conversion. No TTS server - the corpus is the held-fixed input and the engines'
+# health is probed at the start of a normal run anyway. The model lands in
+# output/<wake>/oww/smoke-<stamp>/ and the canonical model, the .last_run_tag and
+# the archive stay untouched (train/oww/train.py --smoke):
+#
+#     SMOKE=1 ./scripts/run-oww-training-applesilicon.sh "hey seeree"
 
 set -euo pipefail
 
@@ -254,6 +263,17 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 mkdir -p logs
 LOG="logs/training-${SAFE_NAME}-macos-${STAMP}.log"
 
+# SMOKE=1 (header): the smoke directory is named HERE, not in train.py, because
+# this script's success check has to look at exactly the file the run writes -
+# train.py's own default would pick a stamp this shell cannot see. --smoke goes
+# into the arg list after the wake word, where it lands in "extra train.py args".
+SMOKE_OUTPUT=""
+if [[ "${SMOKE:-}" == "1" ]]; then
+    SMOKE_OUTPUT="output/${SAFE_NAME}/oww/smoke-${STAMP}"
+    set -- "$@" --smoke --smoke-output "$SMOKE_OUTPUT"
+fi
+[[ -n "$SMOKE_OUTPUT" ]] && MODEL="$SMOKE_OUTPUT/${SAFE_NAME}.onnx"
+
 # THE CONTAINER MAY OWN THESE FILES. Both paths write data/corpus/ and output/, and
 # the trainer images run as root - train/ownership.py hands output/ back afterwards,
 # but data/corpus/ is left as root wrote it. A host run then fails on permissions
@@ -300,6 +320,12 @@ fi
 echo "=== $(date '+%H:%M:%S')  DONE"
 echo "    $MODEL"
 echo
-echo "    Compare the training rate against the container run's 26 it/s - that is"
-echo "    the number this environment exists to beat. Then convert and evaluate:"
-echo "      $ENV_DIR/.venv/bin/python -m train.oww.onnx2tflite $MODEL"
+if [[ -n "$SMOKE_OUTPUT" ]]; then
+    echo "    SMOKE RUN: the model is in the smoke directory, the results are not"
+    echo "    measurable, and nothing in the archive changed. Delete it when done:"
+    echo "      rm -rf $SMOKE_OUTPUT"
+else
+    echo "    Compare the training rate against the container run's 26 it/s - that is"
+    echo "    the number this environment exists to beat. Then convert and evaluate:"
+    echo "      $ENV_DIR/.venv/bin/python -m train.oww.onnx2tflite $MODEL"
+fi

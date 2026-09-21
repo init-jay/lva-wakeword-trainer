@@ -70,6 +70,18 @@ os.chdir(WORK_DIR)
 # through every call site.
 _SEED: int = 0
 
+# The smoke-mode training size: the smallest at which the full pipeline still
+# runs end to end. 200 steps is ~30 s of the torch loop on an M-series Mac,
+# against ~8 min at the 50,000-step default (SPEED.md: the full host run's
+# training loop, 50k steps, is the minority of its ~35 minutes). The feature
+# arrays are NOT minified - upstream sizes them from the corpus directories and
+# exposes no size knob - so a smoke run still pays the full recompute (~12 min
+# measured, the augmentation+features stage). The corpus is REUSED, never
+# regenerated: generation is the 30-54 minute TTS stage, and its server health
+# is probed at the start of a normal run anyway - the smoke exists to exercise
+# the pipeline between the probes, not the probes.
+SMOKE_TRAINING_STEPS = 200
+
 # Speed coverage of the positives, widened at the top for run 9.
 #
 # Measured failure: a synthetic sweep of the run 4 model detected 6/6 up to 1.25x,
@@ -404,6 +416,7 @@ def create_config(wake_word: str, n_samples: int, training_steps: int,
                   target_accuracy: float = 0.7, target_recall: float = 0.5,
                   n_samples_val: int = None,
                   augmentation_batch_size: int = 16,
+                  output_dir: Path = None,
                   overrides: list = None):
     """Create training configuration."""
     safe_name = wake_word.replace(" ", "_").lower()
@@ -478,7 +491,8 @@ def create_config(wake_word: str, n_samples: int, training_steps: int,
     # which fails with FileNotFoundError during feature computation - after corpus
     # generation and augmentation have already run. (The mangled "trai" is the same
     # bug eating the "n"; harmless once the directory is right.)
-    config["output_dir"] = str(WORK_DIR / "output" / safe_name / "oww")
+    config["output_dir"] = (str(output_dir) if output_dir is not None
+                            else str(WORK_DIR / "output" / safe_name / "oww"))
     config["corpus_dir"] = str(WORK_DIR / "data" / "corpus" / safe_name / "oww")
 
     # CREATE output_dir OURSELVES, ALL OF IT. Upstream makes it with os.mkdir
@@ -734,6 +748,42 @@ def main():
                              "MATCHED false-accept rates it was worse everywhere. It "
                              "moved the operating point, it did not improve the "
                              "model. Measured in tuning run 11.")
+    parser.add_argument("--smoke", action="store_true",
+                        help="Smoke run: the full pipeline SHAPE with the expensive "
+                             "parts minified and the corpus REUSED, not regenerated "
+                             "- the end-to-end check for a changed train/ tree, in a "
+                             "few minutes instead of the ~35 min full host run. "
+                             "What changes: the corpus is REUSED (implies "
+                             "--skip-corpus: no TTS servers, and the manifest check "
+                             "still applies - a differently-shaped corpus is "
+                             "refused exactly as with any reuse), the feature "
+                             "arrays are RECOMPUTED even when the features.json "
+                             "sidecar matches (the feature stage is the one this "
+                             "exists to run; generation is the 30-54 min TTS stage "
+                             "and its health is probed at the start of a normal "
+                             "run anyway), training runs 200 steps instead of the "
+                             "50,000-step default (~30 s against ~8 min), and the "
+                             "tflite conversion still runs for real. Output goes to "
+                             "a clearly-named smoke directory (output/<wake>/oww/"
+                             "smoke-<timestamp>/ by default, --smoke-output to "
+                             "pick); the canonical <wake>.onnx, its .last_run_tag "
+                             "and the archive that the container script keys on "
+                             "that file are all left untouched, so a smoke can "
+                             "never be mistaken for a real run or clobber one. "
+                             "The run tag's config half differs from a real run's "
+                             "because the step count changed - expected, and the "
+                             "smoke directory name says what it is anyway. The "
+                             "results are NOT measurable: do not evaluate or "
+                             "deploy a smoke model. Combining --smoke with an "
+                             "explicit real-size flag (--training-steps, "
+                             "--n-samples-val, --set, --corpus rebuild) is an "
+                             "error: you asked for both a smoke and a real size.")
+    parser.add_argument("--smoke-output", default=None,
+                        help="Where a --smoke run writes its model (default: "
+                             "output/<wake>/oww/smoke-<timestamp>/). A SIBLING of "
+                             "the canonical <wake>.onnx, never its replacement: "
+                             "a smoke run cannot clobber the model the archive "
+                             "points at, no matter how long the smoke lives.")
     parser.add_argument("--layer-size", type=int, default=64, choices=[32, 64, 128], help="Network layer size")
     parser.add_argument("--kokoro-url", default=os.environ.get("KOKORO_URL", "tcp://127.0.0.1:8899"),
                         help="Kokoro TTS server(s) as tcp:// protocol URL(s), "
@@ -944,6 +994,49 @@ def main():
 
     wake_word = args.wake_word
     safe_name = wake_word.replace(" ", "_").lower()
+
+    # === SMOKE MODE: decided here, before any stage, so a contradiction costs
+    # zero seconds. The whole contract is loud and local to this block.
+    smoke_dir = None
+    if args.smoke:
+        # The smoke minifies a FIXED set of sizes; an explicit real size on the
+        # command line is a contradiction, not an override - error out and do not
+        # guess which one was meant. --set counts too: it is the generic size
+        # escape hatch and would silently undo the minification.
+        explicit = []
+        if args.training_steps != parser.get_default("training_steps"):
+            explicit.append("--training-steps")
+        if args.n_samples_val is not None:          # the default is None (= derived)
+            explicit.append("--n-samples-val")
+        if args.set:
+            explicit.append("--set")
+        if args.corpus == "rebuild":
+            explicit.append("--corpus rebuild")
+        if explicit:
+            sys.exit(f"ERROR: --smoke is combined with explicit real-size flags "
+                     f"({', '.join(explicit)}). It minifies them itself; a smoke and "
+                     f"a real size are two different runs. Drop the flag for the run "
+                     f"you actually want.")
+        args.training_steps = SMOKE_TRAINING_STEPS
+        # Reuse is IMPLIED, not auto: auto would rebuild a corpus whose manifest
+        # does not match, which is exactly the hour-long spend a smoke must not
+        # make. A missing manifest fails here, as reuse does.
+        args.corpus = "reuse"
+        if args.smoke_output:
+            smoke_dir = Path(args.smoke_output)
+        else:
+            smoke_dir = (WORK_DIR / "output" / safe_name / "oww"
+                         / f"smoke-{time.strftime('%Y%m%d-%H%M%S')}")
+        smoke_dir.mkdir(parents=True, exist_ok=True)
+        short, _, _, _, _ = provenance.corpus_tag(wake_word, "oww")
+        print("=" * 60)
+        print(f"SMOKE MODE: training minified ({args.training_steps} steps), "
+              f"feature arrays RECOMPUTED, corpus REUSED (tag c{short}), "
+              f"results are NOT measurable")
+        print(f"  model goes to {smoke_dir}")
+        print(f"  the canonical output/{safe_name}/oww/{safe_name}.onnx, its "
+              f".last_run_tag and the archive are untouched")
+        print("=" * 60)
 
     # Seed the parent process's draws (corpus stage: run-on tail jitter, child
     # stretch, Piper speed draws) BEFORE the corpus stage, so the drawing is a
@@ -1305,6 +1398,7 @@ def main():
                   target_recall=args.target_recall,
                   n_samples_val=args.n_samples_val,
                   augmentation_batch_size=args.augmentation_batch_size,
+                  output_dir=smoke_dir,
                   overrides=args.set)
 
     # === FEATURE CACHE GUARD ===
@@ -1339,7 +1433,9 @@ def main():
             print(f"Cached feature arrays are STALE ({reason}) - recomputing. "
                   f"Pass --rebuild-features to say this out loud.")
             overwrite = True
-    run_augmentation(overwrite=overwrite)
+    # --smoke forces the recompute even on a sidecar match: a cache hit here
+    # would make the feature stage - the one this mode exists to run - not run.
+    run_augmentation(overwrite=overwrite or args.smoke)
     sidecar_path.write_text(json.dumps(sidecar, indent=2) + "\n")
 
     # Note the existing model before training. setup_training_dirs clears the corpus
@@ -1349,7 +1445,11 @@ def main():
     # "TRAINING COMPLETE!", and the stale model was copied off the box and evaluated
     # twice before the identical checksums gave it away. Now that the two trees are
     # separate the model ALWAYS survives a run, so this check matters more, not less.
-    model_path = WORK_DIR / "output" / safe_name / "oww" / f"{safe_name}.onnx"
+    # In smoke mode this is the smoke directory, not the canonical one: the
+    # model is written beside where the archive would never look.
+    model_path = ((smoke_dir if smoke_dir is not None
+                   else WORK_DIR / "output" / safe_name / "oww")
+                 / f"{safe_name}.onnx")
     before = model_path.stat().st_mtime if model_path.exists() else None
 
     returncode, audit = run_training()
@@ -1412,10 +1512,20 @@ def main():
     resolved["merged_checkpoints"] = None if not merge_seen else merged_checkpoints
     config_json = model_path.parent / f"{tag}.config.json"
     config_json.write_text(json.dumps(resolved, indent=2, default=str) + "\n")
-    # The wrapper scripts name the archived model after this same tag; reading it
-    # from here (rather than recomputing it in the shell) keeps the two from
-    # drifting apart, which would leave the archive and its config named apart.
-    (model_path.parent / ".last_run_tag").write_text(tag + "\n")
+    if args.smoke:
+        # NO .last_run_tag on a smoke run. run-oww-training.sh archives the model
+        # by READING that file back, and scripts/sweep.py dies without it - both
+        # assume it names the last REAL run. A smoke writing it would put a 200-
+        # step model where a deployable one's name goes, or break a sweep that
+        # happened to interleave. The smoke lives in its own directory, is
+        # cleaned up by hand, and is not a run the archive can be about.
+        print(f"  (smoke: no .last_run_tag written - the archive keeps the last "
+              f"REAL run)")
+    else:
+        # The wrapper scripts name the archived model after this same tag; reading
+        # it from here (rather than recomputing it in the shell) keeps the two from
+        # drifting apart, which would leave the archive and its config named apart.
+        (model_path.parent / ".last_run_tag").write_text(tag + "\n")
     print(f"Run tag: {tag}")
     print(f"Resolved config: {config_json}")
 

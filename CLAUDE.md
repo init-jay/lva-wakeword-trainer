@@ -51,6 +51,9 @@ guess a wake word from the repo's existing `hey_seeree` files.
 | train | the CUDA box, Docker - or anywhere, on CPU, with the `cpu` overlay; on a Mac, host (below) |
 | eval | either — the `eval` image builds native on Apple Silicon |
 
+`make help` is the entry point: the Makefile at the repo root carries the commands
+a human actually types, each annotated with what it costs (minutes, GB, TTS).
+
 On the CUDA box: `export COMPOSE_FILE=docker-compose.yml:docker-compose.cuda.yml`.
 NVIDIA only - `driver: nvidia` does not match an AMD card under ROCm.
 

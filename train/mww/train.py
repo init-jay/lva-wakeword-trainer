@@ -82,6 +82,17 @@ MODEL_FLAGS = [
 # spectrograms.
 SPLITS = ("training", "validation", "testing", "testing_ambient", "validation_ambient")
 
+# The smoke-mode sizes. 200 training steps against the 10,000-step default: the
+# full host run measured 14m14s (corpus + features + train + conversion, SPEED.md),
+# and the training loop is a minority of it, so 200 steps is a matter of seconds
+# to a minute here. The eval interval moves 500 -> 50 deliberately: with the
+# default interval a 200-step run would evaluate only at the last step (train.py:
+# 315, `step % interval == 0 or is_last_step`), never exercising the evaluation
+# path; at 50 it fires four times. Batch size stays at the default - it is not a
+# size the smoke needs to move.
+SMOKE_TRAINING_STEPS = 200
+SMOKE_EVAL_STEP_INTERVAL = 50
+
 
 def check_mmap_set(d: Path):
     """Problems with one mmap feature set, phrased so the fix is obvious."""
@@ -162,6 +173,27 @@ def main():
     p.add_argument("--data-dir", default="data/external")
     p.add_argument("--output-dir", default="output")
     p.add_argument("--training-steps", type=int, nargs="+")
+    p.add_argument("--smoke", action="store_true",
+                   help="Smoke run: the full pipeline SHAPE with the expensive "
+                        "parts minified and the corpus REUSED, not regenerated - "
+                        "the end-to-end check for a changed train/ tree, in a few "
+                        "minutes instead of the 14m14s measured full host run. "
+                        "What changes: training_steps 200 (default: 10,000), "
+                        "eval_step_interval 50 (default: 500, so the evaluation "
+                        "path still fires), and the run is named "
+                        "smoke-<timestamp> instead of <commit>-c<corpus>"
+                        "[-h<config>] - a name no real run can ever take, which is "
+                        "what keeps a smoke model out of the archive's meaning; "
+                        "the config half would differ from a real run's anyway "
+                        "because the step count changed, and that is expected. "
+                        "The corpus stage takes the --skip path (no TTS servers; "
+                        "a pre-manifest corpus is reused as-is) and the pre-built "
+                        "features are reused - both are the held-fixed inputs a "
+                        "sweep point needs. The results are NOT measurable: do "
+                        "not evaluate or deploy a smoke model. Combining --smoke "
+                        "with an explicit real-size flag (--training-steps, "
+                        "--eval-step-interval, --batch-size, --config) is an error: you "
+                        "asked for both a smoke and a real size.")
     p.add_argument("--batch-size", type=int, default=mww_config.DEFAULT_BATCH_SIZE)
     p.add_argument("--learning-rates", type=float, nargs="+",
                    help="learning rate schedule, one value per training stage "
@@ -243,6 +275,8 @@ def main():
     p.add_argument("passthrough", nargs="*", default=[],
                    help="extra args for model_train_eval, after --")
     args = p.parse_args()
+
+
     if args.model_flags is None:
         args.model_flags = MODEL_FLAGS if args.model == "mixednet" else []
     # The repeatable --model-flag k=v entries, merged OVER the list above: an
@@ -267,6 +301,48 @@ def main():
         else:
             merged.extend([flag, value])
         args.model_flags = merged
+
+    # === SMOKE MODE: decided here, before any stage, so a contradiction costs
+    # zero seconds.
+    if args.smoke:
+        # The smoke minifies a FIXED set of sizes; an explicit real size on the
+        # command line is a contradiction, not an override - error out and do not
+        # guess which one was meant.
+        explicit = []
+        if args.training_steps is not None:
+            explicit.append("--training-steps")
+        if args.eval_step_interval is not None:
+            explicit.append("--eval-step-interval")
+        # get_default takes the DEST, not the option string, on recent 3.12
+        # (action.dest == dest - "batch_size", not "--batch-size"): the
+        # option-string form silently returns None and this check fires on
+        # every smoke run (found 2026-09-22, the first mww smoke).
+        if args.batch_size != p.get_default("batch_size"):
+            explicit.append("--batch-size")
+        if args.config:
+            explicit.append("--config")
+        if explicit:
+            sys.exit(f"ERROR: --smoke is combined with explicit real-size flags "
+                     f"({', '.join(explicit)}). It minifies them itself; a smoke and "
+                     f"a real size are two different runs. Drop the flag for the "
+                     f"run you actually want.")
+        args.training_steps = [SMOKE_TRAINING_STEPS]
+        args.eval_step_interval = SMOKE_EVAL_STEP_INTERVAL
+        # The run directory IS the archive's guard here: mww files every run
+        # under output/<wake>/mww/<tag>/ and the wrapper copies the model out
+        # named after <tag>, so a smoke-named directory and file can never be
+        # read as a real run (a real tag is <commit>[-dirty]-c<hex>[-h<hex>],
+        # a different shape entirely) and can never collide with one.
+        if args.tag is None:
+            args.tag = f"smoke-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        short, _, _, _, _ = provenance.corpus_tag(args.wake_word, "mww")
+        print("=" * 60)
+        print(f"SMOKE MODE: training minified ({args.training_steps[0]} steps, "
+              f"eval every {args.eval_step_interval}), corpus and features REUSED "
+              f"(tag c{short}), results are NOT measurable")
+        print(f"  run directory: {args.output_dir}/"
+              f"{args.wake_word.replace(' ', '_').lower()}/mww/{args.tag}")
+        print("=" * 60)
 
     if args.seed:
         random.seed(args.seed)
