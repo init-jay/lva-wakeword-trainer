@@ -219,8 +219,19 @@ the held-out axis is the voice - and writes a `set.json` labelling it a ranking 
 not a gate. `eval_model.py --voice-holdout-set` scores it as a separate, labelled
 block (its own JSON key, never merged into the gates), which stay on the real
 `data/recordings/holdout/`; the top two or three of the ranked points go there.
-Seven unit tests in `tests/test_voice_holdout.py` (suite 45 → 52). The correlation
-sanity check above is the follow-up once sweep points exist.
+Seven unit tests in `tests/test_voice_holdout.py` (suite 45 → 52).
+
+**Sanity check, run 2026-09-22 on the first four oww sweep points**
+(sweeps/oww-training-steps.yaml, ledger output/hey_seeree/runs.jsonl): the
+synthetic set did NOT move with the real holdout over these four points -
+real spread 11.8 pts against a 5.7 pt voice-holdout spread, pearson 0.25
+at n=4 (below the 10-point noise floor, so this is a direction check, not a
+measurement). The set still does one useful thing the real holdout cannot:
+name the failing voice type (all misses at the weakest point were the single
+`am_santa` voice, at every speed). Verdict: keep it as a cheap screen for
+voice-type failures across many sweep points - not as a proxy for the real
+per-speaker gates, which remain the only thing that ranks a deploy decision.
+
 
 ### P1.3 Un-confound the oww trainer's hidden weight doubling
 
@@ -577,6 +588,15 @@ config half.
 `train-applesilicon/.venv/bin/python tests/test_*.py`); logs → `logs/`; pycache cleared.
 
 **Progress 2026-09-21/22 (post bar test):**
+- First real sweep, 2026-09-22: sweeps/oww-training-steps.yaml (25k vs 50k
+  steps x 2 repeats, frozen corpus cf9c065b, host route). 4/4 filed in
+  output/hey_seeree/runs.jsonl, 0 failed, ~17 min/point end-to-end
+  (train + eval + ledger). Result: NOT DISTINGUISHABLE - 25k 88.2%
+  [86.3-90.2] vs 50k 84.3% [78.4-90.2] detection, inside the measured
+  10-point noise floor; adversarial FA 3.5% vs 3.7%, both under the gate.
+  All four points fail the 98% real-speaker detection gate; ryan is 50%
+  at every point. The loop (frozen corpus, sidecar features, tags,
+  sweep, ledger, host eval) is now proven end to end on this Mac.
 - P1.1 negative growth: DONE - wordlists/hey_seeree.yaml extend 20->148, hey_other
   12->150; 298 clips rendered (kokoro-mlx, 18 voices) into
   data/corpus/eval/negatives_tts, 12 stale pre-widening hey_other clips removed.
