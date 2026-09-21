@@ -140,6 +140,18 @@ def die(message, code=1):
     sys.exit(code)
 
 
+def build_jobs(grid, grid_keys, repeats, base_seed):
+    """The point x repeat expansion: (point_index, grid_point, repeat, seed).
+    Seeds are base + 1000*point + repeat - the 1000 stride keeps a repeat of
+    one point from colliding with the seed of the next point. Named so
+    tests/test_sweep.py can build the job list and assert what each job
+    runs; the dry run and the real loop both call it."""
+    points = [dict(zip(grid_keys, combo)) for combo in
+              itertools.product(*(grid[k] for k in grid_keys))] or [{}]
+    return [(pi, gp, r, base_seed + 1000 * pi + r)
+            for pi, gp in enumerate(points) for r in range(repeats)]
+
+
 def options_to_args(options):
     """{key: value} -> CLI arguments: True is a bare flag, False/None dropped,
     everything else `--key value` (the trainers' argparse spelling)."""
@@ -251,6 +263,28 @@ def mww_tag(python, wake_word, base_args, seed):
         sys.stderr.write(out.stderr)
         die(f"train.mww.train --print-tag exited {out.returncode}")
     return out.stdout.strip().splitlines()[-1]
+
+
+def trainer_cmd(target, python, wake_word, base_args, point_args, seed,
+                tag=None, ambient=(), corpus_reuse=False):
+    """The resolved trainer command for one point: base, then grid, then seed.
+    A grid key after base deliberately overrides a base default rather than
+    depending on dict order. THE single source of truth for what a point
+    runs - the dry run prints it, the real loop runs it, and
+    tests/test_sweep.py asserts the grid values reach it. (2026-09-22, B1:
+    the grid was computed per point but never applied - every point ran the
+    base config and was filed under a label the run did not use. A command
+    built inline in the loop is exactly where that kind of omission hides;
+    a named function with a test is not.)"""
+    args = [*base_args, *point_args, "--seed", str(seed)]
+    if target == "mww":
+        return [str(python), "-m", "train.mww.train",
+                "--wake-word", wake_word, "--tag", tag, *ambient, *args]
+    cmd = [str(python), "-m", "train.oww.train",
+           "--wake-word", wake_word, *args]
+    if corpus_reuse:
+        cmd += ["--corpus", "reuse"]
+    return cmd
 
 
 def corpus_dirs(wake_word, target):
@@ -414,36 +448,45 @@ def main():
     # the ledger skip (below) catches it.
     grid = spec.get("grid") or {}
     grid_keys = sorted(grid)
-    points = [dict(zip(grid_keys, combo)) for combo in
-              itertools.product(*(grid[k] for k in grid_keys))] or [{}]
-    jobs = [(pi, gp, r, spec["base_seed"] + 1000 * pi + r)
-            for pi, gp in enumerate(points) for r in range(spec["repeats"])]
+    jobs = build_jobs(grid, grid_keys, spec["repeats"], spec["base_seed"])
 
     corpus, features, out_dir = corpus_dirs(wake_word, target)
     ledger_index = ledger.by_tag(wake_word)
     this_target = ledger_index.get(target, {})
 
     print(f"sweep: {wake_word!r}  target={target}  python={python}")
-    print(f"  grid: {len(points)} point(s)  repeats: {spec['repeats']}  "
+    print(f"  grid: {len(jobs) // spec['repeats']} point(s)  repeats: {spec['repeats']}  "
           f"base_seed: {spec['base_seed']}  -> {len(jobs)} run(s)")
     print(f"  corpus: {corpus}")
     print(f"  ledger: {ledger.ledger_path(wake_word)}  "
           f"({len(this_target)} record(s) for {target} so far)")
 
     if args.dry_run:
+        import shlex
         for pi, gp, repeat, seed in jobs:
             combo = "  ".join(f"{k}={_fmt_grid_value(gp[k])}" for k in grid_keys) or "(base)"
+            point_args = options_to_args(gp)
             if target == "mww":
-                tag = mww_tag(python, wake_word, base_args, seed)
+                # The tag must see the grid too: it names the config the run
+                # will use, and a tag computed without the grid names a config
+                # that will not be run (B1).
+                tag = mww_tag(python, wake_word, base_args + point_args, seed)
             else:
                 tag = "(computed after the run: .last_run_tag)"
             skip = "  [SKIP - already in the ledger]" if tag in this_target else ""
             action, _ = corpus_action(wake_word, target, corpus, features,
                                       pi == 0, True, python, corpus_args, {},
                                       first_job=(pi == 0 and repeat == 0))
+            cmd = trainer_cmd(target, python, wake_word, base_args, point_args,
+                              seed, tag=tag if target == "mww" else None,
+                              corpus_reuse=(target == "oww" and pi != 0))
             print(f"\n  point {pi}  {combo}")
             print(f"    repeat {repeat}  seed {seed}  corpus: {action}")
             print(f"    tag: {tag}{skip}")
+            # The full resolved command: the operator check that a grid value
+            # actually reaches the trainer (B1 was invisible because the
+            # dry run showed labels, not commands).
+            print(f"    cmd: {shlex.join(cmd)}")
         if compare_against:
             print(f"\n  compare_against: {compare_against}  "
                   f"(artifact: {artifact_for(target, wake_word, out_dir, compare_against)})")
@@ -453,13 +496,16 @@ def main():
     trained_tags = []
     for pi, gp, repeat, seed in jobs:
         combo = "  ".join(f"{k}={_fmt_grid_value(gp[k])}" for k in grid_keys) or "(base)"
+        point_args = options_to_args(gp)
         first_point = pi == 0
         stage_times = {}
         print(f"\n{'#' * 72}\n# point {pi}  {combo}  (repeat {repeat} of "
               f"{spec['repeats']}, seed {seed})\n{'#' * 72}")
 
         if target == "mww":
-            tag = mww_tag(python, wake_word, base_args, seed)
+            # The grid must be in the tag too: the tag names the config the
+            # run will use (B1 - it used to name one that would not be run).
+            tag = mww_tag(python, wake_word, base_args + point_args, seed)
             if tag in this_target:
                 print(f"  SKIP: {tag} is already in the ledger - the run was filed before")
                 continue
@@ -476,9 +522,8 @@ def main():
                 # it, so nothing may be trained on it.
                 die(f"no corpus.json manifest at {corpus} - a sweep cannot "
                     f"train on a corpus it cannot name.")
-            cmd = [python, "-m", "train.mww.train",
-                   "--wake-word", wake_word, "--tag", tag,
-                   *ambient, *base_args, "--seed", str(seed)]
+            cmd = trainer_cmd("mww", python, wake_word, base_args, point_args,
+                              seed, tag=tag, ambient=ambient)
             if (out_dir / tag).exists():
                 # A failed earlier run left a partial directory and
                 # model_train_eval refuses to train into one; deleting it is
@@ -490,11 +535,8 @@ def main():
         else:
             corpus_action(wake_word, target, corpus, features, first_point,
                           False, python, corpus_args, stage_times)
-            cmd = [python, "-m", "train.oww.train",
-                   "--wake-word", wake_word,
-                   *base_args, "--seed", str(seed)]
-            if not first_point:
-                cmd += ["--corpus", "reuse"]
+            cmd = trainer_cmd("oww", python, wake_word, base_args, point_args,
+                              seed, corpus_reuse=(not first_point))
 
         if target == "oww":
             # The model was WRITTEN is the real signal, not the exit code -
