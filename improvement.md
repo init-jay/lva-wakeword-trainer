@@ -423,6 +423,14 @@ so the question is closed properly rather than by assumption.
 sweep point, and SPEED.md already explains that oww is pure-GEMM and Accelerate already
 wins that half.
 
+**Done (2026-09-22), negative by measurement.** `tools/coreml_probe.py` ran the real
+models at the real batch shape (16 x 19,200 samples, ncpu 5): CoreML is 0.28x on
+melspectrogram and 0.40x on embedding (0.39x per batch - ~31 min where CPU measures
+~12), and the embedding output drifts up to 6.1e-02 (above float noise, and the
+features are baked into the model). The graphs only partially convert (11/18 and
+44/65 nodes). Result recorded in SPEED.md, "CoreML for the oww feature stage:
+measured, loses"; no CoreML branch is being added.
+
 ### P2.4 Finish the Mac story: a host eval environment — DONE 2026-09-22
 
 Implemented: `eval/pyproject.toml` (+ uv.lock, .dockerignore) - the fifth host uv env
@@ -638,8 +646,8 @@ config half.
   synthetic set. Both far under the ~2 min bar - no code change (full note at P2.2).
 
 **Still open:**
-- P2.3 (CoreML probe). P1.2 is done above except the Piper half of its rendered
-  set (no Piper engine on this Mac).
+- P1.2's rendered set is missing its Piper half (no Piper engine on this Mac) -
+  the reservation and enforcement are in, the 10 clips wait for an engine.
 **Docker image rebuild: done 2026-09-22** - both CPU images rebuilt with the
 new patches and code (verified in-image: 8 PATCHED markers in the oww clone,
 smoke/ledger code present in the mww image). The container routes now match

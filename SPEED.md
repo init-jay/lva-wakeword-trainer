@@ -228,6 +228,31 @@ route to Metal; the MPS/CoreML training route there was evaluated and abandoned,
 and tensorflow-metal does not pair with TF 2.21.0, so microWakeWord has no Metal
 path at all. Kokoro is the one measured exception (below).
 
+## CoreML for the oww feature stage: measured, loses (2026-09-22)
+
+The question the Metal section above does NOT close: the feature stage runs the
+melspectrogram + embedding ONNX models through onnxruntime on CPU (the largest
+non-TTS host stage, ~12 min at 22,144 clips in the 2026-09-21 bar-test run),
+and onnxruntime on this Mac ships a CoreMLExecutionProvider. `tools/coreml_probe.py`
+ran the real models at the real batch shape (16 clips x 19,200 samples,
+ncpu 5 as in the stage), CPU's threaded per-clip/per-window path (what runs
+today) vs CoreML batched:
+
+| stage | CPU (today) | CoreML | |
+|---|---|---|---|
+| melspectrogram, batch 16 | 2.9 ms | 10.5 ms | 0.28x |
+| embedding, batch 16 | 27.1 ms | 67.4 ms | 0.40x |
+| per-batch total | 30 ms | 78 ms | **0.39x** |
+
+CoreML is 2.6-3.5x SLOWER on both stages (extrapolated: ~31 min of model time
+where CPU measures ~12), and the outputs are not bit-identical - embedding
+drift max 6.1e-02 on values ~13.5, which is above float noise for features
+that are baked into every trained model. The graphs only partially convert
+(11 of 18 melspec nodes, 44 of 65 embedding nodes), so the rest falls back to
+CPU inside the same call. Verdict: do not add a CoreML branch to the feature
+stage; the question is closed by measurement, the way the Metal section is.
+(The probe is reproducible: `train-applesilicon/.venv/bin/python tools/coreml_probe.py`.)
+
 ## Kokoro TTS: three ways to run it, and the speed/quality tradeoff
 
 Corpus generation is the largest stage, so the TTS engine matters more than the
