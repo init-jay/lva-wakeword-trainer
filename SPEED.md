@@ -163,7 +163,11 @@ the all-Piper 6m12s — the mix costs about a minute of Kokoro render, and the f
 run stayed at 14m24s against 14m14s.
 
 **What the runs bought** (matched-false-accept comparisons on the holdout,
-`eval/src/compare_models.py`):
+`eval/src/compare_models.py`). These are records of past runs against the
+adversarial set as it then was; the denominator changed on 2026-09-22 (32 ->
+298 clips, P1.1), so every `x/32` figure below is not comparable to a modern
+scorecard's `x/298` - the comparisons WITHIN this section are unaffected, the
+comparison ACROSS the date is not:
 
 - **30% mix at 1x depth: diversity bought run-on, not yet generalisation.** Against
   the same-day all-Piper run (`333944a`): run-on 65% vs 34% at 4/32 adversarial

@@ -221,8 +221,17 @@ block (its own JSON key, never merged into the gates), which stay on the real
 `data/recordings/holdout/`; the top two or three of the ranked points go there.
 Seven unit tests in `tests/test_voice_holdout.py` (suite 45 → 52).
 
+**Scope of the guarantee (bug.md B4):** the voice reservation binds corpus
+BUILDS after commit 3499919. The frozen cf9c065b corpus predates it, so
+models trained on cf9c065b (the four filed sweep rows, the bar-test model)
+saw the held-out voices in training; voice-holdout numbers against them
+measure nothing the holdout set was built to measure. A clean measurement
+needs a post-reservation corpus (new corpus id in the tag's data half).
+
 **Sanity check, run 2026-09-22 on the first four oww sweep points**
-(sweeps/oww-training-steps.yaml, ledger output/hey_seeree/runs.jsonl): the
+(sweeps/oww-training-steps.yaml, ledger output/hey_seeree/runs.jsonl;
+all four are 50k-step runs per the B1 erratum above - the check compares
+models within one config, so the erratum does not change it): the
 synthetic set did NOT move with the real holdout over these four points -
 real spread 11.8 pts against a 5.7 pt voice-holdout spread, pearson 0.25
 at n=4 (below the 10-point noise floor, so this is a direction check, not a
@@ -280,6 +289,21 @@ fixed features, that is the variance, found.
 step=<n> seq=<s>` line per checkpoint that cleared the gate, plus a summary
 `# MERGE_AUDIT cleared=<k>/<total> percentile=90 steps=<...>`, and the wrapper files
 the steps list in `<tag>.config.json` as `merged_checkpoints`.
+
+**Result, read 2026-09-22 (bug.md B2): the merge is a no-op on this corpus.** Every
+real run prints `cleared=0` (grep MERGE_AUDIT logs/ - the 55/55 lines are smoke
+runs, where the percentiles degenerate on a 55-entry history). The gate
+(openwakeword/openwakeword/train.py) requires val_accuracy >= p90 AND
+val_recall >= p90 AND val_fp_per_hr <= p10 SIMULTANEOUSLY, and no checkpoint
+clears all three - so `len(models) == 0`, `average_models` is never called, and
+the exported model is the final training state. Fact 8 is disproven for this
+corpus: the checkpoint merge cannot be the run-to-run variance mechanism, and
+this is also why the P0.1 byte-identical reproducibility was achievable - there
+is no percentile-dependent averaging step to perturb. Two follow-ups, noted
+not acted: `merged_checkpoints: []` (audit present, nothing cleared) is the
+EXPECTED value, distinct from null (audit absent) - the wrapper's comment says
+so; and a merge gate that never fires is arguably upstream's conjunction being
+too strict here - a new lever for a future sweep, not a defect in this pass.
 
 ---
 
@@ -609,12 +633,23 @@ config half.
 - First real sweep, 2026-09-22: sweeps/oww-training-steps.yaml (25k vs 50k
   steps x 2 repeats, frozen corpus cf9c065b, host route). 4/4 filed in
   output/hey_seeree/runs.jsonl, 0 failed, ~17 min/point end-to-end
-  (train + eval + ledger). Result: NOT DISTINGUISHABLE - 25k 88.2%
-  [86.3-90.2] vs 50k 84.3% [78.4-90.2] detection, inside the measured
-  10-point noise floor; adversarial FA 3.5% vs 3.7%, both under the gate.
-  All four points fail the 98% real-speaker detection gate; ryan is 50%
-  at every point. The loop (frozen corpus, sidecar features, tags,
-  sweep, ledger, host eval) is now proven end to end on this Mac.
+  (train + eval + ledger) - the loop (frozen corpus, sidecar features,
+  tags, sweep, ledger, host eval) is proven end to end on this Mac.
+  **ERRATUM (bug.md B1, found 2026-09-22): the grid was never applied to
+  the trainer commands** - every point ran the base config (50k steps, the
+  parser default) and was filed under a grid label the run did not use. The
+  mislabeled "25k vs 50k NOT DISTINGUISHABLE" headline did not say that; it
+  said 50k vs 50k across four seeds. The rows stay in the ledger as they are
+  (append-only, and each row's config.steps already records the true
+  config, so the measurement inside them is real): four 50k-step runs,
+  seeds {42, 43, 1042, 1043} - a direct measurement of this repo's seed
+  noise floor at one config: detection 86.3% mean, 78.4-90.2 spread
+  (11.8 points, against the 10 points quoted from memory); adversarial FA
+  3-4%, under the gate; ryan at 50% at every point. The **training-steps
+  lever remains unmeasured** and the sweep is to be re-run on the fixed
+  runner (scripts/sweep.py now threads the grid through trainer_cmd and
+  prints the resolved command in --dry-run; tests/test_sweep.py asserts a
+  grid value reaches the rendered command and would have caught this).
 - P1.1 negative growth: DONE - wordlists/hey_seeree.yaml extend 20->148, hey_other
   12->150; 298 clips rendered (kokoro-mlx, 18 voices) into
   data/corpus/eval/negatives_tts, 12 stale pre-widening hey_other clips removed.
@@ -646,8 +681,26 @@ config half.
   synthetic set. Both far under the ~2 min bar - no code change (full note at P2.2).
 
 **Still open:**
-- P1.2's rendered set is missing its Piper half (no Piper engine on this Mac) -
-  the reservation and enforcement are in, the 10 clips wait for an engine.
+- The B1 sweep re-run: the fixed runner (grid threaded through trainer_cmd,
+  resolved command printed in --dry-run, tests/test_sweep.py) has not yet
+  trained a single point. Until it has, the training-steps lever is
+  unmeasured and the four filed rows are a seed-noise measurement at 50k.
+- P1.2's rendered set is missing its Piper half (10 clips; the reservation
+  and enforcement are in, the clips wait for a Piper engine running).
+- P2.1 Piper-fleet throughput at N>1, unmeasured (bug.md B5) - the ~5-min
+  wall-time claim in the plan must not go into SPEED.md or the README until
+  bench_tts.py has run N = 1..8 back to back.
+- The CUDA images on the training box still need their next build to pick up
+  the new patches (the CPU images were rebuilt 2026-09-22).
+- Corpus/holdout contamination, stated here where the positional guarantees
+  live: the frozen corpus cf9c065b was built BEFORE the P1.2 voice
+  reservation (commit 3499919), so every model trained on it - including the
+  four filed sweep rows and the bar-test model - was trained on voices now
+  reserved for the holdout set. The voice-holdout numbers against those
+  models are contaminated exactly as generate_positives.py warns about its
+  own corpus: in-distribution on the very axis that was supposed to be
+  disjoint. The reservation binds corpora built after 3499919; a clean
+  voice-holdout measurement needs a corpus rebuild (new corpus id).
 **Docker image rebuild: done 2026-09-22** - both CPU images rebuilt with the
 new patches and code (verified in-image: 8 PATCHED markers in the oww clone,
 smoke/ledger code present in the mww image). The container routes now match

@@ -1567,6 +1567,11 @@ def main():
               "clone is probably missing patches/log-weight-and-merge.py); the "
               "filed config records null for them.")
     resolved["effective_max_negative_weight"] = weight_audit or None
+    # None = the audit lines never appeared (patch missing) - the WARNING above
+    # is why. [] = the audit ran and nothing cleared the gate: the EXPECTED
+    # value on this corpus - the gate requires accuracy, recall and fp to hold
+    # simultaneously and no checkpoint has ever cleared it (improvement.md
+    # P1.4, bug.md B2). A reader finding [] should not chase it as a bug.
     resolved["merged_checkpoints"] = None if not merge_seen else merged_checkpoints
     config_json = model_path.parent / f"{tag}.config.json"
     config_json.write_text(json.dumps(resolved, indent=2, default=str) + "\n")
