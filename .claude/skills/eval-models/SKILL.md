@@ -318,3 +318,22 @@ five points has told you nothing. Say which single variable moved, and re-run.
   something you can go and read.
 - `pymicro_wakeword/microwakeword.py:158` has an upstream `print(config)`, so every
   mWW run dumps the manifest dict to stdout. Not this repo's bug; ignore the line.
+
+## The voice-holdout ranking set (improvement.md P1.2)
+
+A third corpus at `data/corpus/eval/voice_holdout_tts/`, rendered by
+`make render-voice-holdout` (Kokoro on 8900): positives from the voices
+`wordlists/voice_holdout.yaml` **holds out of every corpus build** (oww and
+mww trainers enforce the exclusion; the live TTS catalog is the source of
+truth, so a stale list is an error, not a skip), at speeds inside the
+0.7-1.3 training range. The held-out axis is therefore the voice alone:
+it is a low-variance *ranking* signal for sweep points — a real n per
+point — not a speaker-generalisation gate. A synthetic voice is not a
+person, and the four gates above stay on the real held-out recordings in
+`data/recordings/holdout/`, which the top two or three of the ranked
+points go to. The directory is labelled by its own `set.json`; score it
+with the separate block, never merged into the gates:
+
+```bash
+eval/.venv/bin/python eval/src/eval_model.py --model M --voice-holdout-set data/corpus/eval/voice_holdout_tts
+```

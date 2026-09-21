@@ -58,6 +58,8 @@ from train.corpus.positives import (PLAIN_SPEED_GRID, PLAIN_SPEEDS,  # noqa: E40
 from train.corpus.real import copy_real_samples  # noqa: E402
 from train import ownership, provenance  # noqa: E402
 from train.corpus import manifest as corpus_manifest  # noqa: E402
+from wordlists import exclude_voice_holdout, load_voice_holdout  # noqa: E402
+from wordlists import voice_holdout_path  # noqa: E402
 
 warnings.filterwarnings("ignore", message="Reached EOF prematurely")
 
@@ -1162,6 +1164,34 @@ def main():
                 print("ERROR: every available voice is excluded!")
                 sys.exit(1)
 
+        # THE VOICE HOLDOUT (improvement.md P1.2): the voices wordlists/
+        # voice_holdout.yaml reserves for the synthetic ranking set are excluded
+        # from every corpus build, so that set stays voice-disjoint from
+        # training. The live catalog is the source of truth: an entry it no
+        # longer offers means the tracked list has drifted from the engine, and
+        # that is an error - the silent outcome is the exclusion ending up empty
+        # and the corpus quietly training on a held-out voice.
+        # No tracked file (a checkout predating it) is a no-op, and says so.
+        holdout = load_voice_holdout()
+        holdout_kokoro = holdout.get("kokoro") or []
+        if holdout_kokoro:
+            n_before = len(kokoro_voices)
+            kokoro_voices, holdout_missing = exclude_voice_holdout(
+                "kokoro", kokoro_voices, holdout)
+            if holdout_missing:
+                sys.exit(f"ERROR: the voice holdout ({voice_holdout_path()}) names "
+                         f"Kokoro voice(s) the live catalog does not offer: "
+                         f"{holdout_missing}. The catalog is the source of "
+                         f"truth - update or delete the stale entries in the "
+                         f"tracked list rather than rebuilding a corpus whose "
+                         f"holdout cannot be enforced.")
+            print(f"  Excluding {n_before - len(kokoro_voices)} voice-holdout "
+                  f"voice(s) reserved for the synthetic ranking set: "
+                  f"{', '.join(holdout_kokoro)}")
+        else:
+            print(f"  NOTE: no voice holdout at {voice_holdout_path()} - the "
+                  f"synthetic ranking set has no reserved voices")
+
     # Setup directories
     base_dir = setup_training_dirs(wake_word, args.skip_corpus)
     pos_train = base_dir / "positive_train"
@@ -1249,6 +1279,21 @@ def main():
                 args.piper_url, wake_word,
                 languages=tuple(args.piper_languages.split(",")),
                 max_speakers=args.piper_speakers)
+            # The Piper half of the voice holdout: excluded from the audited
+            # selection, same fail-loudly rule as the Kokoro side above. "In the
+            # catalog" here means in the AUDITED selection - a holdout pair the
+            # server offers but the audit tables drop (mispronouncing, unaudited)
+            # fails the check too, because that pair cannot serve as an eval
+            # voice either, so the tracked list must move, not the audit.
+            if holdout.get("piper"):
+                piper_voices, holdout_missing = exclude_voice_holdout(
+                    "piper", piper_voices, holdout)
+                if holdout_missing:
+                    sys.exit(f"ERROR: the voice holdout ({voice_holdout_path()}) "
+                             f"names Piper (voice, speaker) pair(s) the live "
+                             f"audited selection does not carry: {holdout_missing}. "
+                             f"Update the tracked list to match the catalog this "
+                             f"corpus is built from.")
             if piper_voices:
                 kokoro_plain_train = int(round(plain_train * (1 - args.piper_fraction)))
                 kokoro_plain_test = int(round(plain_test * (1 - args.piper_fraction)))
@@ -1369,10 +1414,17 @@ def main():
     # next run, and what provenance hashes into the run tag's corpus half.
     if not args.skip_corpus:
         from wordlists import path_for  # recorded, not gated: the training confusables
+        # The manifest's shaping is the REQUESTED shaping (corpus_shaping - what
+        # matches_requested diffs on reuse, unchanged) plus the holdout list, so a
+        # reader can see the exclusion without re-deriving it: the corpus the
+        # manifest names is what training consumed, and which voices it does not
+        # contain is part of that name.
+        manifest_shaping = dict(corpus_shaping)
+        manifest_shaping["voice_holdout"] = holdout
         corpus_manifest.write_manifest(
             corpus_dir, wake_word, "oww",
             seed=args.seed,
-            shaping=corpus_shaping,
+            shaping=manifest_shaping,
             engines={
                 "kokoro": {"url": args.kokoro_url, "version": None},
                 **({"piper": {"url": args.piper_url, "version": None}}

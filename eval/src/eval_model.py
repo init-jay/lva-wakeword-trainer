@@ -363,6 +363,15 @@ def main():
                         help="Break positives down by the sweep encoded in their "
                              "filename (speed_0.55_af_bella -> speed_0.55), as "
                              "generate_positives.py names them")
+    parser.add_argument("--voice-holdout-set", default=None,
+                        help="Directory of the voice-holdout synthetic ranking set "
+                             "(generate_positives.py --voice-holdout, with its "
+                             "set.json label). Scored as a SEPARATE, clearly "
+                             "labelled block after the gates - a synthetic voice "
+                             "is not a person, so it is a low-variance ranking "
+                             "signal for sweep points, never merged into the "
+                             "gates above, which stay on the real held-out "
+                             "recordings (improvement.md P1.2)")
     parser.add_argument("--verbose", action="store_true", help="Print a row per positive")
     parser.add_argument("--sliding-window-size", type=int, default=None,
                         help="microWakeWord only: probabilities averaged before "
@@ -531,6 +540,54 @@ def main():
         print(f"  [{verdict(ok)}]  {text:<48}{gate}")
     print("=" * 70)
 
+    # --- voice-holdout synthetic ranking set (improvement.md P1.2) ------------
+    # A separate block on purpose: these clips are rendered from the voices the
+    # corpus builders never train on, at in-distribution speeds, so the held-out
+    # axis is the voice alone. They rank sweep points (low variance, a real n),
+    # they do not gate anything - the gates above stay on real recordings, and
+    # a synthetic voice is not a person.
+    voice_holdout_result = None
+    if args.voice_holdout_set:
+        vdir = Path(args.voice_holdout_set)
+        vclips, vskipped = load_dir(vdir)
+        if vskipped:
+            print(f"WARNING: skipped {vskipped} voice-holdout clips not at {SR} Hz")
+        print("=" * 70)
+        print("VOICE-HOLDOUT SYNTHETIC RANKING SET (NOT A GATE)")
+        print(f"  {vdir}  ({len(vclips)} clips)")
+        print("  Every clip is a voice wordlists/voice_holdout.yaml holds out of every")
+        print("  corpus build, at speeds inside the 0.7-1.3 training range: voice-"
+              "disjoint from training, in-distribution everywhere else. A synthetic")
+        print("  voice is not a person - this is a low-variance ranking signal for")
+        print("  sweep points. It never stands in for the gates above, which stay on")
+        print("  the real held-out recordings; the top two or three of the points it")
+        print("  ranks go there.")
+        if vclips:
+            vrows = evaluate_positives(backend, vclips, args.threshold, rng, False)
+            vdet = sum(1 for r in vrows if r[1])
+            vlat = [r[2] for r in vrows if r[2] is not None]
+            vrate = vdet / len(vclips)
+            vlat_med = float(np.median(vlat)) if vlat else None
+            voice_holdout_result = {
+                "directory": str(vdir),
+                "n": len(vclips),
+                "detected": vdet,
+                "rate": vrate,
+                "latency_median_ms": vlat_med,
+                "missed": [r[0] for r in vrows if not r[1]],
+            }
+            print(f"  threshold {args.threshold}: detected {vdet}/{len(vclips)} "
+                  f"({vrate:.0%})"
+                  + (f", median latency {vlat_med:.0f} ms" if vlat_med is not None else ""))
+            print("  Compare this rate ACROSS sweep points; a movement smaller than")
+            print("  this set's own run-to-run variance is not a result (see the five")
+            print("  misreadings above). The set's set.json names its voices and the")
+            print("  holdout file they came from - read it before trusting a comparison.")
+        else:
+            print("  no clips found - render it with:")
+            print(f"    python -m eval.generate_positives --wake-word <phrase> --voice-holdout")
+        print("=" * 70)
+
     # --- machine-readable copy of the same numbers -------------------------------
     # --json is the hook the run ledger (improvement.md P0.5) reads; the values are
     # exactly what the report above printed, nothing recomputed a second way.
@@ -583,6 +640,11 @@ def main():
                 if detected_cmd is not None else None
             ),
             "gates": [{"check": text, "gate": gate, "pass": ok} for text, gate, ok in checks],
+            # Deliberately a top-level sibling of "positives" and "gates", never
+            # inside either: the voice-holdout set is a synthetic ranking signal
+            # and a ledger reader must not be able to mistake it for the
+            # real-speaker numbers it sits beside (improvement.md P1.2).
+            "voice_holdout_set": voice_holdout_result,
         }
         path = Path(args.json_path)
         path.parent.mkdir(parents=True, exist_ok=True)

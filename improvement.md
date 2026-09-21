@@ -206,6 +206,22 @@ only one where you can cheaply get n in the thousands.
   per-speaker ranking across the seven mww runs already in `output/`? If it doesn't,
   the proxy is worthless and should be dropped rather than trusted.
 
+**Done (2026-09-05).** `wordlists/voice_holdout.yaml` is the tracked list (7 Kokoro
+voices from the live catalog, 2 single-speaker Piper pairs; audited, and disjoint
+from both the trainable set and the in-corpus eval voices), with `load_voice_holdout()`
+and `exclude_voice_holdout()` in `wordlists/__init__.py`: both corpus builders
+(`train/oww/train.py`, `train/mww/corpus.py`) exclude the entries, the live catalog
+is the source of truth (a stale entry exits loudly, naming the file to update; a
+missing file is a no-op), and the manifest records the list. `generate_positives.py
+--voice-holdout` (make render-voice-holdout) renders the set into its own
+`data/corpus/eval/voice_holdout_tts/` at speeds 0.7-1.3 - the training range, since
+the held-out axis is the voice - and writes a `set.json` labelling it a ranking set,
+not a gate. `eval_model.py --voice-holdout-set` scores it as a separate, labelled
+block (its own JSON key, never merged into the gates), which stay on the real
+`data/recordings/holdout/`; the top two or three of the ranked points go there.
+Seven unit tests in `tests/test_voice_holdout.py` (suite 45 → 52). The correlation
+sanity check above is the follow-up once sweep points exist.
+
 ### P1.3 Un-confound the oww trainer's hidden weight doubling
 
 Fact 7: with `target_false_positives_per_hour` at 0.1, `auto_train` can double

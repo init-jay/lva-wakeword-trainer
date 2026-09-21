@@ -121,7 +121,8 @@ from train.corpus.positives import (PLAIN_SPEED_GRID,  # noqa: E402
                                     plain_positive_texts)
 from train.corpus.real import copy_real_samples  # noqa: E402
 from train.corpus import manifest as corpus_manifest  # noqa: E402
-from wordlists import path_for  # noqa: E402
+from wordlists import exclude_voice_holdout, load_voice_holdout  # noqa: E402
+from wordlists import path_for, voice_holdout_path  # noqa: E402
 
 
 def main():
@@ -268,6 +269,12 @@ def main():
                  "this corpus, because the negatives are Piper-only")
 
     voices = []
+    # The voice holdout (improvement.md P1.2): loaded once here, enforced below
+    # against whichever engine is actually in play - the live catalog is the
+    # source of truth, so a list that drifted from it fails loudly instead of
+    # silently excluding nothing. No tracked file (a checkout predating it) is
+    # a no-op, and says so.
+    holdout = load_voice_holdout()
     if args.kokoro_fraction < 1.0:
         print(f"[Piper] {args.piper_url}")
         voices = select_piper_voices(
@@ -276,6 +283,24 @@ def main():
             max_speakers=args.piper_speakers)
         if not voices:
             sys.exit("  no usable Piper voices - nothing to generate")
+        if holdout.get("piper"):
+            # Same fail-loudly rule as the openWakeWord side: a holdout pair the
+            # audited selection no longer carries (dropped by the audit tables,
+            # or gone from the catalog) cannot serve as an eval voice either,
+            # so the tracked list must move, not the audit.
+            n_before = len(voices)
+            voices, holdout_missing = exclude_voice_holdout("piper", voices, holdout)
+            if holdout_missing:
+                sys.exit(f"  ERROR: the voice holdout ({voice_holdout_path()}) names "
+                         f"Piper (voice, speaker) pair(s) the live audited "
+                         f"selection does not carry: {holdout_missing}. Update the "
+                         f"tracked list to match the catalog this corpus is "
+                         f"built from.")
+            print(f"  Excluding {n_before - len(voices)} voice-holdout (voice, speaker) "
+                  f"pair(s) reserved for the synthetic ranking set")
+        else:
+            print(f"  NOTE: no voice holdout at {voice_holdout_path()} - the "
+                  f"synthetic ranking set has no reserved voices")
 
     # KOKORO SUPPLEMENTS THE PHRASE-ALONE BUDGET (see the module docstring):
     # a share of what Piper would have rendered is rendered by it instead.
@@ -302,6 +327,17 @@ def main():
             print(f"  Excluding {len(mispron)} voice(s) that mispronounce the "
                   f"wake word: {', '.join(mispron)}")
         kokoro_voices = [v for v in kokoro_voices if v not in excluded]
+        if holdout.get("kokoro"):
+            n_before = len(kokoro_voices)
+            kokoro_voices, holdout_missing = exclude_voice_holdout(
+                "kokoro", kokoro_voices, holdout)
+            if holdout_missing:
+                sys.exit(f"  ERROR: the voice holdout ({voice_holdout_path()}) names "
+                         f"Kokoro voice(s) the live catalog does not offer: "
+                         f"{holdout_missing}. Update the tracked list.")
+            print(f"  Excluding {n_before - len(kokoro_voices)} voice-holdout "
+                  f"voice(s) reserved for the synthetic ranking set: "
+                  f"{', '.join(holdout.get('kokoro') or [])}")
         if not kokoro_voices:
             sys.exit("  no usable Kokoro voices - re-run with "
                      "--kokoro-fraction 0 (all Piper)")
@@ -367,6 +403,9 @@ def main():
     corpus_manifest.write_manifest(
         root, args.wake_word, "mww",
         seed=args.seed,
+        # The REQUESTED shaping (what a later --skip reuse check diffs) plus the
+        # holdout list, so the manifest names the exclusion: the voice set the
+        # manifest records is already holdout-free, and the list says why.
         shaping={
             "samples_per_voice": args.samples_per_voice,
             "negatives_per_voice": args.negatives_per_voice,
@@ -377,6 +416,7 @@ def main():
             "piper_languages": args.piper_languages,
             "negatives_file": args.negatives_file,
             "no_trim": args.no_trim,
+            "voice_holdout": holdout,
         },
         engines={
             "piper": {"url": args.piper_url, "version": None},

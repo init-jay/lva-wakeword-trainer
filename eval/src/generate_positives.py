@@ -90,6 +90,7 @@ sys.path.insert(0, str(paths.REPO_ROOT / "tts-service" / "tts_protocol"))
 
 from tts_protocol import TtsClient  # noqa: E402
 from train.corpus.piper import select_piper_voices  # noqa: E402
+from wordlists import load_voice_holdout, voice_holdout_path  # noqa: E402
 
 SR = 16000
 FULL_SCALE = 32768.0
@@ -106,6 +107,15 @@ SPEEDS = [0.55, 0.65, 0.75, 1.0, 1.25, 1.4, 1.6]
 # Real recordings came in at a median peak of -22 dBFS. -12 is where they should be.
 LEVELS_DBFS = [-6, -12, -18, -22, -28, -34]
 
+# The voice-holdout ranking set (--voice-holdout): the held-out axis is the
+# VOICE, so every other axis stays inside the training distribution - train.py
+# renders positives at speeds drawn from U(0.7, 1.3), so this grid (its
+# inclusive bounds and the midpoints between them) keeps speed in-distribution
+# while still giving each voice five renders. A synthetic voice is not a
+# person: this set ranks sweep points (low variance, a real n), it does not
+# stand in for the speaker-generalisation gates on the real holdout.
+HOLDOUT_SPEEDS = [0.7, 0.85, 1.0, 1.15, 1.3]
+
 # SNR against added room tone, in dB.
 SNRS_DB = [30, 20, 15, 10, 5]
 
@@ -116,6 +126,80 @@ COMMANDS = [
     "set a timer for five minutes", "what's the weather like today?",
     "turn the volume down a bit",
 ]
+
+
+def _holdout_voices(args, engine, selection, holdout):
+    """The holdout SET itself, checked against the live `selection`.
+
+    The exclusion contract runs the OTHER way here than in the corpus builders:
+    they DROP the holdout entries from the catalog, this renderer TAKES them -
+    the set is rendered from the held-out voices, and the live catalog is still
+    the source of truth, so a tracked entry the selection no longer carries is
+    a stale list and an error here, not a skip (improvement.md P1.2).
+    """
+    entries = holdout.get(engine) or []
+    if not entries:
+        sys.exit(f"ERROR: the voice holdout ({voice_holdout_path()}) reserves no "
+                 f"{engine} voices - nothing to render")
+    if engine == "kokoro":
+        offered = set(selection)
+        missing = [e for e in entries if e not in offered]
+    else:
+        # (voice, speaker-or-None) pairs; a bare voice (speaker None) must match
+        # at least one speaker of that model the selection carries.
+        missing = [e for e in entries
+                   if not any(p[0] == e[0] and (e[1] is None or p[1] == e[1])
+                              for p in selection)]
+    if missing:
+        what = "voice(s)" if engine == "kokoro" else "(voice, speaker) pair(s)"
+        sys.exit(f"ERROR: the voice holdout ({voice_holdout_path()}) names {engine} "
+                 f"{what} the live catalog does not carry: {missing}. Update the "
+                 f"tracked list to match the catalog, rather than rendering a set "
+                 f"whose holdout cannot be enforced.")
+    shown = [e if not isinstance(e, tuple) else f"{e[0]}:{e[1]}"
+             if e[1] is not None else e[0] for e in entries]
+    print(f"  voice holdout: this set renders the {len(entries)} held-out {engine} "
+          f"voice(s) (of {len(selection)} offered): {', '.join(shown)}")
+    return list(entries)
+
+
+def set_manifest(out, args, written, holdout):
+    """Label the rendered directory so nothing can read it as a real-speaker gate.
+
+    The directory name (voice_holdout_tts) and the filename prefix (holdout_)
+    already say what the set is; this file says it deliberately - a future run
+    that points eval_model.py --positives at it by mistake still has to read
+    the label first.
+    """
+    import json
+    from datetime import datetime, timezone
+    manifest = {
+        "set": "voice-holdout synthetic ranking set (improvement.md P1.2)",
+        "what_it_is": ("Positives rendered ONLY from the voices "
+                       "wordlists/voice_holdout.yaml holds out of every corpus "
+                       "build: voice-disjoint from training, every other axis "
+                       "inside the training distribution (speeds 0.7-1.3, plain "
+                       "phrase)."),
+        "what_it_is_not": ("A speaker-generalisation gate. A synthetic voice is "
+                           "not a person; this set is a low-variance RANKING "
+                           "signal for sweep points. The gates stay on the real "
+                           "held-out recordings in data/recordings/holdout/, and "
+                           "the top sweep points go there, not here."),
+        "wake_word": args.wake_word,
+        "tts": args.tts,
+        "holdout_file": str(voice_holdout_path()),
+        "holdout": {k: (v if not v or not isinstance(v[0], tuple)
+                        else [x if not isinstance(x, tuple)
+                             else (f"{x[0]}:{x[1]}" if x[1] else x[0])
+                             for x in v]) for k, v in (holdout or {}).items()},
+        "speeds": HOLDOUT_SPEEDS,
+        "voices_rendered": sorted({vtag(v) for v in args.voices}),
+        "clips_written": written,
+        "created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    path = Path(out) / "set.json"
+    path.write_text(json.dumps(manifest, indent=2) + "\n")
+    print(f"\n{path} (the set's label - read it before scoring)")
 
 
 def vtag(voice):
@@ -200,6 +284,15 @@ def plan(args):
                     text = template.format(phrase=phrase, command=command)
                     jobs.append((f"cmd_{variant}_{i:02d}_{vtag(voice)}.wav", voice, 1.0,
                                  None, text))
+    if "holdout" in args.sweeps:
+        # Every voice, every in-distribution speed: the held-out variable is the
+        # voice, and all five renders per voice count toward its n. Filenames
+        # carry the swept value (the speed), so --by-group can still separate
+        # the points.
+        for speed in HOLDOUT_SPEEDS:
+            for voice in voices:
+                jobs.append((f"holdout_{speed:.2f}_{vtag(voice)}.wav", voice, speed,
+                             None, phrase))
     return jobs
 
 
@@ -257,6 +350,16 @@ def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--wake-word", required=True, help="The phrase to render")
+    p.add_argument("--voice-holdout", action="store_true",
+                   help="Render the voice-HOLDOUT synthetic ranking set instead of "
+                        "the training-distribution sanity corpus: every clip from "
+                        "the voices wordlists/voice_holdout.yaml reserves out of "
+                        "every corpus build (the catalog is checked live, and a "
+                        "held-out voice it no longer offers is an error, not a "
+                        "skip), at speeds inside the 0.7-1.3 training range. "
+                        "Output goes to data/corpus/eval/voice_holdout_tts by "
+                        "default and is reported as a ranking signal, never as "
+                        "a speaker-generalisation gate (improvement.md P1.2)")
     p.add_argument("--url", default="tcp://127.0.0.1:8900",
                    help="Kokoro protocol server: a tcp:// spec (the MLX engine's"
                         " default port on a Mac, the Docker kokoro service's 8899 on"
@@ -277,8 +380,9 @@ def main():
                    help="output directory (default: %(default)s)")
     p.add_argument("--sweeps", nargs="+",
                    default=["voices", "speed", "level", "noise", "command"],
-                   choices=["voices", "speed", "level", "noise", "command"],
-                   help="which sweeps to generate")
+                   choices=["voices", "speed", "level", "noise", "command", "holdout"],
+                   help="which sweeps to generate (--voice-holdout defaults to "
+                        "holdout: every held-out voice at every in-distribution speed)")
     p.add_argument("--voices-per-step", type=int, default=6,
                    help="voices per point in the speed/level/noise sweeps "
                         "(default: %(default)s)")
@@ -292,24 +396,83 @@ def main():
                    help="list what would be generated without calling the server")
     args = p.parse_args()
 
+    # --voice-holdout takes over two defaults: the voice SET (the tracked
+    # holdout list, not the in-distribution VOICES list) and the OUTPUT
+    # (its own directory, so the existing positives/negatives corpora stay
+    # byte-for-byte untouched). Both only when the user has not set them.
+    if args.voice_holdout:
+        if args.out == str(paths.POSITIVES_DIR):
+            args.out = str(paths.EVAL_CORPUS_DIR / "voice_holdout_tts")
+        if args.sweeps == ["voices", "speed", "level", "noise", "command"]:
+            args.sweeps = ["holdout"]
+
     # Engine construction is offline (no I/O), so it happens before the dry-run
     # even though voice SELECTION for Piper needs the live catalog.
+    holdout = load_voice_holdout() if args.voice_holdout else None
+    if args.voice_holdout and not holdout:
+        # The no-op rule applies to the TRAINERS (no tracked file: train on the
+        # whole catalog, print a note). It does not apply here: with no reserved
+        # voices there is nothing to render, and falling back to the in-corpus
+        # VOICES list would be a training-distribution measurement wearing the
+        # holdout's label - the one outcome this whole item exists to prevent.
+        sys.exit(f"ERROR: --voice-holdout needs the tracked list at "
+                 f"{voice_holdout_path()}, which is absent or empty. The trainers "
+                 f"treat that as a no-op (a fresh checkout predating the file "
+                 f"still trains); the ranking set cannot - create the file first.")
     if args.tts == "piper":
         args.engine = TtsClient(args.piper_url)
         if args.dry_run:
-            args.voices = ["<live Piper catalog>"]
+            if holdout is not None:
+                if holdout.get("piper"):
+                    args.voices = list(holdout["piper"])
+                    print(f"  NOTE: --dry-run - the {len(args.voices)} held-out (voice, speaker) "
+                          f"pairs are taken as written; the live selection check happens on "
+                          f"the real render")
+                else:
+                    sys.exit(f"ERROR: the voice holdout ({voice_holdout_path()}) reserves "
+                             f"no Piper pairs - nothing to render for --tts piper")
+            else:
+                args.voices = ["<live Piper catalog>"]
         else:
             # The trainer's audited selection: drops the voices whose pronunciation
             # of this wake word failed the audit, so the corpus cannot contain
             # mislabelled phrases - the failure mode the Kokoro side spent eleven
             # runs discovering (train/corpus/piper.py).
-            args.voices = select_piper_voices(args.piper_url, args.wake_word,
-                                              max_speakers=args.max_speakers)
-            if not args.voices:
+            selection = select_piper_voices(args.piper_url, args.wake_word,
+                                            max_speakers=args.max_speakers)
+            if not selection:
                 sys.exit("ERROR: no usable Piper voices")
+            if holdout is not None:
+                # The set is the held-out pairs themselves (checked against the
+                # audited selection: a pair the audit dropped cannot render the
+                # eval set either, so the tracked list must move, not the audit).
+                args.voices = _holdout_voices(args, "piper", selection, holdout)
+            else:
+                args.voices = selection
+        if not args.voices:
+            sys.exit("ERROR: no usable Piper voices")
     else:
         args.engine = TtsClient(args.url)
-        args.voices = VOICES
+        if holdout is not None and not holdout.get("kokoro"):
+            sys.exit(f"ERROR: the voice holdout ({voice_holdout_path()}) reserves no "
+                     f"Kokoro voices - nothing to render for --tts kokoro")
+        if holdout is not None and holdout.get("kokoro"):
+            # The live catalog is the source of truth, but --dry-run's contract
+            # is to call no server at all: without one the list is taken as
+            # written and the check is deferred to the real render, which does
+            # it unconditionally (a stale list there is a sys.exit, not a skip).
+            if args.dry_run:
+                args.voices = list(holdout["kokoro"])
+                print(f"  NOTE: --dry-run - the {len(args.voices)} holdout voices "
+                      f"are taken as written; the live catalog check happens on "
+                      f"the real render")
+            else:
+                catalog = args.engine.voices()
+                args.voices = _holdout_voices(args, "kokoro", catalog, holdout)
+        else:
+            args.voices = VOICES
+        if not args.voices:
+            sys.exit("ERROR: no usable Kokoro voices")
 
     jobs = plan(args)
     if args.dry_run:
@@ -329,7 +492,8 @@ def main():
     args.engine.voices()
     print(f'generating {len(jobs)} positives for "{args.wake_word}" -> {out} '
           f"({args.engine.server_engine or args.engine.name}, "
-          f"{len(args.voices)} voices)")
+          f"{len(args.voices)} voices)" + ("  [VOICE-HOLDOUT set]"
+                                          if args.voice_holdout else ""))
 
     # Render first, in engine order (voice-outer for Piper), then post-process in
     # parallel as before - the sweeps differ only in post-processing, so one
@@ -351,11 +515,22 @@ def main():
         print(" ", line)
     print(f"\n{written} written, {len(failures)} failed")
     if written:
-        print("\nNOTE: these are training-distribution clips. High detection here means")
-        print("the training run worked, not that the model generalises to new speakers.")
-        print("The speed points outside 0.7-1.3, and the level/noise sweeps, are the")
-        print("parts that test something training did not already cover.")
-        print(f"\nevaluate with:\n  python eval_model.py --model MODEL --positives {out}")
+        if args.voice_holdout:
+            set_manifest(out, args, written, holdout)
+            print("\nNOTE: this is the voice-HOLDOUT synthetic ranking set, not the")
+            print("training-distribution corpus: every clip is a voice the corpus")
+            print("builders never train on, at speeds inside the 0.7-1.3 training")
+            print("range. A synthetic voice is not a person - this ranks sweep")
+            print("points (low variance, a real n); the speaker-generalisation")
+            print("gates stay on data/recordings/holdout/, where the top points go.")
+            print(f"\nevaluate with (labelled block, never merged into the gates):\n"
+                  f"  python eval_model.py --model MODEL --voice-holdout-set {out}")
+        else:
+            print("\nNOTE: these are training-distribution clips. High detection here means")
+            print("the training run worked, not that the model generalises to new speakers.")
+            print("The speed points outside 0.7-1.3, and the level/noise sweeps, are the")
+            print("parts that test something training did not already cover.")
+            print(f"\nevaluate with:\n  python eval_model.py --model MODEL --positives {out}")
 
 
 if __name__ == "__main__":
