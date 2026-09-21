@@ -254,9 +254,19 @@ all - it ALWAYS fires, and a run requesting 2000 trains sequence 1 at 2000, sequ
 at 4000, sequence 3 at 8000. The run-8 comparison was therefore 8000 vs 16000 on
 sequences 2-3, not 2000 vs 4000.
 
-- Then re-measure the weight lever with the doubling visible. Until that is done,
-  treat the run-8 note as provisional - and update the comment in the same edit, per
-  CLAUDE.md's convention.
+- Re-measure: resolved by inspection plus live audit, 2026-09-22 - no new run
+  needed. The doubling condition (`best_val_fp > target_fp_per_hour`, with
+  `best_val_fp` fixed at 1000) depends only on `--target-fp-per-hour`, which
+  was identical for both run-8 points; `--max-negative-weight` does not
+  enter it. The audit lines prove the pattern live (requested 2000 ->
+  effective 2000/4000/8000 per sequence, filed in config.json as
+  `effective_max_negative_weight`). So run 8 was a fair comparison of
+  effective 8000 vs 16000 at sequence 3, and its verdict (4000 not better,
+  leave the default) stands as the effective-weight measurement - the note
+  in train/oww/train.py is no longer provisional (updated in the same edit,
+  per CLAUDE.md). What the audit DOES enable, as a new lever position not
+  yet measured: a LOWER setting (e.g. 1000 -> effective peak 4000), if a
+  future run's FP rate invites it.
 
 ### P1.4 Log the checkpoint merge
 
@@ -628,9 +638,9 @@ config half.
   synthetic set. Both far under the ~2 min bar - no code change (full note at P2.2).
 
 **Still open:**
-- P2.3 (CoreML probe), P1.3
-  re-measurement of the weight lever, P1.2 (held-out-voice set), the Docker
-  image rebuild (new patches only live in the host route until then).
+- P2.3 (CoreML probe). The Docker image rebuild (new patches only live in the host
+  route until the build lands - in progress 2026-09-22). P1.2 is done above
+  except the Piper half of its rendered set (no Piper engine on this Mac).
 - P0.1 bar test (two same-seed runs → byte-identical .onnx) — the gate before any sweep.
   **MET at 2026-09-21 19:20**: run A (full corpus rebuild seed 1234 + augment + features
   + train) and run B (`--skip-corpus`, features reused via the sidecar) produced

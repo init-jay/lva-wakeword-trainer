@@ -851,7 +851,13 @@ def main():
                         help="How hard false positives are penalised by the end of "
                              "training (default: %(default)s). Higher trades "
                              "detection for precision - but so does the detection "
-                             "threshold, for free. Measured in tuning run 8. Recommend to leave at default.")
+                             "threshold, for free. Measured in tuning run 8, which "
+                             "compared requested 2000 vs 4000; the weight doubling "
+                             "is unconditional (best_val_fp is never updated - see "
+                             "patches/log-weight-and-merge.py and improvement.md "
+                             "P1.3), so that was effective 2000/4000/8000 vs "
+                             "4000/8000/16000 per sequence: a fair comparison, 4000 "
+                             "was not better. Recommend to leave at default.")
     parser.add_argument("--augmentation-rounds", type=int, default=3,
                         help="How many differently-augmented copies of each clip to "
                              "compute features for (default: %(default)s). Multiplies "
