@@ -544,9 +544,9 @@ echo
 echo "    Compare the wall time against the container's 26m06s (this machine, 2026-09-06)"
 echo "    and the per-stage numbers against tools/tf_probe.py and tools/bench_tts.py."
 echo
-echo "    Evaluate (Docker, unchanged):"
-echo "      cd eval && docker compose run --rm eval python -m eval.eval_model \\"
-echo "          --model $TAGGED_MODEL"
+echo "    Evaluate (host, P2.4; Docker still works):"
+echo "      eval/.venv/bin/python eval/src/eval_model.py --model $TAGGED_MODEL"
+echo "      # or: cd eval && docker compose run --rm eval python -m eval.eval_model \\ --model ..."
 echo "    Confirm the cutoff against the held-out recordings before deploying it;"
 echo "    the per-speaker rows are the ones that decide it."
 fi

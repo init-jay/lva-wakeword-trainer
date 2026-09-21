@@ -638,9 +638,13 @@ config half.
   synthetic set. Both far under the ~2 min bar - no code change (full note at P2.2).
 
 **Still open:**
-- P2.3 (CoreML probe). The Docker image rebuild (new patches only live in the host
-  route until the build lands - in progress 2026-09-22). P1.2 is done above
-  except the Piper half of its rendered set (no Piper engine on this Mac).
+- P2.3 (CoreML probe). P1.2 is done above except the Piper half of its rendered
+  set (no Piper engine on this Mac).
+**Docker image rebuild: done 2026-09-22** - both CPU images rebuilt with the
+new patches and code (verified in-image: 8 PATCHED markers in the oww clone,
+smoke/ledger code present in the mww image). The container routes now match
+the host route; the CUDA images on the training box still need their next
+build to pick the new patches up.
 - P0.1 bar test (two same-seed runs → byte-identical .onnx) — the gate before any sweep.
   **MET at 2026-09-21 19:20**: run A (full corpus rebuild seed 1234 + augment + features
   + train) and run B (`--skip-corpus`, features reused via the sidecar) produced
