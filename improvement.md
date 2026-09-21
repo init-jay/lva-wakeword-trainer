@@ -213,12 +213,22 @@ Fact 7: with `target_false_positives_per_hour` at 0.1, `auto_train` can double
 `train/oww/train.py` (2000 vs 4000) was comparing *requested* weights whose *effective*
 values are unknown.
 
-- Log, per sequence, the weight actually used and whether the doubling fired. Write it
-  into the run's `<tag>.config.json` as `effective_max_negative_weight`.
-- Expose `target_false_positives_per_hour` as a CLI flag (it is set to 0.1 in
-  `create_config` with no comment justifying the departure from upstream's 0.2).
+**Logging: implemented (`patches/log-weight-and-merge.py`, applied by the setup script
+and both oww Dockerfiles).** Each sequence now prints
+`# WEIGHT_AUDIT sequence=<n> requested=<x> doubled=<bool> effective=<y>` at the moment
+the decision happens, and the wrapper files the per-sequence list in
+`<tag>.config.json` as `effective_max_negative_weight` (appended after the tag is
+computed, so the outcome cannot move the tag). `--target-fp-per-hour` already existed;
+its help now names the doubling.
+
+The first verified run made the condition itself visible: `best_val_fp` is initialised
+to 1000 in `Model.__init__` and is never updated, so the doubling is not conditional at
+all - it ALWAYS fires, and a run requesting 2000 trains sequence 1 at 2000, sequence 2
+at 4000, sequence 3 at 8000. The run-8 comparison was therefore 8000 vs 16000 on
+sequences 2-3, not 2000 vs 4000.
+
 - Then re-measure the weight lever with the doubling visible. Until that is done,
-  treat the run-8 note as provisional — and update the comment in the same edit, per
+  treat the run-8 note as provisional - and update the comment in the same edit, per
   CLAUDE.md's convention.
 
 ### P1.4 Log the checkpoint merge
@@ -228,6 +238,11 @@ percentile. That is a plausible mechanism for a large share of the observed
 run-to-run variance and it is currently invisible. Log the number of merged
 checkpoints and their steps. If the count swings between runs at a fixed seed and
 fixed features, that is the variance, found.
+
+**Logging: implemented (same patch).** The merge prints one `# MERGE_AUDIT merged
+step=<n> seq=<s>` line per checkpoint that cleared the gate, plus a summary
+`# MERGE_AUDIT cleared=<k>/<total> percentile=90 steps=<...>`, and the wrapper files
+the steps list in `<tag>.config.json` as `merged_checkpoints`.
 
 ---
 
@@ -420,10 +435,11 @@ Stated so nobody spends a run re-deriving what this repo already measured:
 
 ## One latent trap, noted while reading
 
-`openwakeword/train.py:294` and `:317` build `val_steps` as `np.int16`. Sequences 2 and
-3 run at `steps/10`, so at the default 50,000 they are fine — but `--training-steps`
-above ~327,000 overflows to negative validation steps with no error. If a sweep ever
-reaches for very long runs, patch it to `int64` first. (SPEED.md's run-11 note already
+`openwakeword/train.py` built `val_steps` as `np.int16` in sequences 2 and 3.
+Sequences 2 and 3 run at `steps/10`, so at the default 50,000 they were fine - but
+`--training-steps` above ~327,000 overflowed to negative validation steps with no
+error. **Now fixed in `patches/log-weight-and-merge.py` (int64, like sequence 1's
+array - identical below the bound).** (SPEED.md's run-11 note already
 found 100k steps to be worse at matched false accepts, so this is a trap rather than a
 recommendation.)
 

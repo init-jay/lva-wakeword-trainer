@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -427,7 +428,10 @@ def create_config(wake_word: str, n_samples: int, training_steps: int,
     # doubling - each sequence that ends with best_val_fp above this target
     # doubles max_negative_weight (it can fire twice, so a run requesting 2000
     # can train at 8000). Upstream's default is 0.2; this repo wrote 0.1 at
-    # creation and has never measured the departure.
+    # creation and has never measured the departure. The EFFECTIVE per-sequence
+    # weights are now audited into <tag>.config.json (patches/
+    # log-weight-and-merge.py), so a sweep against this target finally has
+    # its actual weights on the record.
     config["target_false_positives_per_hour"] = target_fp_per_hour
     # auto_train's base learning rate. Upstream hardcoded 0.0001 inside the
     # method - not a config key, not a flag - so this key and
@@ -629,8 +633,24 @@ def report_free_vram():
         print(f"  Could not read VRAM: {e}")
 
 
+# The machine-readable audit lines patches/log-weight-and-merge.py makes the
+# upstream trainer print at the moments of its two hidden decisions - the
+# per-sequence negative-weight (the doubling, improvement.md P1.3) and the
+# checkpoint merge (P1.4). The wrapper captures them in-process as the
+# subprocess streams; reading the run log after the fact is not an option:
+# the log exists only when the run script's `script -q` wrote it, through a
+# pty (with escape codes), and the direct-invocation path has no log at all.
+_AUDIT_RE = re.compile(r"^#\s*(WEIGHT_AUDIT|MERGE_AUDIT)\s+(\S.*)$")
+
+
 def run_training():
-    """Run OpenWakeWord model training."""
+    """Run OpenWakeWord model training.
+
+    Returns (returncode, audit). audit maps "weight"/"merge" to the raw
+    audit lines captured from the subprocess stdout; main() files them in
+    <tag>.config.json AFTER computing the run tag (outcomes, not inputs -
+    see main).
+    """
     print("\n" + "=" * 60)
     print("Training model...")
     print("=" * 60)
@@ -641,12 +661,63 @@ def run_training():
     report_free_vram()
 
     train_script = str(WORK_DIR / "openwakeword/openwakeword/train.py")
-    result = subprocess.run([
-        sys.executable, train_script,
-        "--training_config", "training_config.yaml",
-        "--train_model"
-    ], env=_trainer_env())
-    return result.returncode
+    # stdout is CAPTURED and echoed line by line: the echo keeps the bar and
+    # audit lines in the run log exactly as before (stdout inherited), and the
+    # capture is what lets main() file the audit lines in <tag>.config.json.
+    # stderr is inherited: torch's dataloader-fork warnings are the only
+    # output there and the run script's log already records them.
+    proc = subprocess.Popen(
+        [
+            sys.executable, train_script,
+            "--training_config", "training_config.yaml",
+            "--train_model",
+        ],
+        env=_trainer_env(),
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    audit = {"weight": [], "merge": []}
+    try:
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            m = _AUDIT_RE.match(line)
+            if m:
+                (audit["weight"] if m.group(1) == "WEIGHT_AUDIT"
+                 else audit["merge"]).append(m.group(2).strip())
+    finally:
+        proc.stdout.close()
+    returncode = proc.wait()
+    return returncode, audit
+
+
+def _parse_audit_lines(audit):
+    """The captured audit lines as <tag>.config.json values.
+
+    effective_max_negative_weight is the PER-SEQUENCE list (requested /
+    doubled / effective per sequence): the honest form, since sequences 2
+    and 3 each see a different weight (P1.3). merged_checkpoints is the
+    steps list from the merge summary line (P1.4) - a present-but-EMPTY
+    list means the gate ran and nothing cleared it (upstream then exports
+    the live model as-is), which is a different record from the null filed
+    when the line is missing entirely (patch not applied).
+    Returns (weight, steps, merge_seen).
+    """
+    weight = []
+    for line in audit["weight"]:
+        kv = dict(p.split("=", 1) for p in line.split())
+        weight.append({
+            "sequence": int(kv["sequence"]),
+            "requested": int(kv["requested"]),
+            "doubled": kv["doubled"].lower() == "true",
+            "effective": int(kv["effective"]),
+        })
+    steps, merge_seen = [], False
+    for line in audit["merge"]:
+        if line.startswith("cleared="):
+            merge_seen = True
+            kv = dict(p.split("=", 1) for p in line.split())
+            steps = [int(s) for s in kv["steps"].split(",") if s]
+    return weight, steps, merge_seen
 
 
 def main():
@@ -762,8 +833,9 @@ def main():
                              "ends with best_val_fp above it DOUBLES "
                              "max_negative_weight - it can fire twice, so a run "
                              "requesting --max-negative-weight 2000 can train at "
-                             "8000. Upstream's default is 0.2; this repo's 0.1 "
-                             "is an unmeasured departure from it.")
+                             "8000. The effective per-sequence weights are audited "
+                             "into <tag>.config.json. Upstream's default is 0.2; "
+                             "this repo's 0.1 is an unmeasured departure from it.")
     parser.add_argument("--target-accuracy", type=float, default=0.7,
                         help="Checkpoint-merge gate for validation accuracy "
                              "(default: %(default)s, the value this repo has "
@@ -1274,7 +1346,7 @@ def main():
     model_path = WORK_DIR / "output" / safe_name / "oww" / f"{safe_name}.onnx"
     before = model_path.stat().st_mtime if model_path.exists() else None
 
-    returncode = run_training()
+    returncode, audit = run_training()
 
     # Whether the model was WRITTEN is the real signal, not the exit code.
     # openwakeword saves the .onnx and then tries to convert it to tflite, which fails
@@ -1314,10 +1386,24 @@ def main():
     # get different names and can both be filed - today they share a tag and the
     # second one overwrites the first. The FULL resolved config (paths included)
     # is what the ledger reads, and it is filed under the tag that identifies it.
+    # The audit keys are appended to the filed copy AFTER the tag is computed:
+    # they are OUTCOMES of the run (which weights actually ran, which
+    # checkpoints the merge chose), not inputs, and the merge gate is
+    # thresholded on the run's own validation metrics, so they can differ
+    # between two runs at an identical config. A tag that moved with them
+    # would rename comparable runs and break the ledger's one-tag-one-run
+    # contract.
     resolved = yaml.safe_load((WORK_DIR / "training_config.yaml").read_text())
     tag = provenance.run_tag(wake_word, target="oww",
                              config=_tag_input(resolved),
                              fallback=time.strftime("%Y%m%d-%H%M%S"))
+    weight_audit, merged_checkpoints, merge_seen = _parse_audit_lines(audit)
+    if not weight_audit or not merge_seen:
+        print("WARNING: audit lines were missing from the training output (the "
+              "clone is probably missing patches/log-weight-and-merge.py); the "
+              "filed config records null for them.")
+    resolved["effective_max_negative_weight"] = weight_audit or None
+    resolved["merged_checkpoints"] = None if not merge_seen else merged_checkpoints
     config_json = model_path.parent / f"{tag}.config.json"
     config_json.write_text(json.dumps(resolved, indent=2, default=str) + "\n")
     # The wrapper scripts name the archived model after this same tag; reading it

@@ -184,7 +184,7 @@ assert 'CPUExecutionProvider' in onnxruntime.get_available_providers()"
 
 # --- patches ---------------------------------------------------------------------
 #
-# SIX OF THE SEVEN, and the omission is the point. See patches/ for each.
+# SEVEN OF THE EIGHT, and the omission is the point. See patches/ for each.
 
 COPY patches/skip-piper-import.py /tmp/skip-piper-import.py
 RUN python3 /tmp/skip-piper-import.py openwakeword/openwakeword/train.py
@@ -211,6 +211,16 @@ RUN python3 /tmp/seed-augment.py openwakeword/openwakeword/train.py
 # a sweep can move it from the CLI. See patches/configurable-lr.py.
 COPY patches/configurable-lr.py /tmp/configurable-lr.py
 RUN python3 /tmp/configurable-lr.py openwakeword/openwakeword/train.py
+
+# Make auto_train's two hidden decisions visible: the per-sequence negative
+# weight (its doubling can turn a requested 2000 into an effective 8000, and
+# whether it fired in a given run was never recorded) and the checkpoint
+# merge (which checkpoints cleared the 90th-percentile gate). Both print
+# machine-readable lines the wrapper files in <tag>.config.json. Also lifts
+# the int16 val_steps trap at --training-steps above ~327k.
+# See patches/log-weight-and-merge.py.
+COPY patches/log-weight-and-merge.py /tmp/log-weight-and-merge.py
+RUN python3 /tmp/log-weight-and-merge.py openwakeword/openwakeword/train.py
 
 # ANOTHER PATCH THIS IMAGE NEEDS AND THE CUDA ONE DOES NOT, and it patches an
 # installed dependency rather than the openWakeWord clone.

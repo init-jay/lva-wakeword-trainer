@@ -52,7 +52,7 @@ fi
 
 # --- patches ----------------------------------------------------------------------
 #
-# SIX OF SEVEN, the same six docker/Dockerfile.oww.cpu applies, for the same reasons.
+# SEVEN OF EIGHT, the same seven docker/Dockerfile.oww.cpu applies, for the same reasons.
 # gpu-resident-features.py is omitted: it moves the 17.28 GB feature array into VRAM,
 # and there is none here. On a 64 GB Mac the array simply lives in memory, which
 # removes the problem rather than working around it - a memory setting, not a
@@ -70,7 +70,8 @@ fi
 # method-local class, neither of which can be pickled. It is a no-op anywhere but
 # darwin, so it lives here rather than in the shared four.
 for p in skip-piper-import honour-augmentation-rounds feature-device-selection \
-         configurable-corpus-dir seed-augment configurable-lr macos-dataloader-fork; do
+         configurable-corpus-dir seed-augment configurable-lr log-weight-and-merge \
+         macos-dataloader-fork; do
     python3 "patches/$p.py" "$CLONE/openwakeword/train.py"
 done
 

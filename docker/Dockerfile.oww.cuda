@@ -96,6 +96,15 @@ RUN python3 /tmp/seed-augment.py openwakeword/openwakeword/train.py
 COPY patches/configurable-lr.py /tmp/configurable-lr.py
 RUN python3 /tmp/configurable-lr.py openwakeword/openwakeword/train.py
 
+# Patch: audit auto_train's two hidden decisions - the per-sequence negative
+# weight (its doubling can turn a requested 2000 into an effective 8000, and
+# whether it fired in a given run was never recorded) and the checkpoint merge
+# (which checkpoints cleared the 90th-percentile gate) - as machine-readable
+# lines the wrapper files in <tag>.config.json. Also lifts the int16 val_steps
+# trap at --training-steps above ~327k. See patches/log-weight-and-merge.py.
+COPY patches/log-weight-and-merge.py /tmp/log-weight-and-merge.py
+RUN python3 /tmp/log-weight-and-merge.py openwakeword/openwakeword/train.py
+
 # Patch: hold the training features in VRAM rather than mmap. The 17.28 GB
 # ACAV100M array against 20 GB of RAM leaves training stalling on page faults -
 # GPU at 14%, CPU 37% idle, 7.2 GB swapped. Requires `docker compose stop kokoro
