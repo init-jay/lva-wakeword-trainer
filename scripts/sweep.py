@@ -555,7 +555,14 @@ def main():
         if eval_enabled:
             json_path = out_dir / "eval" / f"{tag}.json"
             json_path.parent.mkdir(parents=True, exist_ok=True)
-            result = run_stage("eval", [eval_python, "-m", "eval.eval_model",
+            # Plain-path invocation, not `python -m eval.eval_model`: the
+            # module form exists only in the Docker image, where the mount
+            # makes the package name `eval` with eval_model.py at its top
+            # level. On the host the sources live in eval/src/ (a namespace
+            # package at eval/), so the module path does not resolve - the
+            # same lesson as generate_negatives.py (CLAUDE.md "Verify
+            # before asserting").
+            result = run_stage("eval", [eval_python, str(REPO_ROOT / "eval" / "src" / "eval_model.py"),
                                         "--model", str(artifact),
                                         "--json", str(json_path)],
                                stage_times)

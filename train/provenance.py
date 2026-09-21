@@ -293,8 +293,11 @@ def main():
 
     if config is not None:
         print(f"  {'config':<12}{config_tag(config)}")
-    print(f"  {'tag':<12}{run_tag(args.wake_word, target=args.target, config=config,
-                                  fallback=args.fallback)}")
+    # Single-line f-string deliberately: eval/.venv is Python 3.11 (the eval
+    # image's base) and multi-line f-strings are a 3.12 feature (PEP 701) -
+    # scripts/sweep.py imports this module and runs under either venv.
+    tag = run_tag(args.wake_word, target=args.target, config=config, fallback=args.fallback)
+    print(f"  {'tag':<12}{tag}")
 
     if missing:
         print()
