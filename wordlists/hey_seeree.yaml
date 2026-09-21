@@ -28,6 +28,137 @@ eval:
     - hey city hall
     - hey seeker
     - hey seaweed
+    # Widened 2026-09-21 (improvement.md P1.1): 20 clips made one clip worth
+    # 3.1 points of every matched-FA row. Same rule as above - real words that
+    # begin with the phrase's own syllables (se-/si-/ce-), then diverge.
+    - hey severe
+    - hey severe headache
+    - hey severe weather
+    - hey severity
+    - hey severely
+    - hey season
+    - hey seasons
+    - hey seasonal
+    - hey seasonings
+    - hey second
+    - hey seconds
+    - hey second floor
+    - hey second half
+    - hey second thought
+    - hey secondhand
+    - hey secondary
+    - hey section
+    - hey sectional
+    - hey secure
+    - hey security
+    - hey security code
+    - hey security deposit
+    - hey secretary
+    - hey sedan
+    - hey sedate
+    - hey seed
+    - hey seeds
+    - hey seeder
+    - hey seersucker
+    - hey seers
+    - hey seize
+    - hey seize the day
+    - hey seizure
+    - hey seen
+    - hey see-saw
+    - hey seashell
+    - hey seashore
+    - hey seasick
+    - hey seascape
+    - hey seaplane
+    - hey seaport
+    - hey seafarer
+    - hey search
+    - hey searching
+    - hey search results
+    - hey cedar
+    - hey cedar chest
+    - hey centipede
+    - hey century
+    - hey center
+    - hey center console
+    - hey centerpiece
+    - hey centimeter
+    - hey centigrade
+    - hey centennial
+    - hey cents
+    - hey sent
+    - hey sentry
+    - hey sentiment
+    - hey sentimental
+    - hey sentence
+    - hey sentences
+    - hey sensation
+    - hey sensory
+    - hey sensor
+    - hey sensors
+    - hey sense
+    - hey sensible
+    - hey sensibly
+    - hey sensational
+    - hey serene
+    - hey serenity
+    - hey serendipity
+    - hey sergeant
+    - hey sermon
+    - hey serum
+    - hey serum shot
+    - hey servant
+    - hey server
+    - hey servers
+    - hey service
+    - hey service station
+    - hey serviceman
+    - hey servicing
+    - hey serving
+    - hey serving dish
+    - hey serviette
+    - hey session
+    - hey sessions
+    - hey set it
+    - hey settled
+    - hey settlement
+    - hey settee
+    - hey setting
+    - hey settings
+    - hey setter
+    - hey settle down
+    - hey siren
+    - hey sirens
+    - hey sire
+    - hey sizzling
+    - hey sizzle
+    - hey size
+    - hey sizes
+    - hey size twelve
+    - hey sizing
+    - hey silver
+    - hey silvery
+    - hey silo
+    - hey sister
+    - hey sisters
+    - hey sister-in-law
+    - hey silkworm
+    - hey sitting
+    - hey sitting room
+    - hey sit tight
+    - hey sixty
+    - hey sixty-one
+    - hey sixty-two
+    - hey sixty-three
+    - hey sixty-four
+    - hey sixty-five
+    - hey sixty-seven
+    - hey sixty-eight
+    - hey sixty-nine
+    - hey sixty years old
+    - hey sissy
+    - hey sirocco
 
   # THE SAME SOUNDS INSIDE ORDINARY SPEECH, WITH NO CARRIER WORD. Tests that the
   # model needs the whole phrase rather than its distinctive second syllable.
@@ -62,14 +193,148 @@ eval:
     - hey, did you remember to lock the door?
     - hey Sean, are you coming?
     - hey Cecily, the food is ready.
+        # Widened 2026-09-21 (improvement.md P1.1): names that start with the
+    # phrase's second syllable are the hard cases (Se-, Si-, Sh-), then a
+    # broad pool of ordinary first names.
+    - hey Seamus
+    - hey Seb
+    - hey Sebastian
+    - hey Selah
+    - hey Selim
+    - hey Selina
+    - hey Selma
+    - hey Sena
+    - hey Serena
+    - hey Sergio
+    - hey Seth
+    - hey Shane
+    - hey Shana
+    - hey Shani
+    - hey Shelley
+    - hey Shelly
+    - hey Shelby
+    - hey Sheridan
+    - hey Sheri
+    - hey Sherin
+    - hey Sherri
+    - hey Sherrie
+    - hey Sherry
+    - hey Sherman
+    - hey Shirley
+    - hey Sherwood
+    - hey Sid
+    - hey Sidra
+    - hey Sienna
+    - hey Sigrid
+    - hey Silas
+    - hey Simone
+    - hey Simon
+    - hey Simona
+    - hey Sinclair
+    - hey Sina
+    - hey Sinead
+    - hey Siobhan
+    - hey Sofia
+    - hey Sonia
+    - hey Sonya
+    - hey Soren
+    - hey Sorrell
+    - hey Sou
+    - hey Alex
+    - hey Amy
+    - hey Andre
+    - hey Andy
+    - hey Anne
+    - hey Anna
+    - hey Anthony
+    - hey Anya
+    - hey Archie
+    - hey Asher
+    - hey Ashley
+    - hey Ava
+    - hey Bailey
+    - hey Bea
+    - hey Ben
+    - hey Benji
+    - hey Betty
+    - hey Bianca
+    - hey Bob
+    - hey Bobby
+    - hey Boyd
+    - hey Bradley
+    - hey Bruce
+    - hey Bruno
+    - hey Buddy
+    - hey Bud
+    - hey Burke
+    - hey Burt
+    - hey Butch
+    - hey Callie
+    - hey Carly
+    - hey Cassidy
+    - hey Catherine
+    - hey Celine
+    - hey Chandra
+    - hey Charles
+    - hey Chaz
+    - hey Cherri
+    - hey Chet
+    - hey Chip
+    - hey Chris
+    - hey Ciara
+    - hey Clive
+    - hey Cloe
+    - hey Cody
+    - hey Cole
+    - hey Colin
+    - hey Connie
+    - hey Conner
+    - hey Cooper
+    - hey Cori
+    - hey Craig
+    - hey Cy
+    - hey Cynthia
+    - hey Cyrus
+    - hey Dale
+    - hey Danni
+    - hey Dario
+    - hey Dash
+    - hey Dave
+    - hey David
+    - hey Dax
+    - hey Dean
+    - hey Debbie
+    - hey Dee
+    - hey Delia
+    - hey Delilah
+    - hey Dennis
+    - hey Deno
+    - hey Desi
+    - hey Desmond
+    - hey Didi
+    - hey Dilly
+    - hey Dino
+    - hey Dion
+    - hey Dirk
+    - hey Dot
+    - hey Dottie
+    - hey Dominic
+    - hey Donna
+    - hey Donny
+    - hey Doreen
+    - hey Dory
+    - hey Dougie
+    - hey Dove
+    - hey Drew
+    - hey Duke
+    - hey Dylan
+    - hey Eamon
+    - hey Easton
+    - hey Echo
+    - hey Ed
+    - hey Eden
+    - hey Edie
 
-  # BARE COMMANDS, NO WAKE WORD. Checks that command-shaped speech alone cannot trip
-  # it. These are also spliced onto positives by eval_model.py to build the
-  # command-following gate, and rendered after the phrase by generate_positives.py -
-  # so the same list does three jobs and must stay ordinary and unremarkable.
-  #
-  # DISJOINT FROM train/corpus/negatives.py:TRAINING_COMMANDS on purpose. Those are
-  # trained on; these are measured on.
   command:
     - what's the time?
     - turn on the lights please
