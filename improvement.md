@@ -514,9 +514,15 @@ config half.
   unmeasured.
 - P1.3/P1.4: DONE (commit 456e443) - WEIGHT_AUDIT/MERGE_AUDIT into config.json;
   finding: the doubling is unconditional (best_val_fp never updated).
-- P3.1/P2.5: --smoke on both trainers + Makefile entry point - implemented,
-  under end-to-end verification (a mangled newline in
-  run-mww-training-applesilicon.sh found by the first mww smoke run and fixed).
+- P3.1/P2.5: DONE (commit bca9f53) - --smoke on both trainers + Makefile
+  entry point (make help / smoke-oww / smoke-mww / test / eval / corpus-*).
+  Verified end-to-end 2026-09-22: oww smoke 13.5 min (exit 0, corpus reused,
+  features recomputed, canonical md5 + tag untouched), mww smoke ~1 min
+  (exit 0, tflite + ROC written). The first live runs caught and fixed
+  three environment bugs: a fused newline in the mww run script, uv's PEP 660
+  editable install shadowed by a namespace package from the repo root (now
+  a path .pth + __file__ asserts in setup/run), and get_default taking the
+  dest, not the option string, on recent 3.12.
 
 **Still open:**
 - P2.4 (host eval env), P2.2 (parallel trim), P2.3 (CoreML probe), P1.3
