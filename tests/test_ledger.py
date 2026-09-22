@@ -26,14 +26,21 @@ median recorded-threshold FA. Pre-sweep records (every existing one) keep
 the @-threshold reading, and with no sweep on file at all the output is
 byte-identical to the pre-sweep table - pinned against the real ledger's
 golden output, since the append-only ledger holds both vintages.
+
+No pytest (tests/_runner.py): this file was written with fixtures and
+capsys and the `make test` target - plain python, one file at a time, no
+pytest in any venv in this repo - died on its import and silently skipped
+the six files after it in the suite. Converted 2026-09-22 to the house
+convention: tempfile for the scratch ledger, redirect_stderr for the
+warning capture, an early return for the fresh-checkout skip.
 """
 
-import importlib.util
+import contextlib
+import io
 import json
 import sys
+import tempfile
 from pathlib import Path
-
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -42,14 +49,30 @@ if str(REPO_ROOT) not in sys.path:
 from train import ledger  # noqa: E402
 
 
-@pytest.fixture
-def tmp_ledger(monkeypatch, tmp_path):
+@contextlib.contextmanager
+def tmp_ledger(records):
     """Point ledger.ledger_path at a scratch file so summarise reads a
     synthetic ledger; the append-only real file is never touched (it is
     history, not a fixture)."""
-    path = tmp_path / "runs.jsonl"
-    monkeypatch.setattr(ledger, "ledger_path", lambda wake_word: path)
-    return path
+    real = ledger.ledger_path
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "runs.jsonl"
+        _write(path, records)
+        ledger.ledger_path = lambda wake_word: path
+        try:
+            yield path
+        finally:
+            ledger.ledger_path = real
+
+
+@contextlib.contextmanager
+def _err():
+    """capsys.readouterr().err, without pytest: summarise's warnings go to
+    `file=sys.stderr`, which print resolves at call time, so swapping the
+    sys.stderr object catches them."""
+    buf = io.StringIO()
+    with contextlib.redirect_stderr(buf):
+        yield buf
 
 
 def _write(path, records):
@@ -90,16 +113,16 @@ def rec_sweep(tag, steps, seed, det, fa, curve, threshold=0.5):
     return r
 
 
-def test_same_label_different_config_splits_and_warns(tmp_ledger, capsys):
+def test_same_label_different_config_splits_and_warns():
     # C1: two records whose grid labels agree but whose resolved configs do
     # not must land in SEPARATE groups, with a stderr warning that names the
     # offending tag, the label and the resolved value.
-    _write(tmp_ledger, [
+    with tmp_ledger([
         rec("aaa1111-cf9c065b-haaaaaa", 25000, 25000, 42, 0.70, 0.02),
         rec("bbb2222-cf9c065b-hbbbbbb", 25000, 50000, 43, 0.90, 0.04),
-    ])
-    out = ledger.summarise("hey seeree")
-    err = capsys.readouterr().err
+    ]), _err() as err:
+        out = ledger.summarise("hey seeree")
+    err = err.getvalue()
     assert "training-steps=25000" in out
     assert "training-steps=50000" in out
     assert out.count("n=1 ") == 2, "one record per group: %r" % out
@@ -109,24 +132,24 @@ def test_same_label_different_config_splits_and_warns(tmp_ledger, capsys):
     assert "aaa1111" not in err
 
 
-def test_record_without_config_falls_back_to_label(tmp_ledger, capsys):
+def test_record_without_config_falls_back_to_label():
     # No resolved config on file (predates the config half): the label is
     # the only evidence, grouping keeps it, and there is nothing to warn
     # against.
     r = rec("aaa1111-cf9c065b-haaaaaa", 25000, 25000, 42, 0.70, 0.02)
     r["config"] = None
-    _write(tmp_ledger, [r])
-    out = ledger.summarise("hey seeree")
+    with tmp_ledger([r]), _err() as err:
+        out = ledger.summarise("hey seeree")
     assert "training-steps=25000" in out
-    assert capsys.readouterr().err == ""
+    assert err.getvalue() == ""
 
 
-def test_exact_duplicates_collapse_to_distinct_pairs(tmp_ledger, capsys):
+def test_exact_duplicates_collapse_to_distinct_pairs():
     # C2: four records, two (config-hash, seed) pairs - the real 50k group
     # shape (h94736bd/1042 and h642a48d/1043, each at two commits, agreeing
     # to the last digit). n is 2, with the run count alongside, and the
     # statistics come from the two distinct pairs.
-    _write(tmp_ledger, [
+    with tmp_ledger([
         rec("aaa1111-dirty-cf9c065b-h94736bd", 50000, 50000, 1042,
             0.9019607843137255, 0.03691275167785235),
         rec("ccc3333-dirty-cf9c065b-h94736bd", 50000, 50000, 1042,
@@ -135,24 +158,24 @@ def test_exact_duplicates_collapse_to_distinct_pairs(tmp_ledger, capsys):
             0.7843137254901961, 0.03691275167785235),
         rec("ccc3333-dirty-cf9c065b-h642a48d", 50000, 50000, 1043,
             0.7843137254901961, 0.03691275167785235),
-    ])
-    out = ledger.summarise("hey seeree")
+    ]), _err() as err:
+        out = ledger.summarise("hey seeree")
     assert "n=2 (4 runs)" in out
     assert "84.3% [78.4-90.2]" in out
     assert "adv FA@0.5" in out and "detection@0.5" in out
-    assert capsys.readouterr().err == ""
+    assert err.getvalue() == ""
 
 
-def test_divergent_duplicates_are_loud(tmp_ledger, capsys):
+def test_divergent_duplicates_are_loud():
     # C2's other half: the same (config-hash, seed) with DIFFERENT eval
     # numbers is a determinism regression - name both tags and the
     # differing fields; do not collapse the disagreement into one number.
-    _write(tmp_ledger, [
+    with tmp_ledger([
         rec("aaa1111-cf9c065b-h94736bd", 50000, 50000, 1042, 0.9, 0.03),
         rec("ccc3333-cf9c065b-h94736bd", 50000, 50000, 1042, 0.67, 0.03),
-    ])
-    out = ledger.summarise("hey seeree")
-    err = capsys.readouterr().err
+    ]), _err() as err:
+        out = ledger.summarise("hey seeree")
+    err = err.getvalue()
     assert "DETERMINISM REGRESSION" in err
     assert "aaa1111-cf9c065b-h94736bd" in err
     assert "ccc3333-cf9c065b-h94736bd" in err
@@ -164,43 +187,45 @@ def test_divergent_duplicates_are_loud(tmp_ledger, capsys):
     assert "n=1 (2 runs)" in out
 
 
-def test_mixed_thresholds_say_mixed(tmp_ledger):
+def test_mixed_thresholds_say_mixed():
     # C3 step 1: one-threshold readings labelled per group; a group whose
     # records were eval'd at different thresholds cannot pretend to be one
     # threshold and says so instead.
-    _write(tmp_ledger, [
+    with tmp_ledger([
         rec("aaa1111-cf9c065b-haaaaaa", 25000, 25000, 42, 0.7, 0.02,
             threshold=0.5),
         rec("bbb2222-cf9c065b-hbbbbbb", 25000, 25000, 43, 0.8, 0.01,
             threshold=0.4),
-    ])
-    out = ledger.summarise("hey seeree")
+    ]):
+        out = ledger.summarise("hey seeree")
     assert "adv FA@mixed" in out
     assert "detection@mixed" in out
 
 
-def test_summary_carries_the_matched_fa_caveat(tmp_ledger):
+def test_summary_carries_the_matched_fa_caveat():
     # C3 step 1: the standing caveat under the table - the numbers cannot
     # be read as a matched-FA comparison (CLAUDE.md).
-    _write(tmp_ledger, [
+    with tmp_ledger([
         rec("aaa1111-cf9c065b-haaaaaa", 25000, 25000, 42, 0.7, 0.02),
         rec("bbb2222-cf9c065b-hbbbbbb", 50000, 50000, 43, 0.8, 0.01),
-    ])
-    out = ledger.summarise("hey seeree")
+    ]):
+        out = ledger.summarise("hey seeree")
     assert "one-threshold readings, not a matched-FA comparison" in out
     assert "Never compare models" in out
 
 
-def test_real_ledger_groups_on_resolved_steps(capsys):
+def test_real_ledger_groups_on_resolved_steps():
     # The cf9c065b-class silent-drift history, pinned: the two 094e414 rows
     # (25k label, 50k config) group with the true 50k rows, the 25k group
     # prints its real 73.5% mean, and the 50k group's n counts pairs, not
     # records. Skips if the repo's ledger is absent (fresh checkout).
-    path = ledger.ledger_path("hey seeree")
-    if not path.is_file():
-        pytest.skip(f"no ledger at {path}")
-    out = ledger.summarise("hey seeree")
-    err = capsys.readouterr().err
+    if not ledger.ledger_path("hey seeree").is_file():
+        print("  skip: no ledger at "
+              f"{ledger.ledger_path('hey seeree')} (fresh checkout)")
+        return
+    with _err() as err:
+        out = ledger.summarise("hey seeree")
+    err = err.getvalue()
     line_25k = next(l for l in out.splitlines() if "training-steps=25000" in l)
     line_50k = next(l for l in out.splitlines() if "training-steps=50000" in l)
     assert "n=2 " in line_25k
@@ -215,7 +240,7 @@ def test_real_ledger_groups_on_resolved_steps(capsys):
 # C3 step 2: the matched-FA reading off the recorded threshold sweep
 # ---------------------------------------------------------------------------
 
-def test_matched_fa_at_most_budget_picks_the_right_point(tmp_ledger):
+def test_matched_fa_at_most_budget_picks_the_right_point():
     # B = median across the two swept groups of each group's own FA at its
     # recorded threshold: median(2%, 3%) = 2.5%. At FA <= 2.5% the 25k
     # curve's eligible points are (2%, 85%) and (0%, 60%) -> 85%; the
@@ -223,11 +248,11 @@ def test_matched_fa_at_most_budget_picks_the_right_point(tmp_ledger):
     # 50k group reads its own curve: only (1%, 72%) is eligible.
     c25 = _sweep([0.3, 0.5, 0.7], [0.05, 0.02, 0.0], [0.90, 0.85, 0.60])
     c50 = _sweep([0.3, 0.5, 0.7], [0.06, 0.03, 0.01], [0.88, 0.80, 0.72])
-    _write(tmp_ledger, [
+    with tmp_ledger([
         rec_sweep("aaa1111-cf9c065b-haaaaaa", 25000, 42, 0.85, 0.02, c25),
         rec_sweep("bbb2222-cf9c065b-hbbbbbb", 50000, 43, 0.80, 0.03, c50),
-    ])
-    out = ledger.summarise("hey seeree")
+    ]):
+        out = ledger.summarise("hey seeree")
     assert "matched-FA budget: adv FA <= 2.5%" in out
     line25 = next(l for l in out.splitlines() if "25000" in l)
     line50 = next(l for l in out.splitlines() if "50000" in l)
@@ -239,18 +264,18 @@ def test_matched_fa_at_most_budget_picks_the_right_point(tmp_ledger):
     assert "adv FA@0.5" in line25 and "detection@0.5" in line25
 
 
-def test_budget_below_best_fa_prints_marked_fallback(tmp_ledger):
+def test_budget_below_best_fa_prints_marked_fallback():
     # B = median(2%, 5%) = 3.5%. The 50k curve never reaches 3.5% (best
     # point 5%): its value is that best point (70% at its own FA), marked
     # '*' with a footnote saying what it is - never an interpolated guess
     # at 3.5%.
     ca = _sweep([0.3, 0.5, 0.7], [0.05, 0.02, 0.0], [0.90, 0.85, 0.60])
     cb = _sweep([0.3, 0.5, 0.7], [0.09, 0.07, 0.05], [0.90, 0.80, 0.70])
-    _write(tmp_ledger, [
+    with tmp_ledger([
         rec_sweep("aaa1111-cf9c065b-haaaaaa", 25000, 42, 0.85, 0.02, ca),
         rec_sweep("bbb2222-cf9c065b-hbbbbbb", 50000, 43, 0.80, 0.05, cb),
-    ])
-    out = ledger.summarise("hey seeree")
+    ]):
+        out = ledger.summarise("hey seeree")
     assert "matched-FA budget: adv FA <= 3.5%" in out
     line50 = next(l for l in out.splitlines() if "50000" in l)
     assert "det@FA<=3.5%  70.0% *" in line50
@@ -258,17 +283,17 @@ def test_budget_below_best_fa_prints_marked_fallback(tmp_ledger):
     assert "not an interpolation" in out
 
 
-def test_mixed_ledger_renders_both_readings_labelled(tmp_ledger):
+def test_mixed_ledger_renders_both_readings_labelled():
     # One swept group beside one pre-sweep group: the pre-sweep row keeps
     # its @-threshold columns and gets an explicit '-' (never a borrowed
     # number), and the caveat names the two vintages so the table cannot
     # be read as one comparison.
     ca = _sweep([0.3, 0.5, 0.7], [0.05, 0.02, 0.0], [0.90, 0.85, 0.60])
-    _write(tmp_ledger, [
+    with tmp_ledger([
         rec_sweep("aaa1111-cf9c065b-haaaaaa", 25000, 42, 0.85, 0.02, ca),
         rec("bbb2222-cf9c065b-hbbbbbb", 50000, 50000, 43, 0.80, 0.03),
-    ])
-    out = ledger.summarise("hey seeree")
+    ]):
+        out = ledger.summarise("hey seeree")
     # with a single swept group, B is that group's own recorded-threshold FA
     line50 = next(l for l in out.splitlines() if "50000" in l)
     assert "adv FA@0.5" in line50 and "detection@0.5" in line50
@@ -278,7 +303,7 @@ def test_mixed_ledger_renders_both_readings_labelled(tmp_ledger):
     assert "predate the sweep" in out
 
 
-def test_real_ledger_no_sweep_output_is_byte_identical(capsys):
+def test_real_ledger_no_sweep_output_is_byte_identical():
     # Pin (regression guard for the fallback path): the real ledger has no
     # sweep on file, so summarise must be byte-identical to the pre-sweep
     # table - the append-only ledger will hold both vintages side by side,
@@ -286,12 +311,22 @@ def test_real_ledger_no_sweep_output_is_byte_identical(capsys):
     # captured 2026-09-22, before the sweep existed. If a new record is
     # ever appended to the real ledger, re-capture the goldens DELIBERATELY
     # (it is history, not a fixture): the pin is there to make that an
-    # act, not a drift.
-    path = ledger.ledger_path("hey seeree")
-    if not path.is_file():
-        pytest.skip(f"no ledger at {path}")
+    # act, not a drift. Skips if the ledger is absent (fresh checkout).
+    if not ledger.ledger_path("hey seeree").is_file():
+        print("  skip: no ledger at "
+              f"{ledger.ledger_path('hey seeree')} (fresh checkout)")
+        return
     golden = Path(__file__).parent / "golden"
-    out = ledger.summarise("hey seeree")
-    err = capsys.readouterr().err
+    with _err() as err:
+        out = ledger.summarise("hey seeree")
     assert out + "\n" == (golden / "ledger_hey_seeree_stdout.txt").read_text()
-    assert err == (golden / "ledger_hey_seeree_stderr.txt").read_text()
+    assert err.getvalue() == (golden / "ledger_hey_seeree_stderr.txt").read_text()
+
+
+def main():
+    import _runner
+    _runner.run(sys.modules[__name__])
+
+
+if __name__ == "__main__":
+    main()

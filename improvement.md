@@ -869,6 +869,15 @@ config half.
   "corpus built at seed 0; the seed varies only features/training" the
   INTENDED semantic - in which case say so in the help text; otherwise pass
   the seed in the request.)
+- **The matched-FA column has no live data yet** (bug.md round 2, C3-step2,
+  dfe69db): all 8 ledger records predate `threshold_sweep`, so
+  `det@FA<=B` will not render until the next sweep files a new-format
+  record. The fallback (sweep-less records keep the `@0.5` columns) is
+  byte-pinned against the real ledger's golden output; the mixed-vintage
+  table (one swept group beside one pre-sweep group, the pre-sweep row
+  printing `- (no sweep on file)`) is test-covered but has not been seen
+  on the real file. When the column first appears, it is the C3-step2
+  reading, not a change in the @-threshold columns beside it.
 **Docker image rebuild: done 2026-09-22** - both CPU images rebuilt with the
 new patches and code (verified in-image: 8 PATCHED markers in the oww clone,
 smoke/ledger code present in the mww image). The container routes now match
