@@ -97,6 +97,53 @@ def test_repeated_grid_key_names_the_config_the_tag_would_name():
             assert a in cmd, f"tag argument {a!r} not in the run command"
 
 
+def test_first_job_is_point_zero_repeat_zero_only():
+    assert sweep.is_first_job(0, 0)
+    assert not sweep.is_first_job(0, 1)
+    assert not sweep.is_first_job(1, 0)
+    assert not sweep.is_first_job(1, 1)
+
+
+def test_point_zero_repeats_run_corpus_reuse_not_auto():
+    # C5 (bug.md, 2026-09-22): corpus_reuse=(not first_point) left every
+    # repeat of point 0 in auto mode, and auto SILENTLY REBUILDS a
+    # mismatched manifest - a TTS catalog change between two repeats of
+    # point 0 would redraw the frozen corpus mid-sweep with no error, and
+    # every later point would verify against the NEW manifest and pass.
+    # Only the first job (point 0, repeat 0) may build; every later job -
+    # point 0's repeats included - verifies with --corpus reuse.
+    for pi, gp, repeat, seed in _jobs():
+        cmd = sweep.trainer_cmd("oww", "python", "hey seeree", [],
+                                sweep.options_to_args(gp), seed=seed,
+                                corpus_reuse=(not sweep.is_first_job(pi, repeat)))
+        if pi == 0 and repeat == 0:
+            assert "--corpus" not in cmd, (
+                f"only the first job builds (auto mode): {cmd!r}")
+        else:
+            assert cmd[-2:] == ["--corpus", "reuse"], (
+                f"point {pi} repeat {repeat} must verify the frozen corpus "
+                f"(--corpus reuse), got: {cmd!r}")
+
+
+def test_mww_dry_run_build_label_only_for_first_job():
+    # The mww side of C5's class: the dry-run LABEL and the command must
+    # agree. Build is the first JOB only; point 0 repeat 1+ already had the
+    # manifest and verifies it (--skip), so its label says reuse. The mww
+    # train stage itself takes no corpus mode flag (the corpus stage owns
+    # the check), so there is no one-word equivalent to fix here - this
+    # test pins that the label was already right and stays that way.
+    corpus = REPO_ROOT / "data" / "corpus" / "hey_seeree" / "mww"
+    features = corpus / "features"
+    for pi, gp, repeat, seed in _jobs():
+        action, _ = sweep.corpus_action("hey seeree", "mww", corpus, features,
+                                        pi == 0, True, "/python", [], {},
+                                        first_job=sweep.is_first_job(pi, repeat))
+        if pi == 0 and repeat == 0:
+            assert action == "build"
+        else:
+            assert action == "reuse (manifest verified per point)"
+
+
 def main():
     import _runner
     _runner.run(sys.modules[__name__])

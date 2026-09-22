@@ -152,6 +152,21 @@ def build_jobs(grid, grid_keys, repeats, base_seed):
             for pi, gp in enumerate(points) for r in range(repeats)]
 
 
+def is_first_job(pi, repeat):
+    """Whether (point, repeat) is the first JOB of the sweep: point 0, repeat 0.
+
+    Distinct from the first POINT (pi == 0): a repeat of point 0 is NOT the
+    first job, and must not run in auto corpus mode - auto reuses a matching
+    manifest but SILENTLY REBUILDS a mismatched one (train/oww/train.py's
+    --corpus auto), so a TTS catalog change between two repeats of point 0
+    would redraw the frozen corpus mid-sweep with no error, and every later
+    point would then verify against the NEW manifest and pass (bug.md C5,
+    2026-09-22 - the mirror of the cf9c065b silent reuse). Only the first
+    job may build; every later job verifies.
+    """
+    return pi == 0 and repeat == 0
+
+
 def options_to_args(options):
     """{key: value} -> CLI arguments: True is a bare flag, False/None dropped,
     everything else `--key value` (the trainers' argparse spelling)."""
@@ -317,10 +332,13 @@ def corpus_action(wake_word, target, corpus, features, first_point, dry_run,
     effective voice set against the manifest - the axis the cf9c065b reuse,
     2026-09-22, was blind on - so the engines must be REACHABLE for a reuse,
     which a sweep fleet is. oww: the train run itself owns the corpus
-    stage - the first job in auto mode (build + write manifest), later
-    points with --corpus reuse (the trainer's own check_reuse call; point 1
-    repeat 2+ stays in auto, which is itself the verify, since auto reuses
-    a matching manifest rather than rebuilding).
+    stage - the first job in auto mode (build + write manifest); every later
+    job, point 1's repeats included, with --corpus reuse (the trainer's own
+    check_reuse call). It is reuse, not auto, on purpose: auto reuses a
+    matching manifest but silently REBUILDS a mismatched one, which is how a
+    catalog change between two repeats of point 1 would redraw the frozen
+    corpus mid-sweep without an error (bug.md C5, 2026-09-22 - the mirror of
+    the cf9c065b silent reuse).
 
     `first_job` is the first (point, repeat) of the sweep; `first_point` is
     that point. The dry-run labels build only for the former, because the
@@ -343,10 +361,12 @@ def corpus_action(wake_word, target, corpus, features, first_point, dry_run,
             f"and re-run point 1).")
 
     if target == "oww":
-        # The oww train run is the only actor: point 1 stays in auto mode
-        # (build, write the manifest), later points pass --corpus reuse,
-        # which makes the trainer call manifest.check_reuse and exit with
-        # the diff before any training is spent.
+        # The oww train run is the only actor: the first job stays in auto
+        # mode (build, write the manifest); every later job - point 1's
+        # repeats included - passes --corpus reuse, which makes the trainer
+        # call manifest.check_reuse and exit with the diff before any
+        # training is spent. Not auto on the repeats: auto would silently
+        # rebuild a mismatched manifest (bug.md C5, 2026-09-22).
         return "reuse (verified inside the train run via --corpus reuse)"
 
     if first_point and not manifest.is_file():
@@ -481,10 +501,11 @@ def main():
             skip = "  [SKIP - already in the ledger]" if tag in this_target else ""
             action, _ = corpus_action(wake_word, target, corpus, features,
                                       pi == 0, True, python, corpus_args, {},
-                                      first_job=(pi == 0 and repeat == 0))
+                                      first_job=is_first_job(pi, repeat))
             cmd = trainer_cmd(target, python, wake_word, base_args, point_args,
                               seed, tag=tag if target == "mww" else None,
-                              corpus_reuse=(target == "oww" and pi != 0))
+                              corpus_reuse=(target == "oww"
+                                            and not is_first_job(pi, repeat)))
             print(f"\n  point {pi}  {combo}")
             print(f"    repeat {repeat}  seed {seed}  corpus: {action}")
             print(f"    tag: {tag}{skip}")
@@ -503,6 +524,7 @@ def main():
         combo = "  ".join(f"{k}={_fmt_grid_value(gp[k])}" for k in grid_keys) or "(base)"
         point_args = options_to_args(gp)
         first_point = pi == 0
+        first_job = is_first_job(pi, repeat)
         stage_times = {}
         print(f"\n{'#' * 72}\n# point {pi}  {combo}  (repeat {repeat} of "
               f"{spec['repeats']}, seed {seed})\n{'#' * 72}")
@@ -514,8 +536,14 @@ def main():
             if tag in this_target:
                 print(f"  SKIP: {tag} is already in the ledger - the run was filed before")
                 continue
+            # first_job passed on the real path too: the dry-run label and
+            # the real stage must agree on what counts as the build (C5's
+            # label/command-disagreement class). The mww --skip path itself
+            # already keys on the manifest existing, which a repeat of
+            # point 0 has by then - no separate hole on this target.
             corpus_action(wake_word, target, corpus, features, first_point,
-                          False, python, corpus_args, stage_times)
+                          False, python, corpus_args, stage_times,
+                          first_job=first_job)
             # Same order as the run script: tag first, then corpus, then
             # train. The tag here was computed before the corpus stage, not
             # after, because --print-tag writes nothing - the tag still names
@@ -539,9 +567,13 @@ def main():
                 cmd.append("--force")
         else:
             corpus_action(wake_word, target, corpus, features, first_point,
-                          False, python, corpus_args, stage_times)
+                          False, python, corpus_args, stage_times,
+                          first_job=first_job)
+            # C5: NOT (not first_point) - that left every repeat of point 0
+            # in auto mode, where a manifest mismatch rebuilds the frozen
+            # corpus silently (bug.md, 2026-09-22).
             cmd = trainer_cmd("oww", python, wake_word, base_args, point_args,
-                              seed, corpus_reuse=(not first_point))
+                              seed, corpus_reuse=(not first_job))
 
         if target == "oww":
             # The model was WRITTEN is the real signal, not the exit code -
