@@ -115,6 +115,28 @@ contaminated voice-holdout axis (the corpus predates the reservation), FA
 quantises to 0.27%/clip at 366 negatives, and per-speaker n is small (ryan 6
 clips).
 
+## Current models (trained 2026-09-23)
+
+Two fresh points, both on post-reservation corpora, latest code (42f8982):
+
+- **oww `42f8982-c348af7b-hb9d1d75`** (seed 56, 25k steps, corpus c348af7b):
+  43/51 (84%) at 0.5 - jay 33/35, jen 9/10, ryan 1/6; adversarial FA 5/298
+  (2%); det@FA≤2.0% 86.3%; median latency 100 ms; voice-holdout set 35/45
+  (78%) at 0.5, 66 ms. The second point on the clean corpus (seed 55: 37/51,
+  28/45) - the delta is inside the 10-point seed noise, and ryan is 1/6 on
+  both: the weak-voice result is not a seed effect.
+- **mww `42f8982-ce1500f5-h5f6f353`** (10k steps, calibrated cutoff 0.62:
+  88.74% recall at 0.187 FA/h on the training set) on the first post-
+  reservation mww corpus - **ce1500f5**, 7,617 clips, 30% Kokoro mix, the
+  held-out voices and 2 Piper pairs excluded and recorded in its manifest.
+  Holdout at 0.62: 38/51 (75%) - jay 34/35, jen 4/10, **ryan 0/6**; adversarial
+  FA 6/298 (2%); median latency 142 ms (the old candidate measured 261 ms);
+  voice-holdout set 33/45 (73%) - its first clean reading (the old candidate
+  predates the reservation). Against the staged candidate ecbf160 (73% at its
+  0.09 cutoff: jay 31/35, jen 2/10, ryan 4/6) it wins jay and jen and loses
+  ryan outright - not a per-speaker win, so per the deploy rule it does not
+  replace the staged candidate.
+
 ## openWakeWord on the Mac: host vs. container
 
 **On Apple Silicon, leaving the container is worth ~7x on the training stage.** 250
