@@ -170,10 +170,17 @@ def main():
                    help="reuse the existing corpus instead of building one, for a "
                         "run whose corpus is a held-fixed variable. Requires the "
                         "corpus to exist; when a corpus.json manifest exists it is "
-                        "checked against the shaping flags this invocation would "
-                        "use, and a mismatch exits with a diff - silently reusing a "
-                        "differently-shaped corpus is the failure this refuses. "
-                        "Needs no TTS servers, so it runs before the probes.")
+                        "checked against the shaping flags AND the effective voice "
+                        "set (live catalog minus exclusions minus the voice holdout) "
+                        "this invocation would use, and a mismatch exits with a "
+                        "diff - silently reusing a differently-shaped corpus or one "
+                        "built from a different voice set is the failure this "
+                        "refuses (the cf9c065b reuse, 2026-09-22, on the oww side, "
+                        "matched every shaping flag and still trained on held-out "
+                        "voices). The voice set is probed first: the catalog fetch "
+                        "is cheap (no rendering), but the engines must be UP for a "
+                        "--skip run - an unverifiable catalog is exactly the reuse "
+                        "this check exists to refuse.")
     p.add_argument("--no-trim", action="store_true",
                    help="skip silence trimming. Almost certainly wrong: Piper "
                         "renderings carry a median 248 ms of trailing silence "
@@ -205,76 +212,28 @@ def main():
     root = Path(args.corpus_root) / safe / "mww"
     positives, negatives = root / "positives", root / "negatives"
 
-    # REUSE MODE: the sweep's front door. Decided before the TTS probes - a reuse
-    # run must work with the engines down, exactly as an oww --skip-corpus run does.
-    if args.skip:
-        existing = {d: len(list(d.glob("*.wav"))) for d in (positives, negatives)
-                    if d.is_dir()}
-        if not any(existing.values()):
-            sys.exit(f"\n--skip, but no corpus at {root} - build it first "
-                     f"(drop --skip)")
-        manifest = corpus_manifest.load_manifest(root)
-        if manifest is not None:
-            corpus_manifest.check_reuse(root, {
-                "samples_per_voice": args.samples_per_voice,
-                "negatives_per_voice": args.negatives_per_voice,
-                "kokoro_fraction": args.kokoro_fraction,
-                "child_fraction": args.child_fraction,
-                "real_copies": args.real_copies,
-                "piper_speakers": args.piper_speakers,
-                "piper_languages": args.piper_languages,
-                "negatives_file": args.negatives_file,
-                "no_trim": args.no_trim,
-            })
-        else:
-            print(f"  NOTE: no corpus.json manifest at {root} - the corpus predates "
-                  f"the manifest stage, so its shaping cannot be verified. Reusing "
-                  f"as-is; a rebuild would write one.")
-        for d, n in existing.items():
-            print(f"  reusing {d} ({n} wav)")
-        return
-
-    # REFUSE TO APPEND TO AN EXISTING CORPUS. Generating into a non-empty directory
-    # silently merges two runs, and the merge is worse than it sounds:
-    #
-    #   * clips from voices excluded since the last run stay in the corpus - the
-    #     exclusion list is applied when GENERATING, not when reading
-    #   * add_child_range_copies globs the whole directory, so the previous run's
-    #     clips get a second set of shifted copies
-    #   * real recordings are copied again, changing their share of the corpus
-    #
-    # The result is a corpus no one intended, with no error and only a clip count
-    # to notice it by. train.py's setup_training_dirs rmtree's for the same reason.
-    existing = {d: len(list(d.glob("*.wav"))) for d in (positives, negatives)
-                if d.is_dir()}
-    if any(existing.values()):
-        if not args.clean:
-            print("REFUSING TO GENERATE: corpus already exists")
-            for d, n in existing.items():
-                print(f"  {d}  ({n} wav)")
-            print("\nGenerating on top of it would merge two runs - including clips")
-            print("from voices excluded since, and a second round of child-range")
-            print("copies over the old ones. Re-run with --clean to replace it.")
-            sys.exit(1)
-        for d in (positives, negatives):
-            if d.is_dir():
-                print(f"  removing {d} ({existing.get(d, 0)} wav)")
-                shutil.rmtree(d)
-
-    positives.mkdir(parents=True, exist_ok=True)
-    negatives.mkdir(parents=True, exist_ok=True)
-
+    # The fraction gates which engines are probed below, so validate it first.
     if not 0.0 <= args.kokoro_fraction < 1.0:
         sys.exit("  --kokoro-fraction must be in [0, 1) - Piper stays primary in "
                  "this corpus, because the negatives are Piper-only")
 
-    voices = []
+    # VOICE SET: resolved BEFORE the --skip decision, from the same code path
+    # the build below uses - one computation, so the check and the build cannot
+    # drift apart. The cf9c065b reuse, 2026-09-22 (oww side) showed the hole
+    # this mirrors: every shaping flag matched, but the check never compared
+    # the voice set, so a post-reservation run reused a pre-reservation corpus
+    # and trained on seven held-out voices. The probes are cheap catalog
+    # fetches (no rendering, no model load), but they DO need the fleet up -
+    # a --skip run no longer works with the engines down, because an
+    # unverifiable catalog is exactly the reuse the check exists to refuse.
+
     # The voice holdout (improvement.md P1.2): loaded once here, enforced below
     # against whichever engine is actually in play - the live catalog is the
     # source of truth, so a list that drifted from it fails loudly instead of
     # silently excluding nothing. No tracked file (a checkout predating it) is
     # a no-op, and says so.
     holdout = load_voice_holdout()
+    voices = []
     if args.kokoro_fraction < 1.0:
         print(f"[Piper] {args.piper_url}")
         voices = select_piper_voices(
@@ -341,6 +300,74 @@ def main():
         if not kokoro_voices:
             sys.exit("  no usable Kokoro voices - re-run with "
                      "--kokoro-fraction 0 (all Piper)")
+
+    # What a --skip run validates against, and what the manifest records at
+    # the end of a build: the requested shaping flags plus the TOP-LEVEL
+    # voice set (manifest["voices"]), a different axis from every flag -
+    # piper entries are (voice, speaker) pairs, the same shape select_piper_
+    # voices returns and the manifest stores.
+    requested = {
+        "samples_per_voice": args.samples_per_voice,
+        "negatives_per_voice": args.negatives_per_voice,
+        "kokoro_fraction": args.kokoro_fraction,
+        "child_fraction": args.child_fraction,
+        "real_copies": args.real_copies,
+        "piper_speakers": args.piper_speakers,
+        "piper_languages": args.piper_languages,
+        "negatives_file": args.negatives_file,
+        "no_trim": args.no_trim,
+        "voices": {"kokoro": kokoro_voices, "piper": voices},
+    }
+
+    # REUSE MODE: the sweep's front door. Decided AFTER the probes, because
+    # the check diffs the voice set the probes just resolved (module: the
+    # cf9c065b reuse was blind on exactly that axis).
+    if args.skip:
+        existing = {d: len(list(d.glob("*.wav"))) for d in (positives, negatives)
+                    if d.is_dir()}
+        if not any(existing.values()):
+            sys.exit(f"\n--skip, but no corpus at {root} - build it first "
+                     f"(drop --skip)")
+        manifest = corpus_manifest.load_manifest(root)
+        if manifest is not None:
+            corpus_manifest.check_reuse(root, requested)
+        else:
+            print(f"  NOTE: no corpus.json manifest at {root} - the corpus predates "
+                  f"the manifest stage, so its shaping and voice set cannot be "
+                  f"verified. Reusing as-is; a rebuild would write one.")
+        for d, n in existing.items():
+            print(f"  reusing {d} ({n} wav)")
+        return
+
+    # REFUSE TO APPEND TO AN EXISTING CORPUS. Generating into a non-empty directory
+    # silently merges two runs, and the merge is worse than it sounds:
+    #
+    #   * clips from voices excluded since the last run stay in the corpus - the
+    #     exclusion list is applied when GENERATING, not when reading
+    #   * add_child_range_copies globs the whole directory, so the previous run's
+    #     clips get a second set of shifted copies
+    #   * real recordings are copied again, changing their share of the corpus
+    #
+    # The result is a corpus no one intended, with no error and only a clip count
+    # to notice it by. train.py's setup_training_dirs rmtree's for the same reason.
+    existing = {d: len(list(d.glob("*.wav"))) for d in (positives, negatives)
+                if d.is_dir()}
+    if any(existing.values()):
+        if not args.clean:
+            print("REFUSING TO GENERATE: corpus already exists")
+            for d, n in existing.items():
+                print(f"  {d}  ({n} wav)")
+            print("\nGenerating on top of it would merge two runs - including clips")
+            print("from voices excluded since, and a second round of child-range")
+            print("copies over the old ones. Re-run with --clean to replace it.")
+            sys.exit(1)
+        for d in (positives, negatives):
+            if d.is_dir():
+                print(f"  removing {d} ({existing.get(d, 0)} wav)")
+                shutil.rmtree(d)
+
+    positives.mkdir(parents=True, exist_ok=True)
+    negatives.mkdir(parents=True, exist_ok=True)
 
     # The split, in TOTAL clips: Piper keeps its per-voice budget scaled down by
     # the fraction, and the difference is spread over however many Kokoro voices

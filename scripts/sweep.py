@@ -312,8 +312,11 @@ def corpus_action(wake_word, target, corpus, features, first_point, dry_run,
     a manifest is already on disk, verify with --skip and build features if
     missing: freezing means not re-rendering, and a sweep that re-renders
     TTS audio per point measures the engines, not the knob. Every later
-    mww point: --skip verification only (it needs no TTS servers, so a dead
-    engine cannot fail a reuse). oww: the train run itself owns the corpus
+    mww point: --skip verification only. The skip path probes the catalogs
+    first (cheap `voices` fetches, no rendering) because it diffs the
+    effective voice set against the manifest - the axis the cf9c065b reuse,
+    2026-09-22, was blind on - so the engines must be REACHABLE for a reuse,
+    which a sweep fleet is. oww: the train run itself owns the corpus
     stage - the first job in auto mode (build + write manifest), later
     points with --corpus reuse (the trainer's own check_reuse call; point 1
     repeat 2+ stays in auto, which is itself the verify, since auto reuses
@@ -374,8 +377,10 @@ def corpus_action(wake_word, target, corpus, features, first_point, dry_run,
         return "build (+ features, built once for the whole sweep)"
 
     # REUSE (first point with an existing manifest, or any later point):
-    # --skip checks the manifest against the shaping THIS invocation would
-    # use and exits with the diff on any mismatch; it needs no TTS servers.
+    # --skip checks the manifest against the shaping AND the effective voice
+    # set THIS invocation would use and exits with the diff on any mismatch;
+    # it probes the catalogs first (no rendering) because the voice set is
+    # resolved from them.
     run_stage("corpus (verify frozen - --skip)",
               [python, "-m", "train.mww.corpus",
                "--wake-word", wake_word, "--skip", *corpus_args],

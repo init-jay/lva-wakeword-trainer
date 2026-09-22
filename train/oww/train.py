@@ -756,9 +756,12 @@ def main():
                              "- the end-to-end check for a changed train/ tree, in a "
                              "few minutes instead of the ~35 min full host run. "
                              "What changes: the corpus is REUSED (implies "
-                             "--skip-corpus: no TTS servers, and the manifest check "
-                             "still applies - a differently-shaped corpus is "
-                             "refused exactly as with any reuse), the feature "
+                             "--skip-corpus: the corpus stage is skipped, though the "
+                             "catalog probe still runs for the reuse check - the "
+                             "engines must be reachable, nothing is rendered - and "
+                             "the manifest check still applies: a differently-shaped "
+                             "or differently-voiced corpus is refused exactly as "
+                             "with any reuse), the feature "
                              "arrays are RECOMPUTED even when the features.json "
                              "sidecar matches (the feature stage is the one this "
                              "exists to run; generation is the 30-54 min TTS stage "
@@ -817,9 +820,15 @@ def main():
                              "--child-fraction, --runon-fraction) are IGNORED: the clips "
                              "already exist and this does not rebuild them. When a "
                              "corpus.json manifest exists it is CHECKED against the "
-                             "requested shaping flags and a mismatch refuses the run - "
-                             "reusing a differently-shaped corpus silently would be "
-                             "the measurement the flag exists to prevent.")
+                             "requested shaping flags and the effective voice set and "
+                             "a mismatch refuses the run - reusing a differently-shaped "
+                             "corpus or one built from a different voice set silently "
+                             "would be the measurement the flag exists to prevent (the "
+                             "voice set is checked because the cf9c065b reuse, "
+                             "2026-09-22, matched on every shaping flag and still "
+                             "trained on held-out voices). Checking it means the TTS "
+                             "catalogs must be REACHABLE for a resume - the probe is "
+                             "a cheap catalog fetch, but it is what the check reads.")
     parser.add_argument("--rebuild-features", action="store_true",
                         help="Recompute the augmentation/feature .npy arrays even "
                              "though they exist and their sidecar matches. Needed "
@@ -979,11 +988,16 @@ def main():
     parser.add_argument("--corpus", choices=["auto", "reuse", "rebuild"], default="auto",
                         help="Whether to rebuild the TTS corpus or reuse the one on "
                              "disk. auto (default): reuse when a corpus.json manifest "
-                             "exists and matches the requested shaping flags - during "
-                             "a sweep the corpus is a held-fixed independent variable, "
-                             "and regenerating it redraws the TTS noise every point. "
+                             "exists and matches the requested shaping flags AND the "
+                             "effective voice set (live catalog minus exclusions "
+                             "minus the voice holdout, resolved from the TTS "
+                             "catalogs before the decision) - during a sweep the "
+                             "corpus is a held-fixed independent variable, and "
+                             "regenerating it redraws the TTS noise every point. "
                              "reuse: require that (a mismatch exits with a diff, no "
-                             "silent rebuild). rebuild: regenerate unconditionally. "
+                             "silent rebuild - including a different voice set, the "
+                             "axis the cf9c065b reuse, 2026-09-22, was blind on). "
+                             "rebuild: regenerate unconditionally. "
                              "Replaces --skip-corpus as the front door; that flag "
                              "still works and means reuse.")
     parser.add_argument("--seed", type=int, default=0,
@@ -1058,12 +1072,126 @@ def main():
         random.seed(args.seed)
         np.random.seed(args.seed)
 
+    # === VOICE SET: resolved BEFORE the corpus-mode decision ====================
+    # The reuse check diffs the EFFECTIVE voice set, not only the shaping flags.
+    # The cf9c065b reuse, 2026-09-22: every shaping flag matched the manifest,
+    # but the tracked voice holdout (seven Kokoro voices + two Piper pairs)
+    # postdated the corpus build, and matches_requested never compared
+    # manifest["voices"] - so a post-reservation run silently trained on the
+    # pre-reservation corpus. The probe is the cheap `voices` op (a catalog
+    # fetch: no rendering, no model load), so a reuse run pays for it too;
+    # deferring it to the build stage is exactly what kept the check
+    # voice-blind, and it is the only way to know a catalog that has moved
+    # since the build cannot be reused as if it had not. The consequence: a
+    # --skip-corpus resume needs the TTS fleet UP (an unreachable catalog
+    # exits here, as it does for a build).
+    #
+    # Computed ONCE and consumed by BOTH the check and the build below: two
+    # computations of "live catalog minus exclusions" could drift from each
+    # other and re-open the same hole with the check fixed.
+    print("\n[Kokoro servers]")
+    pool = KokoroPool(args.kokoro_url.split(","))
+    kokoro_voices = probe_kokoro_servers(pool)
+    if not kokoro_voices:
+        print("ERROR: No Kokoro voices available!")
+        sys.exit(1)
+    print(f"  {len(pool)} server(s), {len(kokoro_voices)} shared English voices")
+
+    excluded = set(MISPRONOUNCING_VOICES.get(safe_name, []))
+    excluded.update(v.strip() for v in args.exclude_voices.split(",") if v.strip())
+
+    # The v0 legacy voices, dropped by default. Reported separately from the
+    # mispronouncing ones: those are excluded to protect accuracy, these to save
+    # time that buys nothing. See LEGACY_VOICE_MARKER for the corpora that
+    # measured it.
+    legacy = sorted(v for v in kokoro_voices if LEGACY_VOICE_MARKER in v)
+    if legacy and not args.include_legacy_voices:
+        excluded.update(legacy)
+        print(f"  Skipping {len(legacy)} v0 legacy voice(s) - older renderings of "
+              f"speakers already in the set, {len(legacy) * 100 // len(kokoro_voices)}% "
+              f"of the clips for no measured gain (--include-legacy-voices keeps them)")
+    elif legacy:
+        print(f"  Including {len(legacy)} v0 legacy voice(s) by request")
+
+    if excluded:
+        present = sorted(v for v in kokoro_voices if v in excluded)
+        kokoro_voices = [v for v in kokoro_voices if v not in excluded]
+        mispronouncing = sorted(set(present) - set(legacy))
+        if mispronouncing:
+            print(f"  Excluding {len(mispronouncing)} voice(s) that mispronounce "
+                  f"the wake word: {', '.join(mispronouncing)}")
+        print(f"  {len(kokoro_voices)} voices remain")
+        missing = sorted(excluded - set(present))
+        if missing:
+            print(f"  NOTE: {', '.join(missing)} not offered by these servers anyway")
+        if not kokoro_voices:
+            print("ERROR: every available voice is excluded!")
+            sys.exit(1)
+
+    # THE VOICE HOLDOUT (improvement.md P1.2): the voices wordlists/
+    # voice_holdout.yaml reserves for the synthetic ranking set are excluded
+    # from every corpus build, so that set stays voice-disjoint from
+    # training. The live catalog is the source of truth: an entry it no
+    # longer offers means the tracked list has drifted from the engine, and
+    # that is an error - the silent outcome is the exclusion ending up empty
+    # and the corpus quietly training on a held-out voice.
+    # No tracked file (a checkout predating it) is a no-op, and says so.
+    # Runs BEFORE the corpus-mode decision because the exclusion is part of
+    # what the reuse check validates: the cf9c065b reuse, 2026-09-22, was a
+    # run whose effective voice set differed from the corpus on exactly this
+    # line and nothing else.
+    holdout = load_voice_holdout()
+    holdout_kokoro = holdout.get("kokoro") or []
+    if holdout_kokoro:
+        n_before = len(kokoro_voices)
+        kokoro_voices, holdout_missing = exclude_voice_holdout(
+            "kokoro", kokoro_voices, holdout)
+        if holdout_missing:
+            sys.exit(f"ERROR: the voice holdout ({voice_holdout_path()}) names "
+                     f"Kokoro voice(s) the live catalog does not offer: "
+                     f"{holdout_missing}. The catalog is the source of "
+                     f"truth - update or delete the stale entries in the "
+                     f"tracked list rather than rebuilding a corpus whose "
+                     f"holdout cannot be enforced.")
+        print(f"  Excluding {n_before - len(kokoro_voices)} voice-holdout "
+              f"voice(s) reserved for the synthetic ranking set: "
+              f"{', '.join(holdout_kokoro)}")
+    else:
+        print(f"  NOTE: no voice holdout at {voice_holdout_path()} - the "
+              f"synthetic ranking set has no reserved voices")
+
+    # The Piper half, resolved here for the same reason (and only when it is
+    # in play - piper_fraction 0 renders no Piper clips, so the request and
+    # the manifest both say `piper: []`, which is a match, not a hole).
+    piper_voices = []
+    if args.piper_fraction > 0:
+        piper_voices = select_piper_voices(
+            args.piper_url, wake_word,
+            languages=tuple(args.piper_languages.split(",")),
+            max_speakers=args.piper_speakers)
+        # The Piper half of the voice holdout: excluded from the audited
+        # selection, same fail-loudly rule as the Kokoro side above. "In the
+        # catalog" here means in the AUDITED selection - a holdout pair the
+        # server offers but the audit tables drop (mispronouncing, unaudited)
+        # fails the check too, because that pair cannot serve as an eval
+        # voice either, so the tracked list must move, not the audit.
+        if holdout.get("piper"):
+            piper_voices, holdout_missing = exclude_voice_holdout(
+                "piper", piper_voices, holdout)
+            if holdout_missing:
+                sys.exit(f"ERROR: the voice holdout ({voice_holdout_path()}) "
+                         f"names Piper (voice, speaker) pair(s) the live "
+                         f"audited selection does not carry: {holdout_missing}. "
+                         f"Update the tracked list to match the catalog this "
+                         f"corpus is built from.")
+
     # === CORPUS MODE: reuse the frozen corpus or rebuild it =====================
     # P0.3: during a sweep the corpus is a HELD-FIXED INDEPENDENT VARIABLE. The
     # default (auto) reuses it whenever a corpus.json manifest exists and matches
-    # the requested shaping flags, so a tuning loop does not redraw the TTS noise
-    # on every point; rebuilding is explicit (--corpus rebuild), and so is reuse
-    # (which refuses rather than falling back to a rebuild on a mismatch).
+    # the requested shaping AND the resolved voice set above, so a tuning loop
+    # does not redraw the TTS noise on every point; rebuilding is explicit
+    # (--corpus rebuild), and so is reuse (which refuses rather than falling
+    # back to a rebuild on a mismatch).
     # --skip-corpus is kept as the legacy spelling of reuse-for-resume.
     corpus_dir = WORK_DIR / "data" / "corpus" / safe_name / "oww"
     corpus_shaping = {
@@ -1079,31 +1207,42 @@ def main():
         "include_legacy_voices": args.include_legacy_voices,
         "no_trim": args.no_trim,
     }
+    # The voice set is a TOP-LEVEL axis of the request (manifest["voices"]),
+    # not a shaping flag: it is the live catalog minus every exclusion, as
+    # resolved above - the same value the manifest records when the build
+    # below completes, so the check and the build cannot drift apart.
+    requested = dict(corpus_shaping)
+    requested["voices"] = {"kokoro": kokoro_voices, "piper": piper_voices}
     if args.skip_corpus:
         args.corpus = "reuse"
     if args.corpus == "rebuild":
         args.skip_corpus = False
         print("Corpus mode: REBUILD (--corpus rebuild - the manifest, if any, is ignored)")
     elif args.corpus == "reuse":
-        # check_reuse exits with a diff when the shaping does not match; a missing
-        # manifest is an error in EXPLICIT mode, because silently rebuilding is the
-        # fallback this flag exists to make impossible.
-        corpus_manifest.check_reuse(corpus_dir, corpus_shaping)
+        # check_reuse exits with a diff when the shaping OR the voice set does
+        # not match; a missing manifest is an error in EXPLICIT mode, because
+        # silently rebuilding is the fallback this flag exists to make
+        # impossible.
+        corpus_manifest.check_reuse(corpus_dir, requested)
         args.skip_corpus = True
     else:  # auto
         manifest = corpus_manifest.load_manifest(corpus_dir)
         if manifest is not None:
-            diffs = corpus_manifest.matches_requested(manifest, corpus_shaping)
+            diffs = corpus_manifest.matches_requested(manifest, requested)
             if not diffs:
-                print("Corpus mode: REUSE (manifest matches the requested shaping) - "
-                      "the corpus is a held-fixed variable for this run")
+                print("Corpus mode: REUSE (manifest matches the requested shaping "
+                      "and voice set) - the corpus is a held-fixed variable for "
+                      "this run")
                 args.skip_corpus = True
             else:
                 for line in diffs:
                     print(f"  corpus manifest: {line}")
                 print("Corpus mode: REBUILD (the manifest does not match the "
-                      "requested shaping - reusing a differently-shaped corpus "
-                      "silently would be the measurement this check prevents)")
+                      "requested shaping or voice set - reusing a differently-"
+                      "shaped corpus or one built from a different voice set "
+                      "silently would be the measurement this check prevents; "
+                      "the cf9c065b reuse, 2026-09-22, did exactly that on the "
+                      "voice axis)")
         else:
             print("Corpus mode: REBUILD (no corpus.json manifest - the corpus will "
                   "be built and the manifest written)")
@@ -1125,78 +1264,12 @@ def main():
     print("[Compute]")
     report_onnx_providers()
 
-    # ONLY WHEN GENERATING. --skip-corpus needs no TTS, and probing here would fail
-    # a resumed run for want of a server it never calls - while also holding
-    # ~8 GiB of VRAM that training is about to want. See wait_for_kokoro_shutdown.
-    if not args.skip_corpus:
-        # Get Kokoro voices
-        print("\n[Kokoro servers]")
-        pool = KokoroPool(args.kokoro_url.split(","))
-        kokoro_voices = probe_kokoro_servers(pool)
-        if not kokoro_voices:
-            print("ERROR: No Kokoro voices available!")
-            sys.exit(1)
-        print(f"  {len(pool)} server(s), {len(kokoro_voices)} shared English voices")
-
-
-        excluded = set(MISPRONOUNCING_VOICES.get(safe_name, []))
-        excluded.update(v.strip() for v in args.exclude_voices.split(",") if v.strip())
-
-        # The v0 legacy voices, dropped by default. Reported separately from the
-        # mispronouncing ones: those are excluded to protect accuracy, these to save
-        # time that buys nothing. See LEGACY_VOICE_MARKER for the corpora that
-        # measured it.
-        legacy = sorted(v for v in kokoro_voices if LEGACY_VOICE_MARKER in v)
-        if legacy and not args.include_legacy_voices:
-            excluded.update(legacy)
-            print(f"  Skipping {len(legacy)} v0 legacy voice(s) - older renderings of "
-                  f"speakers already in the set, {len(legacy) * 100 // len(kokoro_voices)}% "
-                  f"of the clips for no measured gain (--include-legacy-voices keeps them)")
-        elif legacy:
-            print(f"  Including {len(legacy)} v0 legacy voice(s) by request")
-
-        if excluded:
-            present = sorted(v for v in kokoro_voices if v in excluded)
-            kokoro_voices = [v for v in kokoro_voices if v not in excluded]
-            mispronouncing = sorted(set(present) - set(legacy))
-            if mispronouncing:
-                print(f"  Excluding {len(mispronouncing)} voice(s) that mispronounce "
-                      f"the wake word: {', '.join(mispronouncing)}")
-            print(f"  {len(kokoro_voices)} voices remain")
-            missing = sorted(excluded - set(present))
-            if missing:
-                print(f"  NOTE: {', '.join(missing)} not offered by these servers anyway")
-            if not kokoro_voices:
-                print("ERROR: every available voice is excluded!")
-                sys.exit(1)
-
-        # THE VOICE HOLDOUT (improvement.md P1.2): the voices wordlists/
-        # voice_holdout.yaml reserves for the synthetic ranking set are excluded
-        # from every corpus build, so that set stays voice-disjoint from
-        # training. The live catalog is the source of truth: an entry it no
-        # longer offers means the tracked list has drifted from the engine, and
-        # that is an error - the silent outcome is the exclusion ending up empty
-        # and the corpus quietly training on a held-out voice.
-        # No tracked file (a checkout predating it) is a no-op, and says so.
-        holdout = load_voice_holdout()
-        holdout_kokoro = holdout.get("kokoro") or []
-        if holdout_kokoro:
-            n_before = len(kokoro_voices)
-            kokoro_voices, holdout_missing = exclude_voice_holdout(
-                "kokoro", kokoro_voices, holdout)
-            if holdout_missing:
-                sys.exit(f"ERROR: the voice holdout ({voice_holdout_path()}) names "
-                         f"Kokoro voice(s) the live catalog does not offer: "
-                         f"{holdout_missing}. The catalog is the source of "
-                         f"truth - update or delete the stale entries in the "
-                         f"tracked list rather than rebuilding a corpus whose "
-                         f"holdout cannot be enforced.")
-            print(f"  Excluding {n_before - len(kokoro_voices)} voice-holdout "
-                  f"voice(s) reserved for the synthetic ranking set: "
-                  f"{', '.join(holdout_kokoro)}")
-        else:
-            print(f"  NOTE: no voice holdout at {voice_holdout_path()} - the "
-                  f"synthetic ranking set has no reserved voices")
+    # NOTE: the voice set (kokoro_voices, piper_voices, pool) was resolved
+    # BEFORE the corpus-mode decision above - the reuse check validated
+    # against that same computation, and so does the manifest write at the
+    # end of this stage: one computation, no drift between check and build.
+    # The [Kokoro servers] header printed above is why nothing here probes
+    # again.
 
     # Setup directories
     base_dir = setup_training_dirs(wake_word, args.skip_corpus)
@@ -1266,7 +1339,11 @@ def main():
         runon_test = int(args.samples_per_voice // 10 * args.runon_fraction)
         plain_test = args.samples_per_voice // 10 - runon_test
 
-        # Piper SUBSTITUTES for part of the phrase-alone budget rather than adding to it.
+        # piper_voices was resolved before the corpus-mode decision (above),
+        # alongside the Kokoro set: the reuse check and the manifest write
+        # validate against that same computation, so it is not re-derived
+        # here. Piper SUBSTITUTES for part of the phrase-alone budget rather
+        # than adding to it.
         #
         # Adding would move three things at once: engine diversity, total corpus size,
         # and - because real clips are a FRACTION of the positive set - real-clip
@@ -1278,38 +1355,20 @@ def main():
         # Substituting holds the total, the plain/run-on split, and real-clip density
         # fixed, leaving one variable: where a share of the phrase-alone clips came
         # from. Run-ons stay entirely Kokoro - see the --piper-fraction help for why.
-        piper_voices = []
         kokoro_plain_train, kokoro_plain_test = plain_train, plain_test
-        if args.piper_fraction > 0:
-            piper_voices = select_piper_voices(
-                args.piper_url, wake_word,
-                languages=tuple(args.piper_languages.split(",")),
-                max_speakers=args.piper_speakers)
-            # The Piper half of the voice holdout: excluded from the audited
-            # selection, same fail-loudly rule as the Kokoro side above. "In the
-            # catalog" here means in the AUDITED selection - a holdout pair the
-            # server offers but the audit tables drop (mispronouncing, unaudited)
-            # fails the check too, because that pair cannot serve as an eval
-            # voice either, so the tracked list must move, not the audit.
-            if holdout.get("piper"):
-                piper_voices, holdout_missing = exclude_voice_holdout(
-                    "piper", piper_voices, holdout)
-                if holdout_missing:
-                    sys.exit(f"ERROR: the voice holdout ({voice_holdout_path()}) "
-                             f"names Piper (voice, speaker) pair(s) the live "
-                             f"audited selection does not carry: {holdout_missing}. "
-                             f"Update the tracked list to match the catalog this "
-                             f"corpus is built from.")
-            if piper_voices:
-                kokoro_plain_train = int(round(plain_train * (1 - args.piper_fraction)))
-                kokoro_plain_test = int(round(plain_test * (1 - args.piper_fraction)))
-                # Budget in TOTAL clips, then spread over however many Piper voices
-                # there are - the two engines do not have the same voice count, so a
-                # per-voice figure would not substitute one-for-one.
-                piper_total_train = (plain_train - kokoro_plain_train) * len(kokoro_voices)
-                piper_total_test = (plain_test - kokoro_plain_test) * len(kokoro_voices)
-                piper_per_voice_train = max(1, piper_total_train // len(piper_voices))
-                piper_per_voice_test = max(1, piper_total_test // len(piper_voices))
+        if piper_voices:
+            # The Piper half of the voice holdout was already excluded in the
+            # pre-check resolution; the budget arithmetic is all that remains
+            # at build time.
+            kokoro_plain_train = int(round(plain_train * (1 - args.piper_fraction)))
+            kokoro_plain_test = int(round(plain_test * (1 - args.piper_fraction)))
+            # Budget in TOTAL clips, then spread over however many Piper voices
+            # there are - the two engines do not have the same voice count, so a
+            # per-voice figure would not substitute one-for-one.
+            piper_total_train = (plain_train - kokoro_plain_train) * len(kokoro_voices)
+            piper_total_test = (plain_test - kokoro_plain_test) * len(kokoro_voices)
+            piper_per_voice_train = max(1, piper_total_train // len(piper_voices))
+            piper_per_voice_test = max(1, piper_total_test // len(piper_voices))
 
         print("\n[Kokoro TTS]")
         print(f"  Per voice: {kokoro_plain_train} phrase-alone, {runon_train} run-on "
@@ -1424,7 +1483,11 @@ def main():
         # matches_requested diffs on reuse, unchanged) plus the holdout list, so a
         # reader can see the exclusion without re-deriving it: the corpus the
         # manifest names is what training consumed, and which voices it does not
-        # contain is part of that name.
+        # contain is part of that name. The top-level `voices` field records the
+        # SAME post-exclusion set (write_manifest's voices argument, below), and
+        # matches_requested now diffs THAT - the axis the cf9c065b reuse,
+        # 2026-09-22, was blind on: recorded, never compared, and a
+        # post-reservation request matched on every shaping flag because of it.
         manifest_shaping = dict(corpus_shaping)
         manifest_shaping["voice_holdout"] = holdout
         corpus_manifest.write_manifest(

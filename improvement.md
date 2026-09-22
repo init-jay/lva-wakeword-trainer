@@ -778,15 +778,38 @@ config half.
   into SPEED.md or the README.
 - The CUDA images on the training box still need their next build to pick up
   the new patches (the CPU images were rebuilt 2026-09-22).
-- Corpus/holdout contamination, stated here where the positional guarantees
-  live: the frozen corpus cf9c065b was built BEFORE the P1.2 voice
-  reservation (commit 3499919), so every model trained on it - including the
-  four filed sweep rows and the bar-test model - was trained on voices now
-  reserved for the holdout set. The voice-holdout numbers against those
-  models are contaminated exactly as generate_positives.py warns about its
-  own corpus: in-distribution on the very axis that was supposed to be
-  disjoint. The reservation binds corpora built after 3499919; a clean
-  voice-holdout measurement needs a corpus rebuild (new corpus id).
+- **RESOLVED 2026-09-22: the corpus/holdout contamination, stated here where
+  the positional guarantees live.** Caught live, not on paper: a
+  post-reservation run was launched expecting a rebuild, and the reuse check
+  REUSED the pre-reservation cf9c065b corpus - `matches_requested` compared
+  the shaping flags and the seed but never the voice set, so the 7 held-out
+  Kokoro voices (and the 2 Piper pairs) trained the model after all. The fix
+  adds the voice set to the reuse diff (top-level `voices`, compared per
+  engine; a manifest missing the field refuses, as with a missing shaping
+  key), and the oww voice-set resolution - catalog probe,
+  mispronunciation/`--exclude-voices`/holdout exclusions, Piper selection -
+  now runs BEFORE the corpus-mode decision so the check and the build
+  consume one computation (the old "only when generating" deferral was what
+  made the check voice-blind); the mww `--skip` check got the same axis. Six
+  new tests, one shaped exactly like this incident. The corpus was then
+  rebuilt with `--corpus rebuild`: **c348af7b** (17,241 files, 15 Kokoro
+  voices, the holdout list recorded in the manifest), and a baseline point
+  trained on it: `81490a6-dirty-c348af7b-hc250775` (seed 55, 25k steps).
+  **First clean voice-holdout reference: 28/45 (62%) at threshold 0.5,
+  median latency 94 ms** - the baseline for ranking future points, which
+  will all be built on c348af7b or later. The contaminated-era 4/45 is NOT
+  comparable to it: different models at a fixed threshold, which this repo's
+  invariants forbid. The real gates are unchanged and the standing caveat
+  holds: on the clean corpus ryan is still 1/6 (17%) - the rebuild did not
+  move the one thing the corpus cannot fix.
+- **Follow-up flagged by that fix: `seed` is not in either trainer's reuse
+  request**, even though `matches_requested` special-cases it and the
+  manifest records it. If the corpus augmentation consumes `--seed`, a
+  different-seed run would silently reuse another seed's corpus - the same
+  one-axis hole, one axis over. (The sweep's frozen-corpus design may make
+  "corpus built at seed 0; the seed varies only features/training" the
+  INTENDED semantic - in which case say so in the help text; otherwise pass
+  the seed in the request.)
 **Docker image rebuild: done 2026-09-22** - both CPU images rebuilt with the
 new patches and code (verified in-image: 8 PATCHED markers in the oww clone,
 smoke/ledger code present in the mww image). The container routes now match

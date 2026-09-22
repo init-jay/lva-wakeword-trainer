@@ -40,7 +40,12 @@ with a changed `--samples-per-voice` it just ignores the flag (train/oww/train.p
 says so in a comment), and with a changed `--augmentation-rounds` it reuses
 stale features as if nothing changed. Silent stale reuse is the failure mode
 this module exists to make loud. A corpus that no longer matches its request is
-rebuilt, never coaxed.
+rebuilt, never coaxed. The voice SET is a first-class axis here, not a
+shaping flag: the cf9c065b reuse, 2026-09-22 — every shaping flag matched,
+but the check never compared `voices`, so a post-reservation run (the tracked
+voice holdout postdated the build) trained on the pre-reservation corpus. A
+manifest that records a voice set different from the one requested is refused
+just like one shaped differently.
 
 DIGEST SCOPE, ONE NUMBER. oww lays out four subdirs (positive/train, positive/test,
 negative/train, negative/test) and mww two (positives, negatives); digestting the
@@ -131,8 +136,17 @@ def write_manifest(corpus_dir, wake_word, target, seed, shaping,
         # of false comparison that cannot otherwise be distinguished.
         "seed": seed,
         "engines": _normalize_engines(engines),
-        # The voice list ACTUALLY used, in order — not the catalog the engine
-        # offered, since exclusion filters can change which of it got used.
+        # The voice set ACTUALLY used, post-exclusion — not the catalog the
+        # engine offered, since the mispronunciation/legacy/holdout filters
+        # change which of it got used. Piper entries are (voice, speaker)
+        # pairs, json-serialised as [voice, speaker] lists; matches_requested
+        # normalises both shapes before comparing (a tuple never equals a
+        # list). This field is the axis the cf9c065b reuse, 2026-09-22,
+        # missed: it was recorded but never diffed, so a post-reservation
+        # request matched a pre-reservation corpus on every shaping flag and
+        # trained on seven held-out voices. `piper: []` is honest, not a hole:
+        # it means the build ran with piper_fraction 0 and rendered no Piper
+        # clips at all (the oww default; the on-disk cf9c065b corpus is one).
         "voices": {"kokoro": list(voices.get("kokoro", [])),
                    "piper": list(voices.get("piper", []))} if voices is not None else None,
         # oww: {"positive_train", "positive_test", "negative_train", "negative_test"};
@@ -165,19 +179,95 @@ def load_manifest(corpus_dir):
     return json.loads(path.read_text())
 
 
+def _canonical_voice(entry):
+    """One voice entry in its comparison shape: (voice, speaker-or-None).
+
+    Kokoro entries are bare voice strings; Piper entries are (voice, speaker)
+    pairs, and json hands those back as [voice, speaker] LISTS — a tuple and a
+    list never compare equal, so both sides of any diff must land on this one
+    shape first, or a matching corpus would refuse itself.
+    """
+    if isinstance(entry, (list, tuple)):
+        speaker = entry[1] if len(entry) > 1 and entry[1] is not None else None
+        return (str(entry[0]), speaker)
+    return (str(entry), None)
+
+
+def _canonical_voices(voices):
+    """A recorded or requested voice set in comparable form: sorted per engine.
+
+    Sorted rather than order-preserving: catalog order belongs to the engine,
+    and two builds of the same set from two server states must still match —
+    the comparison is about WHICH voices, not which slot each sat in. A bare
+    non-dict value reads as the empty set; None (a manifest that records no
+    set at all) stays None so the caller can report the missing field.
+    """
+    if voices is None:
+        return None
+    if not isinstance(voices, dict):
+        voices = {}
+    return {engine: sorted(_canonical_voice(e) for e in (voices.get(engine) or []))
+            for engine in ("kokoro", "piper")}
+
+
+def _voice_set_diffs(requested, recorded):
+    """Diff lines for every engine whose voice set moved between build and request.
+
+    The line names the voices that MOVED, not the whole set: a 22-voice corpus
+    diffing against a 15-voice request is seven names, and those seven are the
+    information the operator needs (which reservation drifted, which catalog
+    voice appeared or vanished). Both sides are order-insensitive and
+    tuple/list-normalised via _canonical_voices.
+    """
+    req = _canonical_voices(requested)
+    man = _canonical_voices(recorded)
+    diffs = []
+    for engine in ("kokoro", "piper"):
+        r, m = set(req[engine]), set(man[engine])
+        if r == m:
+            continue
+        parts = []
+        if r - m:
+            parts.append("new since the build: " + ", ".join(
+                f"{v}:{s}" if s else v for v, s in sorted(r - m)))
+        if m - r:
+            parts.append("dropped from the build: " + ", ".join(
+                f"{v}:{s}" if s else v for v, s in sorted(m - r)))
+        diffs.append(f"requested voices.{engine}={len(req[engine])} voice(s), "
+                     f"corpus has {len(man[engine])} voice(s) ({'; '.join(parts)})")
+    return diffs
+
+
 def matches_requested(manifest, requested):
     """Diff strings for every requested shaping key that the manifest disagrees with.
 
     `requested` carries only the flags the caller cares about, and those keys are
     exactly the ones compared — a manifest missing a requested key is reported,
     not skipped. `"seed"` is special-cased against manifest["seed"] because the
-    seed is recorded at top level, not under "shaping". Empty list = match.
+    seed is recorded at top level, not under "shaping"; so is `"voices"`,
+    against the top-level set the build actually used. The voice set is a
+    different axis from every shaping flag: the cf9c065b reuse, 2026-09-22 —
+    a post-reservation request matched the pre-reservation manifest on ALL
+    shaping flags, because the holdout exclusion lives in the voice set, not
+    in any flag. A manifest that records no `voices` field (a build predating
+    the feature) cannot be verified on that axis and is refused, not skipped.
+    Empty list = match.
     """
     shaping = manifest.get("shaping") or {}
     diffs = []
     for key, value in requested.items():
         if key == "seed":
             actual, where = manifest.get("seed"), "seed"
+        elif key == "voices":
+            actual, where = manifest.get("voices"), "voices"
+            if actual is None:
+                diffs.append(f"requested {key} (a voice set), corpus manifest has "
+                             f"no {where} field - the corpus predates voice "
+                             f"recording, so its voice set cannot be verified and "
+                             f"it cannot be reused")
+                continue
+            diffs.extend(_voice_set_diffs(value, actual))
+            continue
         else:
             actual, where = shaping.get(key), "shaping"
             if key not in shaping:
@@ -240,8 +330,9 @@ def main():
                    help="print the manifest prettily (the default without "
                         "--check-requested)")
     p.add_argument("--check-requested", default=None, metavar="JSON",
-                   help='a JSON object of requested shaping flags (and "seed"); '
-                        "prints the diff lines, or MATCH when the corpus agrees")
+                   help='a JSON object of requested shaping flags (and "seed", '
+                        'and "voices", a {"kokoro": [...], "piper": [[voice, speaker], ...]} '
+                        "set); prints the diff lines, or MATCH when the corpus agrees")
     args = p.parse_args()
 
     manifest = load_manifest(args.corpus_dir)
