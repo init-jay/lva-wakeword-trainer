@@ -41,7 +41,14 @@ guess a wake word from the repo's existing `hey_seeree` files.
 - **Treat `deploy/` as staging ground.** It stages ONE candidate with its measured
   status written down (`deploy/README.md`), out of `output/` because trainers rmtree
   that tree every run. Replacing the candidate requires a measured win at matched
-  false accepts, per speaker.
+  false accepts, per speaker. The adversarial negatives were widened 2026-09-21
+  (extend 20→148, hey_other 12→150; 366-clip set): a scorecard measured on the old
+  230-clip set is not comparable, so the staged candidate must be re-baselined
+  before a ship call.
+- **Retune in search of the weak voice.** ryan (the child) is the lowest-detection
+  speaker at every measured point and step count (17-33% in the ~2.5% FA band,
+  1/6 on the clean-corpus baseline) and no hyperparameter has moved it. More ryan
+  recordings is the only lever the measurements have pointed at.
 
 ## Where things run
 
@@ -97,6 +104,22 @@ The route rationale and the measurements: SPEED.md.
 - **A tag is code + data**, `<commit>-d<audio hash>` — see `train/provenance.py`.
   Expect the data half to move between runs even when nothing changed; the TTS is
   not bit-reproducible.
+- **`--seed` is a guarantee, not a convenience.** Same seed gives a byte-identical
+  `.onnx` (bar: 3 runs, same md5, verified 2026-09-22). It holds because the global
+  RNG seed covers augmentation and the checkpoint merge is a NO-OP on this corpus
+  (`cleared=0/N` in every real run — the conjunction gate never fires, which is also
+  why the bar was achievable). The ledger prints a DETERMINISM REGRESSION line when
+  a duplicate (config, seed) pair's evals disagree — the standing check on this bar.
+- **The run ledger is append-only** (`output/<word>/runs.jsonl`): never rewrite it,
+  and a duplicate (target, tag) is refused. Corrections are errata in the git
+  history, not edits to the file.
+- **Known open: `--seed` is not in the corpus-reuse request.** `matches_requested`
+  special-cases it and the manifest records it, but neither trainer passes it — so if
+  the corpus augmentation consumes `--seed`, a different-seed run silently reuses
+  another seed's corpus (the same one-axis hole the voice-set fix closed, one axis
+  over). Decide whether "corpus fixed at build seed; the seed varies only
+  features/training" is the intended semantic: then say so in the help text; otherwise
+  pass the seed in the request.
 
 ## Conventions
 
@@ -104,6 +127,12 @@ Comments here explain *why*, usually with the measurement that settled it. Match
 that. If you change something a comment justifies, update the comment in the same
 edit. If a measurement is claimed, cite where it came from — several were found the
 expensive way, and a plausible-sounding replacement is worse than none.
+
+The plan file (`improvement.md`) and the review file (`bug.md`) were removed
+2026-09-22: the measurements they carried live in SPEED.md, the incident history in
+the git log and the test docstrings. Code comments that cite "improvement.md P.." or
+"bug.md B.." are provenance for the commit that implemented or fixed the finding, not
+links to keep alive.
 
 Verify before asserting. Much of what looks obvious in this repo is not: `os.mkdir`
 is not recursive, `str.strip` is not `removesuffix`, and PyPI metadata does not

@@ -83,6 +83,38 @@ own 13.5 min end to end, mww ~1 minute (improvement.md, P2.5) - the oww
 smoke is dominated by the feature recompute, which smoke deliberately
 re-runs so a broken feature stage fails in minutes, not hours.
 
+## First sweep: 25k vs 50k steps - not a win at matched false accepts (measured 2026-09-22)
+
+`sweeps/oww-training-steps.yaml`: 25k vs 50k steps, two repeats each, on the
+frozen cf9c065b corpus, seeds 42/43 (25k) and 1042/1043 (50k). The matched-FA
+curves were built by hand - 40 evals driving `eval_model.py` across decision
+thresholds 0.25-0.85 - because the automated matched-FA path (eval's
+`threshold_sweep` + the ledger's `det@FA<=B` column) did not exist yet; that
+gap is now closed, so the next sweep concludes itself.
+
+In the comparable FA band (~2.2-2.5% total-negative FA over the 366-clip set)
+detection is the same - 25k ~78-82%, 50k ~77-81% - overlapping inside the
+2-6 point repeat spread and far under the 10-point run-to-run noise floor:
+**NOT distinguishable at matched false accepts.** 50k only reaches its higher
+detection ceiling (up to 90%) at 3.0-3.3% FA - it buys that extra detection
+with more false triggers, not for free. Per speaker (never pooled): ryan is
+the lowest-detection voice at every point and step count (17-33% in the
+comparable band); jay 77-94% and jen 80-100% are solid for both. Doubling
+steps does not lift the weak voice. Consistent with the corpus-depth result
+(more of the training signal did not produce a deployable model).
+
+**First clean voice-holdout baseline** (post-reservation corpus c348af7b, 15
+voices, 2026-09-22): `81490a6-dirty-c348af7b-hc250775` (seed 55, 25k steps) -
+**28/45 (62%) at threshold 0.5, median latency 94 ms** on the 45-clip
+voice-disjoint ranking set; on the real holdout, 37/51 (73%) at 0.5 with ryan
+1/6. The @0.5 readings are orientation, not comparisons; the contaminated-era
+4/45 measured against cf9c065b models is NOT comparable to the 28/45
+(different models at a fixed threshold, which the fixed-threshold rule
+forbids). Caveats that survive to the next sweep: the cf9c065b rows have a
+contaminated voice-holdout axis (the corpus predates the reservation), FA
+quantises to 0.27%/clip at 366 negatives, and per-speaker n is small (ryan 6
+clips).
+
 ## openWakeWord on the Mac: host vs. container
 
 **On Apple Silicon, leaving the container is worth ~7x on the training stage.** 250
