@@ -767,8 +767,10 @@ config half.
   not a win at matched false accepts (full note in the B1-re item above). The
   original four rows stay as a 50k seed-noise measurement; the four c6542f5
   rows supersede the mislabeled 25k-vs-50k comparison.
-- P1.2's rendered set is missing its Piper half (10 clips; the reservation
-  and enforcement are in, the clips wait for a Piper engine running).
+- P1.2's rendered set is COMPLETE 2026-09-22: the Piper half (10 clips,
+  en_GB-alan-medium + en_US-lessac-medium x the 5-speed grid) rendered with
+  the tts-service Piper engine on 8898 into the same labelled directory
+  (45 clips total; the eval block reports n=45).
 - P2.1 Piper-fleet throughput at N>1: MEASURED 2026-09-22 (tools/bench_piper_fleet.py,
   N = 1/2/4/6/8, same 1,440-clip oww workload) - negative result: 16.66 / 9.09 / 17.11 /
   17.26 / 18.16 clips/s, i.e. no scaling (one instance saturates 10 cores; N=2 loses 45%,

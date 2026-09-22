@@ -37,11 +37,12 @@ kokoro:
 # the exclusion tables in train/corpus/piper.py. Both are audited
 # single-speaker models (speaker None: one British man, one American man) from
 # the English set select_piper_voices serves, and neither appears in its
-# mispronouncing/unaudited tables for hey_seeree. Modest on purpose: the
-# Kokoro MLX engine is the only one this Mac renders for at all, so the pair
-# stays as the reserved-and-enforced share of the holdout until a Piper
-# render of the set is wanted (then add its clips; the enforcement is already
-# in place and will fail loudly if this instance's catalog has moved).
+# mispronouncing/unaudited tables for hey_seeree. Rendered 2026-09-22 with
+# the tts-service Piper engine on 8898 (generate_positives.py --voice-holdout
+# --tts piper) into the same labelled directory as the Kokoro clips -
+# distinct voice_speaker filename tags keep the two halves from colliding;
+# the enforcement below still applies and will fail loudly if this
+# instance's catalog has moved.
 piper:
   - en_GB-alan-medium
   - en_US-lessac-medium
