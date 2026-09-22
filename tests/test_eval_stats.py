@@ -1,6 +1,6 @@
 """Guards for the eval harness statistics: threshold_for_fa and
-bootstrap_diff_ci (eval/src/compare_models.py), wilson_interval
-(eval/src/eval_model.py).
+bootstrap_diff_ci (eval/src/compare_models.py), wilson_interval and
+threshold_sweep (eval/src/eval_model.py).
 
 These are the arithmetic behind the repo's two measurement rules: never
 compare models at a fixed threshold (two runs of an identical config
@@ -35,7 +35,7 @@ if "eval" not in sys.modules:
     sys.modules["eval"] = _pkg
 
 from eval.compare_models import bootstrap_diff_ci, threshold_for_fa  # noqa: E402
-from eval.eval_model import wilson_interval  # noqa: E402
+from eval.eval_model import SWEEP_GRID, threshold_sweep, wilson_interval  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +143,33 @@ def test_wilson_interval_all_hits_clamps_upper_bound_to_one():
 
 def test_wilson_interval_zero_n_is_none():
     assert wilson_interval(0, 0) is None
+
+
+# ---------------------------------------------------------------------------
+# threshold_sweep (bug.md C3 step 2, 2026-09-22: the 40-eval manual job)
+# ---------------------------------------------------------------------------
+
+def test_threshold_sweep_re_thresholds_peaks_hand_computed():
+    # Detection at t iff the peak is >= t: first_crossing fires on ANY frame
+    # >= t, and the peak is the max over frames, so re-thresholding the peak
+    # is a pure filter - no model re-run. Tiny hand-computed case:
+    # 3 positives, 4 adversarial, two grid points.
+    pos = [0.2, 0.6, 0.9]
+    adv = [0.1, 0.5, 0.7, 0.95]
+    s = threshold_sweep(pos, adv, [0.5, 0.9])
+    assert s["thresholds"] == [0.5, 0.9]
+    assert s["positives_rate"] == [2 / 3, 1 / 3]  # >=0.5: 2/3; >=0.9: 1/3
+    assert s["adv_rate"] == [3 / 4, 1 / 4]       # >=0.5: 3/4; >=0.9: 1/4
+    assert s["pos_n"] == 3 and s["adv_n"] == 4
+
+
+def test_sweep_grid_is_19_points_and_cross_checks_the_recorded_threshold():
+    # 0.05..0.95 step 0.05. 0.5 is on the grid on purpose: the sweep's own
+    # 0.5 point must agree with the single-threshold reading the same run
+    # printed, so the two can never drift apart silently.
+    assert len(SWEEP_GRID) == 19
+    assert SWEEP_GRID[0] == 0.05 and SWEEP_GRID[-1] == 0.95
+    assert 0.5 in SWEEP_GRID
 
 
 def main():

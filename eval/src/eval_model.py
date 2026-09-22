@@ -29,6 +29,14 @@ Two details of the method matter enough to state:
 * "End of speech" is the last sample above 2% of peak amplitude. Latency is the audio
   offset where the score first crosses the threshold, minus that marker.
 
+The --json output also records a THRESHOLD SWEEP over a fixed 0.05-0.95 grid: a
+re-threshold of the per-clip peaks already computed in this one run, so the run
+ledger (train/ledger.py) can compare models at a matched false-accept budget
+instead of a single threshold - 'Never compare models at a fixed threshold'
+(CLAUDE.md); bug.md C3 step 2 (2026-09-22), the 40-eval manual 0.25-0.85 job.
+
+Usage, from the repo root:
+
 Negatives are reported PER CATEGORY, never pooled. The corpus from
 generate_negatives.py is adversarial by construction - a fifth of it is
 phrase-extending - so a pooled false-accept rate means nothing. Category comes from
@@ -183,6 +191,46 @@ def stream(backend, audio):
 def first_crossing(scores, offsets, threshold):
     hit = np.flatnonzero(scores >= threshold)
     return (offsets[hit[0]] if hit.size else None)
+
+
+# The grid the sweep re-thresholds over: 0.05..0.95, 19 points (SWEEP_GRID).
+# 0.5 is on it, so the sweep's own 0.5 point cross-checks the single-threshold
+# numbers the report printed above it - the two cannot drift apart silently.
+SWEEP_GRID = [round(0.05 * i, 2) for i in range(1, 20)]
+
+
+def threshold_sweep(pos_peaks, adv_peaks, grid=SWEEP_GRID):
+    """Re-threshold already-computed per-clip PEAK scores over a fixed grid.
+
+    A pure filter, not a re-scoring: a clip fires at threshold t iff its peak
+    is >= t, because both the positive and negative paths above decide on any
+    frame crossing t (first_crossing / scores.max() >= t) and the peak is the
+    max over frames. The model runs exactly once, in stream(); everything here
+    is arithmetic on the peaks it left behind.
+
+    The false-accept axis is the extend+hey_other subset (ADVERSARIAL), never
+    pooled with the other categories: 'Never pool negative categories'
+    (CLAUDE.md) applies to the curve exactly as it does to the gate - a pooled
+    rate would let general's background dilute the extend signal. Both subsets
+    (extend+hey_other and the full negative set) re-threshold identically
+    because by_category holds a peak for every clip; the FA axis here is the
+    adversarial one, matching the eval block's "adversarial" field.
+
+    bug.md C3 step 2 (2026-09-22): the training-steps verdict cost 40
+    hand-driven evals (one per 0.25-0.85 threshold) for a two-point sweep,
+    because this harness took one --threshold and the ledger had no curve to
+    compare on. This is what lets a sweep runner conclude itself.
+    """
+    pos = np.asarray(pos_peaks, dtype=np.float64)
+    adv = np.asarray(adv_peaks, dtype=np.float64)
+    thr = [float(t) for t in grid]
+    return {
+        "thresholds": thr,
+        "positives_rate": [float((pos >= t).mean()) for t in thr],
+        "adv_rate": [float((adv >= t).mean()) for t in thr],
+        "pos_n": int(pos.size),
+        "adv_n": int(adv.size),
+    }
 
 
 def load_dir(directory, recursive=True):
@@ -505,6 +553,19 @@ def main():
     else:
         print(f"\nNo command_*.wav in {args.negatives}; skipping the command-following gate.")
 
+    # --- threshold sweep (bug.md C3 step 2, 2026-09-22) -------------------------
+    # The scores are all in hand: rows holds a peak per positive, by_category a
+    # peak per negative, so the sweep is one pure pass over the peaks, not 19
+    # model runs. It goes in the --json output (and the ledger verbatim with
+    # it) so a matched-FA comparison is a lookup instead of a 40-eval manual
+    # job.
+    sweep = None
+    if adversarial_n and positives:
+        sweep = threshold_sweep(
+            [r[3] for r in rows],
+            [p for c in ADVERSARIAL for _, p in by_category.get(c, [])],
+            SWEEP_GRID)
+
     # --- gates -------------------------------------------------------------------
     print("\n" + "=" * 70)
     print("GATES")
@@ -539,6 +600,27 @@ def main():
     for text, gate, ok in checks:
         print(f"  [{verdict(ok)}]  {text:<48}{gate}")
     print("=" * 70)
+
+    # One compact line, the detection@FA readings a human would have produced
+    # by hand-driving this harness across 0.25-0.85 (40 evals; bug.md C3,
+    # 2026-09-22). At-most-B semantics: the best detection on the curve with
+    # FA <= B - the curve is a step function, never interpolated.
+    if sweep:
+        print()
+        print(f"THRESHOLD SWEEP (re-thresholded over {len(sweep['thresholds'])} "
+              "points; the model ran once)")
+        parts = []
+        for b in (0.005, 0.01, 0.02, 0.05):
+            cands = [(d, a, t) for t, a, d in
+                     zip(sweep["thresholds"], sweep["adv_rate"],
+                         sweep["positives_rate"])
+                     if a <= b]
+            if cands:
+                det, fa, t = max(cands, key=lambda c: (c[0], -c[1]))
+                parts.append(f"det@FA<={b:.1%}: {det:.1%} (t={t:.2f})")
+            else:
+                parts.append(f"det@FA<={b:.1%}: - (no grid point at or below it)")
+        print("  " + "   ".join(parts))
 
     # --- voice-holdout synthetic ranking set (improvement.md P1.2) ------------
     # A separate block on purpose: these clips are rendered from the voices the
@@ -640,6 +722,13 @@ def main():
                 if detected_cmd is not None else None
             ),
             "gates": [{"check": text, "gate": gate, "pass": ok} for text, gate, ok in checks],
+            # The matched-FA curve (bug.md C3 step 2, 2026-09-22): 19 x 2 rates
+            # plus two counts - a few hundred bytes, one model run. The FA axis
+            # is the extend+hey_other subset, exactly the "adversarial" field
+            # above, never the pooled set. None for a run with no adversarial
+            # clips or no positives; the ledger then falls back to the
+            # one-threshold reading, as for every pre-sweep record on file.
+            "threshold_sweep": sweep,
             # Deliberately a top-level sibling of "positives" and "gates", never
             # inside either: the voice-holdout set is a synthetic ranking signal
             # and a ledger reader must not be able to mistake it for the

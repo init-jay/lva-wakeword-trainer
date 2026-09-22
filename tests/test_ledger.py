@@ -16,6 +16,16 @@ regression and must be named, not averaged over.
 C3 step 1: the columns carry the recorded eval threshold (@0.5, or `mixed`),
 because the rates are one-threshold readings and CLAUDE.md forbids reading
 them as a matched-FA comparison.
+
+C3 step 2: when records carry eval_model.py's threshold_sweep (the
+fixed-grid re-threshold of that run's own per-clip peaks), the table reads
+a COMMON matched-FA budget: detection at at-most-B adversarial FA is a
+point pick on each group's own step-function curve, never an
+interpolation. B is the median across swept groups of each group's own
+median recorded-threshold FA. Pre-sweep records (every existing one) keep
+the @-threshold reading, and with no sweep on file at all the output is
+byte-identical to the pre-sweep table - pinned against the real ledger's
+golden output, since the append-only ledger holds both vintages.
 """
 
 import importlib.util
@@ -60,6 +70,24 @@ def rec(tag, steps_label, config_steps, seed, det, fa, threshold=0.5):
             "positives": {"rate": det},
         },
     }
+
+
+def _sweep(thresholds, adv_rate, pos_rate, adv_n=298, pos_n=51):
+    """An eval threshold_sweep block in the shape eval_model.py writes it:
+    per-grid-point rates, adversarial axis = extend+hey_other only."""
+    return {
+        "thresholds": list(thresholds),
+        "adv_rate": list(adv_rate),
+        "positives_rate": list(pos_rate),
+        "adv_n": adv_n,
+        "pos_n": pos_n,
+    }
+
+
+def rec_sweep(tag, steps, seed, det, fa, curve, threshold=0.5):
+    r = rec(tag, steps, steps, seed, det, fa, threshold=threshold)
+    r["eval_block"]["threshold_sweep"] = curve
+    return r
 
 
 def test_same_label_different_config_splits_and_warns(tmp_ledger, capsys):
@@ -181,3 +209,89 @@ def test_real_ledger_groups_on_resolved_steps(capsys):
     assert "86.3% [78.4-90.2]" in line_50k
     assert "094e414-cf9c065b-h4279b3d" in err
     assert "094e414-dirty-cf9c065b-h9c5902b" in err
+
+
+# ---------------------------------------------------------------------------
+# C3 step 2: the matched-FA reading off the recorded threshold sweep
+# ---------------------------------------------------------------------------
+
+def test_matched_fa_at_most_budget_picks_the_right_point(tmp_ledger):
+    # B = median across the two swept groups of each group's own FA at its
+    # recorded threshold: median(2%, 3%) = 2.5%. At FA <= 2.5% the 25k
+    # curve's eligible points are (2%, 85%) and (0%, 60%) -> 85%; the
+    # (5%, 90%) point is EXCLUDED, not blended into the reading, and the
+    # 50k group reads its own curve: only (1%, 72%) is eligible.
+    c25 = _sweep([0.3, 0.5, 0.7], [0.05, 0.02, 0.0], [0.90, 0.85, 0.60])
+    c50 = _sweep([0.3, 0.5, 0.7], [0.06, 0.03, 0.01], [0.88, 0.80, 0.72])
+    _write(tmp_ledger, [
+        rec_sweep("aaa1111-cf9c065b-haaaaaa", 25000, 42, 0.85, 0.02, c25),
+        rec_sweep("bbb2222-cf9c065b-hbbbbbb", 50000, 43, 0.80, 0.03, c50),
+    ])
+    out = ledger.summarise("hey seeree")
+    assert "matched-FA budget: adv FA <= 2.5%" in out
+    line25 = next(l for l in out.splitlines() if "25000" in l)
+    line50 = next(l for l in out.splitlines() if "50000" in l)
+    assert "det@FA<=2.5%  85.0%" in line25
+    assert "det@FA<=2.5%  72.0%" in line50
+    # the derivation is printed, not implicit
+    assert "median" in out and "never interpolated" in out
+    # and the old @-threshold columns still sit beside it, labelled
+    assert "adv FA@0.5" in line25 and "detection@0.5" in line25
+
+
+def test_budget_below_best_fa_prints_marked_fallback(tmp_ledger):
+    # B = median(2%, 5%) = 3.5%. The 50k curve never reaches 3.5% (best
+    # point 5%): its value is that best point (70% at its own FA), marked
+    # '*' with a footnote saying what it is - never an interpolated guess
+    # at 3.5%.
+    ca = _sweep([0.3, 0.5, 0.7], [0.05, 0.02, 0.0], [0.90, 0.85, 0.60])
+    cb = _sweep([0.3, 0.5, 0.7], [0.09, 0.07, 0.05], [0.90, 0.80, 0.70])
+    _write(tmp_ledger, [
+        rec_sweep("aaa1111-cf9c065b-haaaaaa", 25000, 42, 0.85, 0.02, ca),
+        rec_sweep("bbb2222-cf9c065b-hbbbbbb", 50000, 43, 0.80, 0.05, cb),
+    ])
+    out = ledger.summarise("hey seeree")
+    assert "matched-FA budget: adv FA <= 3.5%" in out
+    line50 = next(l for l in out.splitlines() if "50000" in l)
+    assert "det@FA<=3.5%  70.0% *" in line50
+    assert "no curve point at adv FA <= 3.5%" in out
+    assert "not an interpolation" in out
+
+
+def test_mixed_ledger_renders_both_readings_labelled(tmp_ledger):
+    # One swept group beside one pre-sweep group: the pre-sweep row keeps
+    # its @-threshold columns and gets an explicit '-' (never a borrowed
+    # number), and the caveat names the two vintages so the table cannot
+    # be read as one comparison.
+    ca = _sweep([0.3, 0.5, 0.7], [0.05, 0.02, 0.0], [0.90, 0.85, 0.60])
+    _write(tmp_ledger, [
+        rec_sweep("aaa1111-cf9c065b-haaaaaa", 25000, 42, 0.85, 0.02, ca),
+        rec("bbb2222-cf9c065b-hbbbbbb", 50000, 50000, 43, 0.80, 0.03),
+    ])
+    out = ledger.summarise("hey seeree")
+    # with a single swept group, B is that group's own recorded-threshold FA
+    line50 = next(l for l in out.splitlines() if "50000" in l)
+    assert "adv FA@0.5" in line50 and "detection@0.5" in line50
+    assert "-  (no sweep on file" in line50
+    line25 = next(l for l in out.splitlines() if "25000" in l)
+    assert "det@FA<=2.0%  85.0%" in line25
+    assert "predate the sweep" in out
+
+
+def test_real_ledger_no_sweep_output_is_byte_identical(capsys):
+    # Pin (regression guard for the fallback path): the real ledger has no
+    # sweep on file, so summarise must be byte-identical to the pre-sweep
+    # table - the append-only ledger will hold both vintages side by side,
+    # and the old reading cannot move a character. The goldens were
+    # captured 2026-09-22, before the sweep existed. If a new record is
+    # ever appended to the real ledger, re-capture the goldens DELIBERATELY
+    # (it is history, not a fixture): the pin is there to make that an
+    # act, not a drift.
+    path = ledger.ledger_path("hey seeree")
+    if not path.is_file():
+        pytest.skip(f"no ledger at {path}")
+    golden = Path(__file__).parent / "golden"
+    out = ledger.summarise("hey seeree")
+    err = capsys.readouterr().err
+    assert out + "\n" == (golden / "ledger_hey_seeree_stdout.txt").read_text()
+    assert err == (golden / "ledger_hey_seeree_stderr.txt").read_text()

@@ -33,11 +33,19 @@ SPREAD IS THE POINT. summarise() prints MIN/MAX across repeats beside the
 mean, because a difference smaller than the repeat-to-repeat spread is not a
 result - the 10-point measurement above is the noise floor this repo has
 directly observed, at an unchanged configuration.
+
+SINCE BUG.MD C3 STEP 2 (2026-09-22) the eval block also carries
+threshold_sweep: a fixed-grid re-threshold of that one run's own per-clip
+peaks (the model ran once; the threshold is a filter). summarise() reads
+those curves to report detection at a COMMON matched-FA budget across
+groups, instead of beside one threshold - the 40-eval manual 0.25-0.85 job
+is what this exists to stop happening.
 """
 
 import argparse
 import itertools
 import json
+import statistics
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -261,6 +269,58 @@ def _eval_signature(rec):
             eb.get("threshold"))
 
 
+def _sweep_curve(rec):
+    """The record's eval threshold sweep as [(fa%, det%, threshold)], or None.
+
+    bug.md C3 step 2 (2026-09-22): eval_model.py records threshold_sweep -
+    a fixed-grid re-threshold of its own per-clip peaks (the model ran once)
+    - so a sweep can be concluded from the ledger instead of a human driving
+    40 single-threshold evals. The curve is a step function in the FA axis;
+    every reading of it is a POINT PICK, never an interpolation. The FA axis
+    is the extend+hey_other subset, never pooled with the other categories
+    (the 'never pool' invariant applies to the curve as to the gate).
+
+    A record with no sweep (every pre-sweep one on file) or with a
+    structurally inconsistent block (mismatched lengths, missing rates)
+    returns None: the ledger does not repair or recompute the eval block
+    (module docstring), it says what it has and falls back to the
+    one-threshold reading.
+    """
+    ts = (rec.get("eval_block") or {}).get("threshold_sweep") or {}
+    thr, adv, det = (ts.get("thresholds"), ts.get("adv_rate"),
+                     ts.get("positives_rate"))
+    if not (thr and adv and det) or not (len(thr) == len(adv) == len(det)):
+        return None
+    if any(a is None or d is None for a, d in zip(adv, det)):
+        return None
+    return [(float(a) * 100, float(d) * 100, float(t))
+            for t, a, d in zip(thr, adv, det)]
+
+
+def _at_most_budget(curve, budget_pct):
+    """(det%, fallback, fa%) - a curve's reading at a common FA budget B.
+
+    'Detection at AT-MOST-B false accepts' = the max detection over the
+    curve's points with FA <= B. The curve is a step function, so this is a
+    pick among measured points, never a parametric interpolation: an
+    interpolated point is a number no run ever produced, and a number no run
+    produced is how a fixed-threshold verdict (77% vs 67% at 0.5, same
+    config) gets dressed up as a comparison. Ties in detection go to the
+    point with FEWER false accepts - the higher threshold, the safer
+    operating point of the two. When no point meets the budget (B below
+    the curve's best FA) the best-reachable point comes back with
+    fallback=True: the table prints it, marked, as a floor at its own FA
+    rather than a reading at B.
+    """
+    eligible = [pt for pt in curve if pt[0] <= budget_pct]
+    if not eligible:
+        best_fa = min(pt[0] for pt in curve)
+        det = max(pt[1] for pt in curve if pt[0] == best_fa)
+        return det, True, best_fa
+    fa, det, _t = max(eligible, key=lambda pt: (pt[1], -pt[0]))
+    return det, False, fa
+
+
 def _stat(rates):
     """mean [min-max] across repeats, in percent - the spread beside the point.
 
@@ -295,8 +355,23 @@ def summarise(wake_word, grid_keys=None):
     rather than averaged over. THRESHOLD LABELS (C3 step 1) - the columns
     carry the recorded eval threshold (@0.5, or `mixed`), because the rates
     are one-threshold readings and a detection difference beside a different
-    FA rate is the comparison CLAUDE.md forbids; a matched-FA comparison is
-    step 2, which this table does not attempt.
+    FA rate is the comparison CLAUDE.md forbids.
+    MATCHED FA (C3 step 2) - when any record carries the eval threshold
+    sweep (threshold_sweep in the eval block), the table gains a
+    det@FA<=B column. B is ONE common budget for every swept group, computed
+    as the median across swept groups of each group's own median
+    recorded-threshold FA, and printed above the table with that derivation:
+    every group is then read AT B - the best detection on its OWN curve with
+    FA <= B, a step-function point pick, never an interpolation. B anchored
+    to where the groups were each measured keeps them honestly comparable:
+    no group is forced to a corner of its curve the comparison never asked
+    for. A group whose curve cannot reach B prints its best-reachable point,
+    marked '*', with the derivation in a footnote. Groups with no sweep on
+    file (every pre-sweep record) keep the @-threshold columns and caveat;
+    the two readings appear together, labelled apart. When NO record carries
+    a sweep the output is byte-identical to the pre-sweep table: the ledger
+    is append-only and holds both vintages, so the fallback path must not
+    move a single character of the old reading.
     """
     path = ledger_path(wake_word)
     records = load(wake_word)
@@ -329,6 +404,49 @@ def summarise(wake_word, grid_keys=None):
         groups.setdefault((rec.get("target"), combo), []).append(rec)
 
     lines = [f"ledger: {path}  ({len(records)} record(s))", ""]
+
+    # C3 step 2: per-group sweep curves from the records that carry one, with
+    # each record's own recorded-threshold FA (its eval block's adversarial
+    # rate) for the budget derivation. Groups without a sweep on file are
+    # simply absent here and keep the @-threshold rendering below.
+    group_sweep = {}
+    for (target, combo), recs in groups.items():
+        entries = []
+        for r in recs:
+            curve = _sweep_curve(r)
+            if curve is None:
+                continue
+            fa0 = (r["eval_block"].get("adversarial") or {}).get("rate")
+            entries.append((fa0 * 100 if fa0 is not None else None, curve))
+        if entries:
+            group_sweep[(target, combo)] = entries
+
+    # The common FA budget, or None when no record carries a sweep (all
+    # existing records). The median of medians is deterministic and sits at
+    # the heart of the swept groups' operating region: tight enough that the
+    # reading discriminates, derived from each group's own measured point so
+    # no group is forced to a corner of its curve it never reached.
+    matched = None
+    n_swept = 0
+    if group_sweep:
+        per_group = []
+        for entries in group_sweep.values():
+            fa0s = [f for f, _ in entries if f is not None]
+            if fa0s:
+                per_group.append(statistics.median(fa0s))
+        n_swept = len(per_group)
+        if per_group:
+            matched = statistics.median(per_group)
+    if matched is not None:
+        lines += [
+            f"  matched-FA budget: adv FA <= {matched:.1f}% - the median, across the",
+            f"  {n_swept} swept group(s), of each group's own median adv FA at its recorded",
+            "  threshold. Every swept group is read AT that budget: the best detection on its",
+            "  own curve with FA <= B - a step-function point pick, never interpolated",
+            "  (CLAUDE.md: never compare models at a fixed threshold; bug.md C3, 2026-09-22).",
+            "",
+        ]
+    fallback_notes = []
     for (target, combo), recs in sorted(groups.items(),
                                         key=lambda kv: (kv[0][0] or "", kv[0][1])):
         label = "  ".join(f"{k}={v}" for k, v in zip(grid_keys, combo)) or "-"
@@ -341,6 +459,7 @@ def summarise(wake_word, grid_keys=None):
         n = len(pairs)
         n_runs = len(recs)
         adv, det = [], []
+        pair_curves = {}
         for (chash, seed), dups in pairs.items():
             sigs = [_eval_signature(r) for r in dups]
             collapsed = len(sigs) <= 1 or len(set(sigs)) == 1
@@ -361,6 +480,9 @@ def summarise(wake_word, grid_keys=None):
                     adv.append(r["eval_block"]["adversarial"]["rate"] * 100)
                 if (r["eval_block"].get("positives") or {}).get("rate") is not None:
                     det.append(r["eval_block"]["positives"]["rate"] * 100)
+                curve = _sweep_curve(r)
+                if curve is not None:
+                    pair_curves.setdefault((chash, seed), []).append(curve)
         # C3 step 1: name the threshold the rates were read at, or say mixed
         # when the group's records do not agree on one.
         thresholds = {_fmt((r.get("eval_block") or {}).get("threshold")) for r in recs}
@@ -369,7 +491,36 @@ def summarise(wake_word, grid_keys=None):
         line = f"  {target or '?':<5} {label:<38} {n_str}"
         line += f"  adv FA@{th}  {_stat(adv)}".rstrip()
         line += f"  detection@{th}  {_stat(det)}".rstrip()
+        # C3 step 2: the matched-FA column - only when some record carries a
+        # sweep, so a ledger with none (all existing records) renders exactly
+        # as before, byte for byte.
+        if matched is not None:
+            vals, fbs = [], []
+            for curves in pair_curves.values():
+                for curve in curves:
+                    v, fb, fa = _at_most_budget(curve, matched)
+                    vals.append(v)
+                    if fb:
+                        fbs.append((fa, v))
+            if vals:
+                cell = f"  det@FA<={matched:.1f}%  {_stat(vals)}"
+                if fbs:
+                    cell += " *"
+                    worst = min(fbs, key=lambda p: p[0])
+                    fallback_notes.append(
+                        f"* {target or '?'} {label}: no curve point at adv FA <= "
+                        f"{matched:.1f}% (its best point is FA {worst[0]:.1f}%). The "
+                        f"marked value ({worst[1]:.1f}%) is that best point, read at "
+                        "its own FA - a floor, not a reading at the budget, and not "
+                        "an interpolation.")
+            else:
+                cell = f"  det@FA<={matched:.1f}%  -  (no sweep on file; " \
+                       "@-threshold reading only)"
+            line += cell
         lines.append(line)
+    if fallback_notes:
+        lines.append("")
+        lines += [f"  {note}" for note in fallback_notes]
     # Records that carry no eval block show their config and tag only: there is
     # no number to put in the table, and pretending there was would be a lie.
     for rec, values in no_eval:
@@ -389,6 +540,16 @@ def summarise(wake_word, grid_keys=None):
         lines.append("  difference between rows is not a verdict - 'Never compare models")
         lines.append("  at a fixed threshold' (CLAUDE.md); 77% vs 67% at 0.5 was the")
         lines.append("  SAME config (bug.md C3, 2026-09-22).")
+    if matched is not None:
+        lines.append("")
+        lines += [
+            "  det@FA<=B: the matched-FA reading (bug.md C3 step 2, 2026-09-22 - the",
+            "  40-eval manual 0.25-0.85 job this exists to stop). One budget for every",
+            "  swept group; each reads its OWN curve, never another group's.  '-': the",
+            "  records predate the sweep - @-threshold columns only, not comparable at B.",
+            "  '*': the group's curve never reaches FA <= B; the marked value is its best",
+            "  reachable point, at its own FA - a floor, not a reading at the budget.",
+        ]
     return "\n".join(lines)
 
 
