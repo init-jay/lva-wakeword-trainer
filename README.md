@@ -22,7 +22,11 @@ happens inside each step.
 
 ## What you get after each run
 
-- Two `.tflite` models, one `microwakeword` and one `openwakeword`
+- A `microwakeword` model: `.tflite` plus the ESPHome `.json`
+- An `openwakeword` model: `.onnx`, and a `.tflite` where the converter
+  cooperates (on macOS the conversion aborts mid-run, a known recorded
+  non-fatal — the `.onnx` is the model and the run prints the one-line
+  late conversion)
 - A performance scorecard for each, measured under its LVA inference configuration
 - Suggestions for improving the next training run (requires an AI agent pointed at this repo)
 
@@ -62,8 +66,12 @@ Is this good enough to ship?
 
 ### Prefer to drive it yourself?
 
-**[docs/MANUAL_RUN.md](docs/MANUAL_RUN.md)** has the four steps end to end, with the
-commands for each of the three scripts in `scripts/`.
+**`make help`** is the entry point, and **[docs/MANUAL_RUN.md](docs/MANUAL_RUN.md)** has the
+four steps end to end, with the commands for each of the three scripts in `scripts/`.
+The change-one-thing loop itself is a tool: `scripts/sweep.py` runs a small
+grid against a frozen corpus and appends every point to a per-wake-word
+ledger (`output/<word>/runs.jsonl`); `python -m train.ledger --wake-word ...`
+summarises it.
 
 
 ## Design choices
@@ -88,5 +96,8 @@ you what to expect.
 | Eval | minutes | minutes |
 | Preflight | needs a mic | needs a mic |
 
-- Corpus generation is the largest stage of either run; `SKIP_CORPUS=1` skips
-  it on a re-run and saves about 10-15 minutes from number above.
+- Corpus generation is the largest stage of either run; it speaks to a TTS
+  engine (`tts-service/`: Kokoro on 8900, Piper via `scripts/start-tts-fleet.sh`),
+  which is why it is a separate, server-needing stage the trainers can skip -
+  `--skip-corpus` on the oww scripts, `SKIP_CORPUS=1` on mww - and the re-run
+  flags save about 10-15 minutes off the numbers above.

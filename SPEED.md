@@ -55,6 +55,34 @@ mmap'd or thrashed, and falling short page-faults rather than erroring. And on t
 CUDA box, holding the card alone is the difference between finishing and not: a
 Kokoro server left up cost a run a 16.09 GiB allocation with 15.34 GiB free.
 
+## openWakeWord stage costs on the current pipeline (measured 2026-09-22, Mac host)
+
+The P0 work split the oww run into reuse-checked stages (corpus manifest,
+features sidecar keyed on corpus digest + rounds + seed), so the question a
+sweep plan actually asks is no longer "how long is a run" but "what does one
+point cost once the corpus exists". Measured end to end on the 15-voice
+post-reservation corpus (c348af7b, 17,241 clips, all-Kokoro, seed 55, 25k
+steps, `--corpus rebuild`; file mtimes, `logs/corpus-rebuild.log`):
+
+| stage | wall |
+|---|---|
+| TTS corpus + trim + manifest (17,241 clips, one Kokoro engine on 8900) | **12m12s** |
+| Features, 3 augmentation rounds (sidecar miss: new seed) | **8m49s** |
+| 25,000 steps + .onnx write | **3m50s** |
+| **Total, corpus rebuild included** | **24m51s** |
+
+A warm sweep point on the same corpus and seed is the features-skip case:
+~4 minutes. A warm point at a new seed recomputes features: ~13 minutes.
+That is the sub-hour repeatable pass the plan was after: a two-point grid
+with two repeats is under two hours including the one-time corpus build.
+The ±30% machine-load rule applies (load not recorded for this run);
+the 22-voice 50k rows above stand for the bigger-corpus case.
+
+`--smoke` (harness check, not a quality pass) measured the same day:
+own 13.5 min end to end, mww ~1 minute (improvement.md, P2.5) - the oww
+smoke is dominated by the feature recompute, which smoke deliberately
+re-runs so a broken feature stage fails in minutes, not hours.
+
 ## openWakeWord on the Mac: host vs. container
 
 **On Apple Silicon, leaving the container is worth ~7x on the training stage.** 250
