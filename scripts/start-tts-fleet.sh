@@ -126,7 +126,11 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 for ((i = 0; i < N; i++)); do
-    PORT=$((BASE_PORT + i))
+    # 8898 DOWN (8898, 8897, ...), matching this header's "8898 .. 8897+N-1":
+    # the Kokoro engines occupy the ports ABOVE 8898 on a co-located Mac
+    # (8899/8901 docker, 8900 in-process mlx - tts-service/README.md), so a
+    # fleet that counted UP would collide with them on its second instance.
+    PORT=$((BASE_PORT - i))
     URL="tcp://127.0.0.1:$PORT"
     out="$(probe "$PORT" 2>/dev/null)" || out="DOWN probe failed"
 

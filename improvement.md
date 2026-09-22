@@ -366,8 +366,7 @@ least-loaded by job count, so no instance reloads a model mid-run; per-stage
 pidfile-managed, comma-joined URL on stdout for `$(...)` capture); `PIPER_URLS`
 in both Apple-Silicon run scripts. Verified with a live 2-instance fleet:
 every model pinned to exactly one instance, 40/40 clips, single-URL backward
-compat intact. NOT yet measured: real N-way throughput (the N x 21.66 clips/s
-hypothesis from fact 10) - the next real corpus stage lands it.
+compat intact. N-way throughput measured 2026-09-22 (below): **no win from N>1 on a 10-core box** - one Piper instance already saturates all ten cores, so there is no throughput left to shard out.
 
 Fact 10. `generate_piper_samples` is a serial loop; the engine serialises by design
 (one model resident, one lock); the docstring already specifies the fix.
@@ -382,11 +381,56 @@ Fact 10. `generate_piper_samples` is a serial loop; the engine serialises by des
   against `tools/bench_tts.py`'s 21.66 clips/s single-process. On 10 cores, 6 instances
   should land near 1-1.5 min — roughly **5 minutes off a 14-minute mww run**.
   `tools/bench_tts.py` already exists to confirm it; measure before claiming it.
+  REFUTED by the 2026-09-22 measurement below: 6 instances gave 17.26 clips/s, i.e. the
+  same as one - the ~5 min is not there, because one instance already owns all ten cores.
 - Same mechanism applies to Kokoro-MLX, but with much less confidence: MLX contends on
-  one GPU, so expect 2 instances to help and more to not. Measure, don't assume — and
+  one GPU, so expect 2 instances to help and more to not. Measure, don't assume - and
   note SPEED.md's ±30% machine-load rule while doing it.
 
-### P2.2 Parallelise the two serial CPU passes over the corpus — CLOSED 2026-09-22, negative result: neither pass is worth it
+Measured 2026-09-22, `tools/bench_piper_fleet.py`: the real `select_piper_voices` voice
+list + `PiperFleet.shard`, workers == N, one clip per request (Piper is serial - no
+batch, `engine.py`), synthesize-and-discard so it measures the fleet not the disk. The
+same 1,440-clip oww workload at every N (25 models, 90 (voice, speaker) pairs x 16
+clips), built deterministically so a change between sizes is the fleet, not the
+workload; each model's one 0.6 s load is paid, not warmed away. One clean run per N, two
+for N=2:
+
+  N    wall      clips/s    vs N=1    box while rendering
+  1    86.4 s    16.66      1.00x     ~100% busy; 1 instance, ~11-17 onnxruntime threads
+  2    158.6 s    9.09      0.55x     100% busy; 2 instances, ~18-19 threads each
+  4    84.1 s    17.11      1.03x     100% busy
+  6    83.4 s    17.26      1.04x     100% busy
+  8    79.3 s    18.16      1.09x     100% busy
+
+N=2 is a clean loss (9.08 and 9.09 on two back-to-back runs, 0.55x); N=4/6/8 all land
+inside the box's noise band around N=1 (16.66-18.16, and N=1 re-measured at 17.5-17.8 on
+the longer 24-clip/pair workload). **There is no scaling.**
+
+Why the "N x 21.66" never happens: Piper is not single-threaded the way Kokoro-CPU is.
+onnxruntime runs intra-op parallelism across cores, and one instance already used ~980%
+CPU in `bench_tts.py` - ten of this box's ten cores. The ~17-18 clips/s ceiling is the
+*machine's*, not the instance's, and no value of N can create more than ten cores. N=2
+is the worst case: two ~19-thread pools oversubscribe ten cores ~2x and thrash (0.55x);
+four to eight smaller pools share the cores and recover to the ceiling, so they merely
+tie N=1. This confirms and extends `bench_tts.py`'s "a second instance was 0.88x, slower
+than one."
+
+So the sharding is correct engineering (voice-pinning works, per-instance assignment and
+single-URL backward compat verified) but it is NOT "the biggest single win left": on a
+10-core Mac one Piper instance is as fast as any fleet, and N=2 is slower. The mww corpus
+stage (Piper-majority) is already at the box's Piper ceiling and adding instances does not
+cut it. It *would* help where one instance cannot already use every core - a wider box,
+or if each instance's onnxruntime intra-op threads were capped to a fair 10/N share -
+but that is a different change than the fleet as shipped.
+
+Caveat: the box carried background load this session (Apple ML churn, 1-min average
+2.6-17 across the runs), so the absolute ceiling reads low against `bench_tts.py`'s
+21.66 (which also used the shorter "hey seeree" phrase, not the longer oww wordlist
+phrases). That pushes every number down a little; it does not change the scaling
+verdict, and the ~100% box utilization in every run shows the piper work - not the
+background - bound each measurement.
+
+### P2.2 Parallelise the two serial CPU passes over the corpus - CLOSED 2026-09-22, negative result: neither pass is worth it
 
 Measured 2026-09-22 before deciding, per the item's own instruction. Box was under a
 background training sweep the whole time (load average ~11 on 10 cores), so all
@@ -645,19 +689,56 @@ config half.
   seeds {42, 43, 1042, 1043} - a direct measurement of this repo's seed
   noise floor at one config: detection 86.3% mean, 78.4-90.2 spread
   (11.8 points, against the 10 points quoted from memory); adversarial FA
-  3-4%, under the gate; ryan at 50% at every point. The **training-steps
-  lever remains unmeasured** and the sweep is to be re-run on the fixed
-  runner (scripts/sweep.py now threads the grid through trainer_cmd and
-  prints the resolved command in --dry-run; tests/test_sweep.py asserts a
-  grid value reaches the rendered command and would have caught this).
+  3-4%, under the gate; ryan at 50% at every point. The grid fix landed
+  (scripts/sweep.py threads the grid through trainer_cmd; --dry-run prints
+  the resolved command; tests/test_sweep.py asserts a grid value reaches the
+  rendered command and would have caught this), and the **training-steps
+  lever is now measured** on the fixed runner - re-run 2026-09-22, full
+  result in the B1-re item below. Short version: no win from 50k.
+- **B1-re (2026-09-22): the training-steps re-run on the fixed runner - the
+  lever is now measured, and 50k is not a win.** Re-ran sweeps/oww-training-steps.yaml
+  (25k vs 50k steps, 2 repeats each) on the frozen cf9c065b corpus; tag
+  c6542f5-dirty, 4 points (seeds 42/43 at 25k, 1042/1043 at 50k). Grid fix
+  verified in the data: every record's config.steps now equals its grid label
+  (grid==cfg for all four), unlike the original four rows where the two "25k"
+  rows actually trained at 50k. Matched-false-accept comparison - the harness
+  takes one --threshold, so the matched-FA curve was built by hand (I drove
+  eval_model.py across decision thresholds 0.25-0.85 per model, 40 evals,
+  total-negative FA over the 366-clip negatives set): the two settings occupy
+  near-disjoint FA bands (25k reaches 0.55-2.19% total-negative FA, 50k only
+  2.46-3.01%), and in the comparable region (~2.2-2.5% FA) detection is the same
+  - 25k ~78-82%, 50k ~77-81%, overlapping inside the 2-6 point repeat spread and
+  far under the 10-point noise floor: **NOT distinguishable at matched false
+  accepts.** 50k only reaches its higher detection ceiling (up to 90% for seed
+  1042) at 3.0-3.3% FA, a higher-false-accept operating point the 25k models
+  cannot reach - so 50k buys its extra detection with more false triggers, not
+  for free. Per speaker (the axis that matters, never pooled): ryan is the
+  lowest-detection voice at every point and step count (17-50% across the curve;
+  17-33% in the comparable ~2.5% FA band) while jay (77-94%) and jen (80-100%)
+  are solid for both - doubling steps does not lift the weak voice. **Verdict:
+  doubling training steps 25k->50k is not a win** - no detection gain in the
+  achievable band, a false-accept cost to reach the higher ceiling, no
+  per-speaker improvement. Consistent with the corpus-depth result (SPEED.md:
+  more of the training signal did not produce a deployable model). Caveats: 366
+  negatives quantise FA to 0.27%/clip, so the FA bands nearly touch without
+  overlapping and the "match" reads each curve at its nearest common point; one
+  25k repeat (seed 43) aborted on the first pass in an onnxruntime thread race
+  (recursive_mutex lock failed, SIGABRT) during feature computation at machine
+  load ~20 and was re-run cleanly at load ~8-10 (an environment flake, not a
+  model property - the same abort is the known non-fatal tflite-conversion
+  warning); the corpus cf9c065b predates the P1.2 voice reservation (3499919) so
+  the voice-holdout axis is contaminated for these models too (the per-speaker
+  numbers here are the standard in-distribution set); per-speaker n is small
+  (ryan 6 clips).
 - P1.1 negative growth: DONE - wordlists/hey_seeree.yaml extend 20->148, hey_other
   12->150; 298 clips rendered (kokoro-mlx, 18 voices) into
   data/corpus/eval/negatives_tts, 12 stale pre-widening hey_other clips removed.
   Scorecard baseline moves - the deploy candidate must be re-baselined before a
   ship call (commit 73bb78d).
 - P2.1 Piper sharding: DONE (commit 7036f74) - PiperFleet with voice-pinned
-  sharding, start-tts-fleet.sh, PIPER_URLS in both run scripts. N>1 throughput
-  unmeasured.
+  sharding, start-tts-fleet.sh, PIPER_URLS in both run scripts. N-way throughput
+  measured 2026-09-22: no win from N>1 - one instance saturates 10 cores, N=2 is a 0.55x
+  loss, N=4-8 tie N=1 (negative result, full note at P2.1).
 - P1.3/P1.4: DONE (commit 456e443) - WEIGHT_AUDIT/MERGE_AUDIT into config.json;
   finding: the doubling is unconditional (best_val_fp never updated).
 - P3.1/P2.5: DONE (commit bca9f53) - --smoke on both trainers + Makefile
@@ -681,15 +762,18 @@ config half.
   synthetic set. Both far under the ~2 min bar - no code change (full note at P2.2).
 
 **Still open:**
-- The B1 sweep re-run: the fixed runner (grid threaded through trainer_cmd,
-  resolved command printed in --dry-run, tests/test_sweep.py) has not yet
-  trained a single point. Until it has, the training-steps lever is
-  unmeasured and the four filed rows are a seed-noise measurement at 50k.
+- The B1 sweep re-run: DONE 2026-09-22 (tag c6542f5-dirty, 4/4 points, grid fix
+  verified in the data) - the training-steps lever is now measured and 50k is
+  not a win at matched false accepts (full note in the B1-re item above). The
+  original four rows stay as a 50k seed-noise measurement; the four c6542f5
+  rows supersede the mislabeled 25k-vs-50k comparison.
 - P1.2's rendered set is missing its Piper half (10 clips; the reservation
   and enforcement are in, the clips wait for a Piper engine running).
-- P2.1 Piper-fleet throughput at N>1, unmeasured (bug.md B5) - the ~5-min
-  wall-time claim in the plan must not go into SPEED.md or the README until
-  bench_tts.py has run N = 1..8 back to back.
+- P2.1 Piper-fleet throughput at N>1: MEASURED 2026-09-22 (tools/bench_piper_fleet.py,
+  N = 1/2/4/6/8, same 1,440-clip oww workload) - negative result: 16.66 / 9.09 / 17.11 /
+  17.26 / 18.16 clips/s, i.e. no scaling (one instance saturates 10 cores; N=2 loses 45%,
+  N>=4 only ties N=1). The ~5-min wall-time claim in the plan is refuted and must NOT go
+  into SPEED.md or the README.
 - The CUDA images on the training box still need their next build to pick up
   the new patches (the CPU images were rebuilt 2026-09-22).
 - Corpus/holdout contamination, stated here where the positional guarantees
