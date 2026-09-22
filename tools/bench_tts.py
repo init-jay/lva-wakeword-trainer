@@ -41,8 +41,11 @@ JSON per exchange, measured at under 1 ms against 100-500 ms renders.
     uses Accelerate. On Apple Silicon the win is leaving the container, not reaching
     the GPU.
   - Piper is not. onnxruntime parallelises across cores, and one instance measured
-    980% CPU - ten cores. A second instance was 0.88x, slower than one, because the
-    two contend for the cores the first was already using.
+    980% CPU - ten cores (this short-phrase workload; on the longer oww wordlist
+    phrases the same box measures 462% per instance, and a fleet of 2-8 still
+    cannot beat one - SPEED.md "Piper fleet", 2026-09-22). A second instance was
+    0.88x, slower than one, because the two contend for cores the first was
+    already using.
 
 Guessing which pattern an engine follows gets it backwards, so measure. The sweep
 here is designed to tell them apart: if throughput is flat while latency grows

@@ -82,6 +82,21 @@ class PiperFleet:
     is memoised for the object's life - which is the run - so a voice always
     hits the same instance from its first clip to its last, and an instance
     loads each of its models once rather than per request.
+
+    Disposition (C4, bug.md): on ONE machine a fleet does not help, and this
+    is measured, not assumed - SPEED.md "Piper fleet" (2026-09-22, re-measured
+    the same evening, 3-6 trials per size with the load average recorded per
+    trial): one instance 15.49-16.51 clips/s at 462% mean CPU (4.6 of the box's
+    10 cores; no fleet of 2-8 instances passes ~18 clips/s total, and N=2 is a
+    reproducible 0.54x loss, N=4-8 0.75-1.16x with no N>1 mean above N=1's).
+    Do not reach for a local fleet to speed up a corpus stage on one machine
+    - it is not the fast path, and N=2 makes it slower. It is kept because it is the only route to
+    a MULTI-machine corpus (across machines there is no single-box ceiling to
+    run into, and this is the only code that treats N processes as one
+    sharded engine), and the sharding is the non-obvious part: a model must
+    hit the same instance for the whole run or nearly every request pays the
+    0.6 s reload, and a fleet whose instances serve different catalogs would
+    silently shrink the corpus (probe).
     """
 
     def __init__(self, spec):

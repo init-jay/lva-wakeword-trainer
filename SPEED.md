@@ -257,6 +257,85 @@ CPU inside the same call. Verdict: do not add a CoreML branch to the feature
 stage; the question is closed by measurement, the way the Metal section is.
 (The probe is reproducible: `train-applesilicon/.venv/bin/python tools/coreml_probe.py`.)
 
+## Piper fleet (N instances): no N>1 scaling on one machine (2026-09-22, re-measured the same day with repeats)
+
+P2.1 in `improvement.md` ships `PiperFleet` (voice-pinned sharding across N
+`piper_engine` processes, `scripts/start-tts-fleet.sh`) to scale the corpus
+stage. The first measurement — one clean run per N, machine load not recorded
+— read:
+
+```
+N = 1      2      4       6       8
+   16.66  9.09  17.11   17.26   18.16   clips/s     (superseded: one trial each)
+```
+
+Non-monotonic (a 45% loss at N=2 that "recovers" at N=4), and this file's
+±30% / same-day rules do not license a conclusion from a single reading, so it
+was re-measured the same evening: `tools/bench_piper_fleet.py --trials 3`, the
+same 1,440-clip oww workload at every N (25 models, 90 (voice, speaker) pairs
+x 16 clips, built once and re-used, so a change between sizes is the fleet not
+the workload; each model's one 0.6 s load is paid, not warmed away), three
+trials per N back to back, the box's 1/5/15-min load average recorded at each
+trial's start and end. Min/max per cell, the way the MLX table does:
+
+| N | clips/s, min-max (n trials) | mean | 1-min load (trial starts) |
+|---|---|---|---|
+| 1 | 15.49 - 16.51 (6) | 16.14 | 4.5 - 9.4 |
+| 2 | **8.59 - 8.96 (4)** | **8.71 (0.54x)** | 3.7 - 7.6 |
+| 4 | 12.45 - 15.49 (3) | 13.46 (0.83x) | 4.1 - 11.4 |
+| 6 | 13.73 - 16.28 (3) | 14.62 (0.91x) | 8.3 - 17.1 |
+| 8 | 14.83 - 17.98 (3) | 15.95 (0.99x) | 12.9 - 20.1 |
+
+Both findings are now supported by repeats, and both cut against the old
+note's narrative:
+
+**The N=2 dip is real, not the artefact it read like.** 8.59 / 8.64 / 8.65 on
+three consecutive trials under the sweep's lightest loads, 0.54x, and the
+fleet was not imbalanced (720/720 clips per instance, max-min spread 0 -
+sharding was doing its job). A dip of exactly this shape is what survives
+repetition.
+
+**No N>1 scaling.** The old table called N=4/6/8 a tie with N=1; with repeats
+N=4 sits at 0.75-1.00x (two of its three trials at 0.78x) and no N>1 *mean*
+beats N=1's (16.14). The single trial that does clear N=1's best (17.98 vs
+16.51, N=8) ran at the afternoon's dirtiest 1-min load (13-20); N=1 ran first,
+at the lightest load of the sweep, so the one reading that flatters scaling is
+also the one reading with the least room to be read as scaling. The ceiling
+is about 18 clips/s for the box and one serial engine already delivers
+15.5-16.5 of it.
+
+**The mechanism - and where the old note was wrong.** `--sample-cpu` measures
+each instance's CPU two ways over the trial: the exact cumulative-CPU-time
+mean, and a 10 Hz peak poll (1 Hz aliases the ~60 ms request period):
+
+| | exact mean CPU | 10 Hz peak | threads |
+|---|---|---|---|
+| N=1, one instance (3 sampled trials) | **462% of the box's 10 cores, identical to 1% across all three** | 520 - 539% | 11 |
+| N=2, two instances combined | 370% | 647% | 9 + 8 |
+
+The old note's mechanism — "one instance already used ~980% CPU, ten of this
+box's ten cores" — was borrowed from `bench_tts.py`'s shorter "hey seeree"
+workload and never measured on this one. It does not hold here: a single
+instance averages 4.6 of the ten cores and peaks at ~5.3, and yet one
+instance alone reaches the total throughput no fleet of four to eight can
+pass. The wall is not a core count. And the N=2 dip is not core ownership
+either — the two instances there burned only ~370% of the box on average
+while every clip took twice as long as at N=1: each instance's onnxruntime
+intra-op burst, sized for a 10-core box, time-shares cores with the other
+process, so both slow down without either filling a core. That is
+oversubscription, not saturation — the first pass's "~18-19 threads each
+thrash" was a `top` guess, and the CPU times say the effect is less sharp
+than that, but the direction holds. What the two processes contend on exactly
+(memory bandwidth, cache, scheduler) is not measured here, and this file does
+not record a mechanism it has not measured; the dip stands as a measured,
+reproducible loss, its cause open.
+
+Verdict: on this 10-core box, one Piper instance delivers what no fleet
+delivers; N=2 is measurably worse, so a local fleet is out of the default
+path. It is kept for the multi-machine case only — the `PiperFleet` docstring
+states the disposition, and this section is where the measurement lives, the
+way the CoreML section closes the CoreML question.
+
 ## Kokoro TTS: three ways to run it, and the speed/quality tradeoff
 
 Corpus generation is the largest stage, so the TTS engine matters more than the

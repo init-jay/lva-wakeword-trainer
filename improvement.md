@@ -366,7 +366,11 @@ least-loaded by job count, so no instance reloads a model mid-run; per-stage
 pidfile-managed, comma-joined URL on stdout for `$(...)` capture); `PIPER_URLS`
 in both Apple-Silicon run scripts. Verified with a live 2-instance fleet:
 every model pinned to exactly one instance, 40/40 clips, single-URL backward
-compat intact. N-way throughput measured 2026-09-22 (below): **no win from N>1 on a 10-core box** - one Piper instance already saturates all ten cores, so there is no throughput left to shard out.
+compat intact. N-way throughput measured 2026-09-22 and re-measured the same
+evening with repeats (below): **no win from N>1 on a 10-core box** - one Piper
+instance alone reaches the total throughput no fleet of 2-8 can pass, so there
+is no throughput left to shard out on one machine (SPEED.md carries the table
+and the mechanism).
 
 Fact 10. `generate_piper_samples` is a serial loop; the engine serialises by design
 (one model resident, one lock); the docstring already specifies the fix.
@@ -381,8 +385,10 @@ Fact 10. `generate_piper_samples` is a serial loop; the engine serialises by des
   against `tools/bench_tts.py`'s 21.66 clips/s single-process. On 10 cores, 6 instances
   should land near 1-1.5 min — roughly **5 minutes off a 14-minute mww run**.
   `tools/bench_tts.py` already exists to confirm it; measure before claiming it.
-  REFUTED by the 2026-09-22 measurement below: 6 instances gave 17.26 clips/s, i.e. the
-  same as one - the ~5 min is not there, because one instance already owns all ten cores.
+  REFUTED by the 2026-09-22 measurement below, re-measured the same evening
+  with three trials per size and the load recorded per trial: 6 instances gave
+  13.73-16.28 clips/s against one's 15.49-16.51 - the ~5 min is not there,
+  because one instance already delivers the box's total Piper ceiling.
 - Same mechanism applies to Kokoro-MLX, but with much less confidence: MLX contends on
   one GPU, so expect 2 instances to help and more to not. Measure, don't assume - and
   note SPEED.md's ±30% machine-load rule while doing it.
@@ -392,8 +398,9 @@ list + `PiperFleet.shard`, workers == N, one clip per request (Piper is serial -
 batch, `engine.py`), synthesize-and-discard so it measures the fleet not the disk. The
 same 1,440-clip oww workload at every N (25 models, 90 (voice, speaker) pairs x 16
 clips), built deterministically so a change between sizes is the fleet, not the
-workload; each model's one 0.6 s load is paid, not warmed away. One clean run per N, two
-for N=2:
+workload; each model's one 0.6 s load is paid, not warmed away.
+
+First pass: one clean run per N (two for N=2), machine load not recorded:
 
   N    wall      clips/s    vs N=1    box while rendering
   1    86.4 s    16.66      1.00x     ~100% busy; 1 instance, ~11-17 onnxruntime threads
@@ -402,33 +409,75 @@ for N=2:
   6    83.4 s    17.26      1.04x     100% busy
   8    79.3 s    18.16      1.09x     100% busy
 
-N=2 is a clean loss (9.08 and 9.09 on two back-to-back runs, 0.55x); N=4/6/8 all land
-inside the box's noise band around N=1 (16.66-18.16, and N=1 re-measured at 17.5-17.8 on
-the longer 24-clip/pair workload). **There is no scaling.**
+SUPERSEDED (single trial per cell; kept per this file's supersedure convention):
+the N=2 dip was the single-trial artefact class SPEED.md's MLX table is written
+for, and the mechanism carried from that pass ("one instance already used ~980%
+CPU - ten of this box's ten cores") was borrowed from `bench_tts.py`'s shorter
+"hey seeree" workload, not measured on this one.
 
-Why the "N x 21.66" never happens: Piper is not single-threaded the way Kokoro-CPU is.
-onnxruntime runs intra-op parallelism across cores, and one instance already used ~980%
-CPU in `bench_tts.py` - ten of this box's ten cores. The ~17-18 clips/s ceiling is the
-*machine's*, not the instance's, and no value of N can create more than ten cores. N=2
-is the worst case: two ~19-thread pools oversubscribe ten cores ~2x and thrash (0.55x);
-four to eight smaller pools share the cores and recover to the ceiling, so they merely
-tie N=1. This confirms and extends `bench_tts.py`'s "a second instance was 0.88x, slower
-than one."
+Re-measured the same evening (C4, bug.md): `--trials 3` per N back to back
+(plus a CPU-sampled N=2 trial, and three further CPU-sampled N=1 trials), the
+box's 1/5/15-min load average recorded at each trial's start and end. Same day,
+so the same-day rule applies and the tables are comparable; min/max per cell:
 
-So the sharding is correct engineering (voice-pinning works, per-instance assignment and
-single-URL backward compat verified) but it is NOT "the biggest single win left": on a
-10-core Mac one Piper instance is as fast as any fleet, and N=2 is slower. The mww corpus
-stage (Piper-majority) is already at the box's Piper ceiling and adding instances does not
-cut it. It *would* help where one instance cannot already use every core - a wider box,
-or if each instance's onnxruntime intra-op threads were capped to a fair 10/N share -
-but that is a different change than the fleet as shipped.
+  N    clips/s min-max (n)   mean (vs N=1)   1-min load (trial starts)
+  1    15.49 - 16.51 (6)     16.14           4.5 - 9.4
+  2    8.59 - 8.96 (4)       8.71 (0.54x)    3.7 - 7.6
+  4    12.45 - 15.49 (3)     13.46 (0.83x)   4.1 - 11.4
+  6    13.73 - 16.28 (3)     14.62 (0.91x)   8.3 - 17.1
+  8    14.83 - 17.98 (3)     15.95 (0.99x)   12.9 - 20.1
 
-Caveat: the box carried background load this session (Apple ML churn, 1-min average
-2.6-17 across the runs), so the absolute ceiling reads low against `bench_tts.py`'s
-21.66 (which also used the shorter "hey seeree" phrase, not the longer oww wordlist
-phrases). That pushes every number down a little; it does not change the scaling
-verdict, and the ~100% box utilization in every run shows the piper work - not the
-background - bound each measurement.
+The N=2 dip REPRODUCES: 8.59 / 8.64 / 8.65 on three back-to-back trials under
+the sweep's lightest loads, 0.54x, with the fleet evenly loaded (720/720 clips
+per instance, max-min spread 0). **There is no scaling.** The old "N=4/6/8 land
+inside the noise band around N=1" was one trial each; with repeats N=4 sits at
+0.75-1.00x (two of its three trials at 0.78x) and no N>1 mean beats N=1's
+16.14. The single trial that does clear N=1's best (17.98 vs 16.51, N=8) ran at
+the afternoon's dirtiest 1-min load (13-20) - and N=1 ran first, at the
+lightest, so the one reading that flatters scaling is also the least readable
+as scaling.
+
+The mechanism, now measured instead of borrowed (`--sample-cpu`: exact
+cumulative-CPU-time mean over the trial, plus a 10 Hz peak poll):
+
+| | exact mean CPU | 10 Hz peak | threads |
+|---|---|---|---|
+| N=1, one instance (3 sampled trials, 462% on all three) | **462% of the box's 10 cores** | 520 - 539% | 11 |
+| N=2, two instances combined | 370% | 647% | 9 + 8 |
+
+A single instance averages 4.6 of the ten cores and peaks at ~5.3 - NOT the
+~980% the first pass carried over - and yet it alone reaches the total
+throughput no fleet of four to eight can pass: the ~18 clips/s ceiling is the
+box's, one serial engine already delivers 15.5-16.5 of it, and the wall is not
+a core count, so N>1 has nothing to add. The N=2 dip is a different animal:
+the two instances together burned only ~370% of the box on average while every
+clip took twice as long as at N=1 - each instance's onnxruntime intra-op burst,
+sized for a 10-core box, time-shares cores with the other process, so both slow
+down without either filling a core. That is oversubscription, not saturation:
+the first pass's "~18-19 threads each thrash" was a `top` guess, and the CPU
+times say the effect is less sharp than that, but the direction holds. What the
+two processes contend on exactly (memory bandwidth, cache, scheduler) is not
+measured here, and this repo does not record a mechanism it has not measured;
+the dip stands as a measured, reproducible loss, its cause open.
+
+So the sharding is correct engineering (voice-pinning works, per-instance
+assignment and single-URL backward compat verified) but it is NOT "the biggest
+single win left": on a 10-core Mac one Piper instance delivers what no fleet
+delivers - 15.5-16.5 clips/s alone against 8.6-18 across two to eight instances,
+with N=2 measurably worse. The mww corpus stage (Piper-majority) is already at
+that ceiling and adding instances does not cut it. It *would* help where one
+instance cannot already reach the box's ceiling - a wider box, or if each
+instance's onnxruntime intra-op threads were capped to a fair 10/N share -
+but that is a different change than the fleet as shipped. The disposition is
+stated at the class (`PiperFleet`'s docstring): kept for the multi-machine
+corpus, not assumed to help one machine.
+
+Caveat: the box carried background load this session (Apple ML churn, 1-min
+average 2.6-20 across the runs), so the absolute ceiling reads low against
+`bench_tts.py`'s 21.66 (which also used the shorter "hey seeree" phrase, not
+the longer oww wordlist phrases). That pushes every number down a little; it
+does not change the scaling verdict: within this sweep every N>1 cell ran at
+an equal or higher 1-min load than N=1's, and none came out ahead.
 
 ### P2.2 Parallelise the two serial CPU passes over the corpus - CLOSED 2026-09-22, negative result: neither pass is worth it
 
@@ -737,8 +786,11 @@ config half.
   ship call (commit 73bb78d).
 - P2.1 Piper sharding: DONE (commit 7036f74) - PiperFleet with voice-pinned
   sharding, start-tts-fleet.sh, PIPER_URLS in both run scripts. N-way throughput
-  measured 2026-09-22: no win from N>1 - one instance saturates 10 cores, N=2 is a 0.55x
-  loss, N=4-8 tie N=1 (negative result, full note at P2.1).
+  measured 2026-09-22, re-measured the same evening with 3-6 trials per size and
+  the load recorded per trial: no win from N>1 - one instance 15.49-16.51
+  clips/s at 462% mean CPU (4.6 of 10 cores, not the 10 the first pass claimed),
+  N=2 a reproducible 0.54x loss, N=4-8 0.75-1.16x (negative result, full note at
+  P2.1, table and mechanism in SPEED.md "Piper fleet").
 - P1.3/P1.4: DONE (commit 456e443) - WEIGHT_AUDIT/MERGE_AUDIT into config.json;
   finding: the doubling is unconditional (best_val_fp never updated).
 - P3.1/P2.5: DONE (commit bca9f53) - --smoke on both trainers + Makefile
@@ -771,11 +823,18 @@ config half.
   en_GB-alan-medium + en_US-lessac-medium x the 5-speed grid) rendered with
   the tts-service Piper engine on 8898 into the same labelled directory
   (45 clips total; the eval block reports n=45).
-- P2.1 Piper-fleet throughput at N>1: MEASURED 2026-09-22 (tools/bench_piper_fleet.py,
-  N = 1/2/4/6/8, same 1,440-clip oww workload) - negative result: 16.66 / 9.09 / 17.11 /
-  17.26 / 18.16 clips/s, i.e. no scaling (one instance saturates 10 cores; N=2 loses 45%,
-  N>=4 only ties N=1). The ~5-min wall-time claim in the plan is refuted and must NOT go
-  into SPEED.md or the README.
+- P2.1 Piper-fleet throughput at N>1: MEASURED 2026-09-22, re-measured the same
+  evening with repeats (tools/bench_piper_fleet.py --trials 3, N = 1/2/4/6/8, same
+  1,440-clip oww workload, 1-min load recorded per trial; the original single-trial
+  table 16.66 / 9.09 / 17.11 / 17.26 / 18.16 is superseded, kept at P2.1) - negative
+  result, now supported: 15.49-16.51 / 8.59-8.96 / 12.45-15.49 / 13.73-16.28 /
+  14.83-17.98 clips/s (min-max per N). The N=2 dip reproduces (0.54x); the single
+  instance's 462% mean CPU (4.6 of 10 cores) shows the ceiling is the box's, not a
+  core count - the first pass's "one instance saturates 10 cores" was not measured
+  and does not hold, so the N=2 dip's own mechanism stays open (full note at P2.1,
+  table + mechanism in SPEED.md). The ~5-min wall-time claim in the plan is refuted
+  and must NOT go into the README (the negative result itself is recorded, as the
+  Kokoro and CoreML results are, in SPEED.md).
 - The CUDA images on the training box still need their next build to pick up
   the new patches (the CPU images were rebuilt 2026-09-22).
 - **RESOLVED 2026-09-22: the corpus/holdout contamination, stated here where
