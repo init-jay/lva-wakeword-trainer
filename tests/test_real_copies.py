@@ -187,6 +187,22 @@ def test_balance_flows_through_to_the_written_copies():
         assert (jay, jen) == (20, 20), f"rows should be equal: jay={jay} jen={jen}"
 
 
+def test_balance_accepts_the_all_sentinel_as_every_speaker():
+    from train.corpus.real import balanced_copy_weights, parse_balance_spec
+    # The trainers translate "all" to None before calling, so passing the sentinel
+    # straight through was never exercised - until a dry run did it and the
+    # `for s in speakers` loop iterated the STRING. The error named speakers
+    # ['a', 'l', 'l'], which reads like a typo in the flag rather than a type
+    # confusion, so the conversion now lives in the function too.
+    counts = _counts(jay=8, jen=5, ryan=3)
+    sentinel = parse_balance_spec("all")
+    assert sentinel == "all", "parse returns the sentinel, not a list"
+    w, _ = balanced_copy_weights(counts, 10, speakers=sentinel)
+    assert w == balanced_copy_weights(counts, 10, speakers=None)[0], \
+        f"'all' must mean every speaker: {w}"
+    assert w == {"jay": 10, "jen": 16, "ryan": 27}, w
+
+
 def main():
     import _runner
     _runner.run(sys.modules[__name__])

@@ -82,6 +82,11 @@ def balanced_copy_weights(counts: dict, base_copies: int, speakers=None,
     explicit = dict(explicit or {})
     if not counts:
         return {}, ["no real recordings found - nothing to balance"]
+    if speakers == "all":
+        # parse_balance_spec's sentinel for "every speaker". Accepted here because
+        # passing it straight through used to iterate it character-wise and raise
+        # about unknown speakers ['a', 'l', 'l'] - a true story from a dry run.
+        speakers = None
     named = list(counts) if speakers is None else [s for s in speakers]
     unknown = [s for s in named if s not in counts]
     if unknown:
