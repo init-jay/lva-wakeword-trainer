@@ -403,6 +403,29 @@ def summarise(wake_word, grid_keys=None):
         combo = tuple(_fmt(v) for v in values)
         groups.setdefault((rec.get("target"), combo), []).append(rec)
 
+    # A group whose records were trained on DIFFERENT frozen corpora (more
+    # than one corpus_id) averages DATA, not seeds: part of its [min-max]
+    # spread is TTS redraw, not repeat-to-repeat noise, and a reader treats
+    # the pooled spread as seed noise unless told otherwise. Grouping on the
+    # resolved config (C1) stays - the 2026-09-23 corpus_axes sweep exposed
+    # the hole: it filed config-equal 25k rows across four corpus ids, and
+    # tools/compare_arms.py (the per-corpus view this warning points to) was
+    # already saying it per arm; the summariser - the table a reader sees
+    # first - had to say it too.
+    for (target, combo), recs in sorted(groups.items(),
+                                        key=lambda kv: (kv[0][0] or "", kv[0][1])):
+        corpora = sorted({str(r.get("corpus_id")) for r in recs
+                          if r.get("corpus_id") is not None})
+        if len(corpora) > 1:
+            label = "  ".join(f"{k}={v}" for k, v in zip(grid_keys, combo)) or "-"
+            print(f"  WARNING: group {target or '?'} {label} spans "
+                  f"{len(corpora)} corpus_id(s) {', '.join(corpora)} "
+                  f"({len(recs)} record(s)) - cross-corpus rows must never be "
+                  "silently averaged: part of the [min-max] spread is TTS "
+                  "redraw, not seed noise (2026-09-23 corpus_axes sweep; "
+                  "tools/compare_arms.py is the per-corpus view)",
+                  file=sys.stderr)
+
     lines = [f"ledger: {path}  ({len(records)} record(s))", ""]
 
     # C3 step 2: per-group sweep curves from the records that carry one, with
