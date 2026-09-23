@@ -1423,6 +1423,7 @@ dependencies = [
     { name = "tensorboard" },
     { name = "tensorflow" },
     { name = "tqdm" },
+    { name = "tts-protocol" },
     { name = "webrtcvad-wheels" },
 ]
 
@@ -1440,7 +1441,23 @@ requires-dist = [
     { name = "tensorboard" },
     { name = "tensorflow", specifier = "==2.21.0" },
     { name = "tqdm" },
+    { name = "tts-protocol", directory = "../tts-service/tts_protocol" },
     { name = "webrtcvad-wheels" },
+]
+
+[[package]]
+name = "tts-protocol"
+version = "0.1.0"
+source = { directory = "../tts-service/tts_protocol" }
+dependencies = [
+    { name = "numpy" },
+    { name = "scipy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy" },
+    { name = "scipy" },
 ]
 
 [[package]]

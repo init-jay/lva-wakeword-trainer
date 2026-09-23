@@ -1,53 +1,226 @@
-"""Piper sample generation over Wyoming TTS.
+"""Piper sample generation for the wake-word corpus (policy layer over tts-protocol).
 
 microWakeWord generates its positives with Piper, so this is the second engine the
 shared corpus layer needs. Deliberately shaped like the Kokoro path in train.py -
 phrase at a spread of speeds across a spread of voices, 16 kHz mono WAVs into a
 directory - so both trainers can consume either engine's output, or both at once.
 
-THE SPEED PROBLEM. Wyoming's `synthesize` event has no rate control, so speed has to
-be applied after synthesis. audit_voices.py:191 does it by resampling, which moves
-pitch as well as rate - correct there (the point is to deny the ASR a comfortable
-rendering), wrong here. `PLAIN_SPEEDS = (0.7, 1.6)` in train.py means DELIVERY RATE:
-Kokoro's speed parameter re-times the phrase without a chipmunk, and the model is
-meant to learn that the phrase can be said quickly, not by someone with a shorter
-vocal tract. Pitch is already covered, separately, by add_child_range_copies. So
-speed here goes through `time_stretch` (WSOLA, pitch-preserving) instead; using
-resampling would silently entangle the speed sweep with the child-range lever and
-make run 13's result impossible to attribute.
+SPLIT, 2026-09-08: the transport (the Wyoming framing, and since this same date
+the in-process variant - see below) moved out of this package. This module speaks
+the repo's TTS PROTOCOL (tts-service/tts_protocol/) as a TCP client: it points at
+a `tcp://` URL (the protocol port a Piper engine publishes) and does not care
+what the server runs behind it. What stays here is wake-word TRAINING POLICY:
+the exclusion tables, the sex table, voice selection, and the corpus generator.
+A new engine does not get these tables; a new wake word does.
 
-PIPER IS STOCHASTIC. VITS samples noise and durations per call, so the same
-(voice, speaker, text, speed) renders differently every time - measured in
-audit_voices.py, where one speaker scored 0% then 100% across passes. For a corpus
-that is free diversity; for the audit it is why `--repeats` exists. It also means
-the corpus is not reproducible from a seed, which is already true of the Kokoro
-path (train.py sets no seed).
+TWO MACHINES, ONE ENGINE: on a Mac it is the `uv` project
+(`uv run --project tts-service/engines/piper python -m piper_engine`, piper-tts
+1.7.0 loaded directly, no Wyoming at all); on the CUDA box the Docker image
+(docker/Dockerfile.piper) bakes in that SAME project - one code path, one G2P
+pin, both machines render from it. Both speak the identical protocol, so the
+code in this file is the same on both machines - only the URL differs. The
+protocol's own justifications (THE SPEED PROBLEM - why speed is WSOLA, not
+resampling; PIPER IS STOCHASTIC; the one-server-one-request constraint) live in
+that engine's docstring (tts-service/engines/piper), because the code they
+explain lives there.
 
-EXERCISED AGAINST A LIVE SERVICE. piper_voices enumerated 2005 (voice, speaker) pairs
-across en_US/en_GB, and piper_render returns 16 kHz int16 at exact speed ratios
-(0.7000, 1.2501, 1.6001 measured on one clip). Not yet used to build a training
-corpus - that is --piper-fraction, staged as tuning run 17.
-
-MEASURE SPEED ON ONE CLIP, NOT ACROSS CALLS. Three separate renderings at
-1.0/1.6/0.7 gave 0.964 s / 0.501 s / 1.194 s - looks wrong, is not: VITS samples
-durations per call, so the base clip differs every time. Stretch ratios are only
-meaningful against a single rendering.
+FLEETS, 2026-09-21: the `tcp://` URL above is also a COMMA-SEPARATED list of
+them (the --piper-url shape on both trainers, P2.1 in improvement.md). One
+instance is one resident model and one serial lane, so client threads against
+a single instance queue rather than run (tts_protocol/server.py takes every
+engine call under one lock; the single instance measures 21.66 clips/s in
+tools/bench_tts.py, and the corpus stage ran at ~16 against it, P2.1's fact
+10). Throughput therefore scales with PROCESSES, and PiperFleet shards the
+corpus BY VOICE - each model, all of its speakers, pinned to ONE instance for
+the whole run. Never round-robin: round-robin would make every instance
+reload a model on most of its requests, and a reload is 0.6 s against the
+hundreds of milliseconds a clip costs (the engine's docstring). scripts/
+start-tts-fleet.sh N starts such a fleet on this Mac; the probe below refuses
+a fleet whose instances do not serve the same catalog, because a sharded voice
+an instance lacks fails per-clip and shrinks the corpus silently.
 """
 
 import json
-import socket
 import sys
+import threading
 import uuid
 from pathlib import Path
 
 import numpy as np
 import scipy.io.wavfile
-from scipy.signal import resample_poly
-from tqdm import tqdm
 
-from .augment import time_stretch
+from tts_protocol.audio import SR  # noqa: E402  (re-exported name, now defined once)
+from tts_protocol.client import TtsClient
+from .kokoro import run_jobs  # noqa: E402  (the shared thread-pool runner; kokoro imports no piper, no cycle)
 
-SR = 16000
+# SR = 16000 lives in tts_protocol.audio; the name stays public from this module.
+
+# One TtsClient per tcp:// URL, shared across calls (the client caches the
+# voice catalog itself).
+_CLIENTS = {}
+_CLIENTS_LOCK = threading.Lock()
+
+
+def _client(piper_url: str) -> TtsClient:
+    with _CLIENTS_LOCK:
+        c = _CLIENTS.get(piper_url)
+        if c is None:
+            c = TtsClient(piper_url)
+            _CLIENTS[piper_url] = c
+        return c
+
+
+class PiperFleet:
+    """N Piper protocol instances, addressed as one comma-separated `tcp://`
+    list - the --piper-url shape.
+
+    A Piper instance holds one model resident and serves one request at a
+    time (the engine's docstring, and the lock in tts_protocol/server.py),
+    so N instances are N independent serial lanes. This class owns the one
+    decision a sharded run must make exactly once: which model goes to which
+    lane. That decision (shard) runs after the voices round-trip (probe) and
+    is memoised for the object's life - which is the run - so a voice always
+    hits the same instance from its first clip to its last, and an instance
+    loads each of its models once rather than per request.
+
+    Disposition (C4, bug.md): on ONE machine a fleet does not help, and this
+    is measured, not assumed - SPEED.md "Piper fleet" (2026-09-22, re-measured
+    the same evening, 3-6 trials per size with the load average recorded per
+    trial): one instance 15.49-16.51 clips/s at 462% mean CPU (4.6 of the box's
+    10 cores; no fleet of 2-8 instances passes ~18 clips/s total, and N=2 is a
+    reproducible 0.54x loss, N=4-8 0.75-1.16x with no N>1 mean above N=1's).
+    Do not reach for a local fleet to speed up a corpus stage on one machine
+    - it is not the fast path, and N=2 makes it slower. It is kept because it is the only route to
+    a MULTI-machine corpus (across machines there is no single-box ceiling to
+    run into, and this is the only code that treats N processes as one
+    sharded engine), and the sharding is the non-obvious part: a model must
+    hit the same instance for the whole run or nearly every request pays the
+    0.6 s reload, and a fleet whose instances serve different catalogs would
+    silently shrink the corpus (probe).
+    """
+
+    def __init__(self, spec):
+        # Accepts a PiperFleet, a list, or a string - one URL or a
+        # comma-separated list, the two shapes --piper-url arrives in.
+        if isinstance(spec, PiperFleet):
+            self._urls = list(spec.urls)
+        elif isinstance(spec, str):
+            self._urls = [u.strip() for u in spec.split(",") if u.strip()]
+        else:
+            self._urls = [str(u).strip() for u in spec if str(u).strip()]
+        if not self._urls:
+            raise ValueError("PiperFleet: no URLs")
+        self._assignment = None
+
+    @property
+    def urls(self) -> list:
+        return self._urls
+
+    def probe(self, languages=None, max_speakers=None) -> list:
+        """A `voices` round trip against EVERY instance, not a connect: a
+        bound port owned by a dead or foreign listener answers a connect and
+        still fails the corpus stage (the run scripts' preflight probes ask
+        the same question, for the same reason).
+
+        Returns the catalog the selection runs against (all instances agree
+        on it, below). The fleet must all serve the SAME catalog: shard pins
+        a voice to an instance, and a voice the instance lacks fails per
+        clip, silently shrinking the corpus instead of failing the run. A
+        Mac fleet shares data/external/piper/voices by construction; a mixed
+        fleet (a Docker instance with a different voice download than a host
+        one) is the composition this check names, at the top of the run.
+        """
+        kwargs = {}
+        if languages:
+            kwargs["languages"] = tuple(languages)
+        if max_speakers:
+            kwargs["max_speakers"] = int(max_speakers)
+        multi = len(self._urls) > 1
+        ref_catalog = None
+        for i, url in enumerate(self._urls):
+            client = _client(url)
+            try:
+                catalog = client.voices(**kwargs)
+            except Exception as e:
+                print(f"  ERROR: could not reach the Piper protocol server at {url}: {e}")
+                if multi:
+                    print("         A fleet is a comma-separated --piper-url; every URL in it "
+                          "must answer. The fleet script (scripts/start-tts-fleet.sh N) "
+                          "reports which of its instances died.")
+                print("         Mac:  `uv run --project tts-service/engines/piper "
+                      "python -m piper_engine --port 8898`")
+                print("         Docker: `docker compose up -d piper` (publishes 8898),")
+                print("         then point --piper-url at tcp://127.0.0.1:8898.")
+                sys.exit(1)
+            if ref_catalog is None:
+                ref_catalog = catalog
+            elif catalog != ref_catalog:
+                first = self._urls[0]
+                print(f"  ERROR: the Piper instances disagree: {first} serves "
+                      f"{len(ref_catalog)} (voice, speaker) pairs, {url} serves "
+                      f"{len(catalog)}.")
+                print("         A fleet is sharded BY VOICE, so a voice is sent to whichever "
+                      "instance holds its shard - an instance that lacks the voice fails that "
+                      "clip, and the corpus shrinks instead of the run failing. Rebuild the "
+                      "fleet from one voices directory (data/external/piper/voices on a Mac) "
+                      "or point --piper-url at the one instance that was audited.")
+                sys.exit(1)
+            if multi:
+                engine = client.server_engine or "?"
+                print(f"  Piper instance OK: {url} (engine={engine}, {len(catalog)} pairs)")
+        return ref_catalog
+
+    def shard(self, voices) -> dict:
+        """(voice, speaker) -> URL, decided ONCE and memoised: for the life
+        of this object - which is the run - a voice always hits the same
+        instance.
+
+        The unit of placement is the MODEL, not the speaker pair. The engine
+        reloads when the model NAME changes and reuses the loaded session
+        when only the speaker does (~28 ms, the engine's docstring), so
+        splitting one model's speakers across instances would make every one
+        of them load it. Weight is the model's pair count, and placement is
+        least-loaded, ties to the lower index: a 12-speaker model costs 12x
+        a single-speaker one, and plain round-robin over the voice list would
+        hand the slowest instance the slowest models by accident. The input
+        order (the server's catalog order, stable within a run) plus the
+        deterministic tie-break make the mapping reproducible for a given
+        fleet size and voice list.
+        """
+        if self._assignment is not None:
+            return self._assignment
+        # Keys are NORMALISED (voice, speaker) pairs, bare-string voices
+        # included: the caller (generate_piper_samples) builds (voice, speaker)
+        # tuples with speaker=None and looks the job's URL up by that key.
+        norm = lambda v: v if isinstance(v, (tuple, list)) else (v, None)
+        if len(self._urls) == 1:
+            self._assignment = {norm(v): self._urls[0] for v in voices}
+            return self._assignment
+
+        models = {}  # model name -> [pairs, in input order]
+        for v in voices:
+            name = v[0] if isinstance(v, (tuple, list)) else v
+            models.setdefault(name, []).append(v)
+
+        loads = [0] * len(self._urls)
+        assignment = {}
+        for name, pairs in models.items():
+            i = min(range(len(self._urls)), key=lambda j: (loads[j], j))
+            loads[i] += len(pairs)
+            for v in pairs:
+                assignment[norm(v)] = self._urls[i]
+        self._assignment = assignment
+        return assignment
+
+
+def _piper_render(piper_url, voice, speaker, text, speed=1.0):
+    """One Piper clip over the protocol. Raises on failure (the PIPER
+    convention: the error envelope names the voice) - the caller reports which
+    (voice, speaker) failed."""
+    v = (voice, speaker) if speaker is not None else voice
+    audio, _ = _client(piper_url).timed_render(v, text, speed)
+    return audio
+
 
 # Voices that mispronounce the wake word, per wake word. THE PIPER EQUIVALENT OF
 # MISPRONOUNCING_VOICES in corpus/negatives.py, AND IT IS NOT OPTIONAL.
@@ -126,8 +299,8 @@ MISPRONOUNCING_PIPER_VOICES: dict[str, list[str]] = {
 # / 106 pairs capped - the same 106 the compose-era run saw, so the English selection
 # set has not moved since the audit era's known exposure. The growth is voices in
 # other languages, which the languages filter already excludes. Widening
-# --piper-languages is a new unaudited set until tools/audit_voices.py --tts piper
-# has run against the instance that generates the corpus.
+# --piper-languages is a new unaudited set until tools/audit_voices.py has
+# run against the instance that generates the corpus.
 #
 # TO RECLAIM THEM: audit these ten against the instance that generates the corpus,
 # then move them into MISPRONOUNCING_PIPER_VOICES or delete them, and add their F0 to
@@ -285,128 +458,20 @@ def voice_sex(voice: str, speaker=None) -> str:
             return specific
     return PIPER_VOICE_SEX.get(voice, "u")
 
-# The Wyoming JSONL-over-TCP framing: one JSON header line per event, then
-# `data_length` bytes of JSON and `payload_length` bytes of audio.
-#
-# Duplicated from audit_voices.py rather than shared. That script is standalone by
-# design - it runs on the host against live TTS and ASR services and takes no
-# dependency on this package - and collapsing the two would drag the corpus layer
-# into it. Worth revisiting if a third caller appears.
 
-
-def _send(sock, etype, data=None, payload=None):
-    header = {"type": etype}
-    if data is not None:
-        header["data"] = data
-    if payload is not None:
-        header["payload_length"] = len(payload)
-    sock.sendall((json.dumps(header) + "\n").encode())
-    if payload is not None:
-        sock.sendall(payload)
-
-
-def _read_event(sock, buf):
-    """Next event, plus the remaining buffer and this event's audio payload."""
-    while b"\n" not in buf:
-        chunk = sock.recv(65536)
-        if not chunk:
-            return None, buf, b""
-        buf += chunk
-    line, _, buf = buf.partition(b"\n")
-    header = json.loads(line)
-    n = header.get("data_length") or 0
-    while len(buf) < n:
-        buf += sock.recv(65536)
-    data = json.loads(buf[:n]) if n else header.get("data", {})
-    buf = buf[n:]
-    p = header.get("payload_length") or 0
-    while len(buf) < p:
-        buf += sock.recv(65536)
-    return {"type": header.get("type"), "data": data}, buf[p:], buf[:p]
-
-
-def piper_voices(host, port, languages=("en_US", "en_GB"), max_speakers=0):
-    """[(voice, speaker_or_None), ...] for the requested languages.
-
-    `max_speakers` caps how many speakers of a multi-speaker model are sampled -
-    en_US-libritts_r-medium alone carries 904, and taking all of them would swamp
-    the corpus with one model's phonemisation. The sample is evenly spaced rather
-    than the first N, because speaker ids are ordered by the source corpus and the
-    head of that list is not representative.
-    """
-    sock = socket.create_connection((host, port), timeout=30)
-    try:
-        sock.settimeout(30)
-        _send(sock, "describe")
-        event, _, _ = _read_event(sock, b"")
-        info = event["data"] if event else {}
-    finally:
-        sock.close()
-
-    out = []
-    for program in info.get("tts", []):
-        for voice in program.get("voices", []):
-            langs = voice.get("languages") or [voice.get("language")]
-            if languages and not any(str(l).startswith(tuple(languages)) for l in langs):
-                continue
-            speakers = [s.get("name") for s in (voice.get("speakers") or [])]
-            if not speakers:
-                out.append((voice["name"], None))
-                continue
-            if max_speakers and len(speakers) > max_speakers:
-                idx = np.linspace(0, len(speakers) - 1, max_speakers).astype(int)
-                speakers = [speakers[i] for i in sorted(set(idx))]
-            out.extend((voice["name"], s) for s in speakers)
-    return out
-
-
-def piper_render(host, port, voice, speaker, text, speed=1.0):
-    """Synthesize one phrase, returned as 16 kHz mono int16.
-
-    `speed` > 1 is faster. Applied with time_stretch after resampling to 16 kHz, so
-    it changes delivery rate without moving pitch - see the module docstring.
-    """
-    sock = socket.create_connection((host, port), timeout=120)
-    try:
-        sock.settimeout(120)
-        v = {"name": voice}
-        if speaker is not None:
-            v["speaker"] = str(speaker)
-        _send(sock, "synthesize", {"text": text, "voice": v})
-        buf, pcm, rate = b"", b"", 22050
-        while True:
-            event, buf, payload = _read_event(sock, buf)
-            if event is None:
-                break
-            if event["type"] in ("audio-start", "audio-chunk"):
-                rate = event["data"].get("rate", rate)
-                pcm += payload
-            elif event["type"] == "audio-stop":
-                break
-    finally:
-        sock.close()
-
-    audio = np.frombuffer(pcm, dtype=np.int16)
-    if audio.size == 0:
-        return np.zeros(0, dtype=np.int16)
-
-    if rate != SR:
-        # resample_poly rather than resample: rational up/down, no FFT-length
-        # sensitivity, and it is what vocal_tract_shift already uses.
-        from fractions import Fraction
-        frac = Fraction(SR, int(rate)).limit_denominator(1000)
-        audio = resample_poly(audio.astype(np.float64), frac.numerator, frac.denominator)
-
-    if abs(speed - 1.0) > 1e-3:
-        # speed 1.6 = 1.6x faster = 1/1.6 the duration.
-        audio = time_stretch(np.asarray(audio, dtype=np.float64), 1.0 / float(speed), sr=SR)
-
-    return np.clip(audio, -32768, 32767).astype(np.int16)
-
-
-def generate_piper_samples(host, port, voices, output_dir: Path,
+def generate_piper_samples(piper_url, voices, output_dir: Path,
                            samples_per_voice: int, texts, speeds, desc="Piper"):
     """Render `samples_per_voice` clips for each voice into `output_dir`.
+
+    `piper_url` is a `tcp://` protocol URL - the port a Piper engine publishes
+    (the in-process server on a Mac, the wrapped Wyoming service in Docker) -
+    or a comma-separated list of them (a fleet, the --piper-url shape):
+    PiperFleet.shard pins every model to ONE instance for the whole run, so
+    each instance loads each of its models once and then only synthesises -
+    the property the next paragraph exists to protect. A fleet's instances
+    must serve the same catalog; select_piper_voices enforces that before any
+    clip is rendered, and an instance that dies mid-run surfaces as per-clip
+    errors naming the voice, not as a shrunken corpus nobody explains.
 
     Signature and sampling deliberately mirror train.py's generate_kokoro_samples,
     so the two are substitutable clip-for-clip: same per-voice budget, same
@@ -423,63 +488,114 @@ def generate_piper_samples(host, port, voices, output_dir: Path,
     are skipped by the child-range lever rather than mis-shifted - Piper voice names
     carry no sex marker to pick a ratio from. See corpus/augment.py.
 
-    VOICE IS THE OUTER LOOP ON PURPOSE - DO NOT REORDER. wyoming-piper holds exactly
-    one loaded voice in a module-level global and reloads it whenever a request names
-    a different one (handler.py:333-346, `if voice_name != _VOICE_NAME`). Iterating
-    texts or speeds outside voices would rebuild the InferenceSession on every
-    request - under --use-cuda a fresh CUDA session each time, far more expensive
-    than the synthesis itself.
+    VOICE IS THE OUTER LOOP ON PURPOSE - DO NOT REORDER. Every Piper server holds
+    exactly one loaded voice at a time and reloads it when a request names a
+    different one: the Wyoming server in a module-level global (handler.py:333-346,
+    `if voice_name != _VOICE_NAME`), the in-process server in its single kept model.
+    Iterating texts or speeds outside voices would rebuild the InferenceSession on
+    every request - under --use-cuda a fresh CUDA session each time, far more
+    expensive than the synthesis itself.
 
-    The same global is why one server serves strictly one request at a time, and why
-    client concurrency measured as pure queueing (docker-compose.yml). Parallelism
-    has to come from separate instances, each with its own voice - which means
-    sharding a multi-voice corpus BY VOICE across instances, never round-robin.
+    The same one-voice-at-a-time property is why one server serves strictly one
+    request at a time, and why a multi-voice corpus is parallelised by running
+    SEPARATE INSTANCES, each with its own voice - and why the sharding across a
+    fleet is BY VOICE, never round-robin. One job per model, one job per instance
+    lane at a time (workers = fleet size, run_jobs' small pool: extra workers
+    queue at the engine's lock and add no throughput, the KokoroPool measurement
+    applies verbatim).
     """
     output_dir.mkdir(parents=True, exist_ok=True)
+    fleet = PiperFleet(piper_url)
+    assignment = fleet.shard(voices)
 
-    jobs = []
-    for v, (voice, speaker) in enumerate(voices):
+    # The per-clip computation is unchanged from the serial loop - same
+    # text-offset-per-voice, speed drawn HERE in the build loop, never in a
+    # worker, so the corpus does not depend on thread scheduling.
+    clips = []  # (voice, speaker, text, speed)
+    for v, pair in enumerate(voices):
+        voice, speaker = (pair if isinstance(pair, (tuple, list))
+                          else (pair, None))
         for i in range(samples_per_voice):
             text = texts[(v * samples_per_voice + i) % len(texts)]
             speed = float(np.random.choice(speeds))
-            jobs.append((voice, speaker, text, speed))
+            clips.append((voice, speaker, text, speed))
 
-    written = 0
+    # Group clips by MODEL, in first-seen order: one job per model keeps every
+    # model's clips contiguous on its pinned instance, which is the voice-outer
+    # property above (the catalog lists a model's speakers contiguously, so
+    # with one URL this is the exact order the serial loop used to render in).
+    by_model = {}
+    for clip in clips:
+        by_model.setdefault(clip[0], []).append(clip)
+    models = list(by_model)
+    weights = [len(by_model[m]) for m in models]
+
     unknown_sex = set()
-    for voice, speaker, text, speed in tqdm(jobs, desc=desc, unit="clip"):
-        try:
-            audio = piper_render(host, port, voice, speaker, text, speed)
-        except Exception as e:
-            print(f"  Error rendering {voice}/{speaker} at {speed}x: {e}")
-            continue
-        if audio.size < 480:
-            continue
+    sex_lock = threading.Lock()
 
-        # piper_p{sex}_{voice}[_{speaker}]_{uuid}.wav
-        #
-        # The `p{sex}` group is second on purpose: add_child_range_copies reads the
-        # sex from parts[1][1], which is where Kokoro's af_/am_ prefix puts it. Same
-        # position, same code, no special case for the engine.
-        sex = voice_sex(voice, speaker)
-        if sex == "u":
-            unknown_sex.add(voice if speaker is None else f"{voice}:{speaker}")
-        tag = f"{voice}_{speaker}" if speaker is not None else voice
-        name = f"piper_p{sex}_{tag}_{uuid.uuid4().hex[:8]}.wav".replace("/", "_")
-        scipy.io.wavfile.write(str(output_dir / name), SR, audio)
-        written += 1
+    def _job(model):
+        # One URL for the whole job: shard pinned the model, so every clip in
+        # it names the same instance and rides one loaded session.
+        url = assignment[by_model[model][0][:2]]
+        written = 0
+        for voice, speaker, text, speed in by_model[model]:
+            try:
+                audio = _piper_render(url, voice, speaker, text, speed)
+            except Exception as e:
+                print(f"  Error rendering {voice}/{speaker} at {speed}x: {e}")
+                continue
+            if audio is None or audio.size < 480:
+                continue
 
-    print(f"  Wrote {written} Piper clips from {len(jobs)} jobs")
+            # piper_p{sex}_{voice}[_{speaker}]_{uuid}.wav
+            #
+            # The `p{sex}` group is second on purpose: add_child_range_copies reads the
+            # sex from parts[1][1], which is where Kokoro's af_/am_ prefix puts it. Same
+            # position, same code, no special case for the engine.
+            sex = voice_sex(voice, speaker)
+            if sex == "u":
+                with sex_lock:
+                    unknown_sex.add(voice if speaker is None else f"{voice}:{speaker}")
+            tag = f"{voice}_{speaker}" if speaker is not None else voice
+            name = f"piper_p{sex}_{tag}_{uuid.uuid4().hex[:8]}.wav".replace("/", "_")
+            scipy.io.wavfile.write(str(output_dir / name), SR, audio)
+            written += 1
+        return written
+
+    produced = run_jobs(models, _job, desc=desc, workers=len(fleet.urls),
+                        weights=weights)
+    # The job manifest: which instance carried which (model, speaker) pair and
+    # how many clips - the fleet's provenance, written into the tree it was
+    # rendered in rather than only the run log that scrolls away. One URL per
+    # row: a model's pairs all ride the instance its shard picked.
+    per_pair = {}
+    for clip in clips:
+        pair = clip[:2]
+        per_pair[pair] = per_pair.get(pair, 0) + 1
+    (output_dir / "piper").mkdir(parents=True, exist_ok=True)
+    (output_dir / "piper" / "jobs.json").write_text(json.dumps(
+        {"piper_urls": fleet.urls,
+         "jobs": [{"model": m, "speaker": s,
+                   "n_clips": per_pair[(m, s)],
+                   "url": assignment[(m, s)]}
+                  for m, s in sorted(per_pair,
+                                     key=lambda p: (p[0], p[1] or ""))]},
+        indent=2))
+    print(f"  Wrote {produced} Piper clips from {len(clips)} jobs")
     if unknown_sex:
         print(f"  WARNING: {len(unknown_sex)} voice(s) have no sex in "
               f"PIPER_VOICE_SEX, so their clips get NO child-range copy: "
               f"{', '.join(sorted(unknown_sex)[:6])}"
               f"{' ...' if len(unknown_sex) > 6 else ''}")
-    return written
+    return produced
 
 
-def select_piper_voices(host, port, wake_word: str, languages=("en_US", "en_GB"),
+def select_piper_voices(piper_url: str, wake_word: str, languages=("en_US", "en_GB"),
                         max_speakers: int = 12) -> list:
-    """Enumerate Piper voices, drop the ones that say the wrong thing, report cover.
+    """Enumerate Piper voices from the `tcp://` server (or fleet - a
+    comma-separated list probes every instance and requires them to agree,
+    see PiperFleet.probe), drop the ones that say the wrong thing, report
+    cover.
 
     The exclusion step is the whole point. Six of 42 Kokoro voices mispronounce
     "hey seeree" and that was ~14% of the synthetic corpus mislabelled as positives
@@ -487,15 +603,8 @@ def select_piper_voices(host, port, wake_word: str, languages=("en_US", "en_GB")
     available an unaudited list is a bigger exposure, not a smaller one.
     """
     safe_name = wake_word.replace(" ", "_").lower()
-    try:
-        found = piper_voices(host, int(port), languages=tuple(languages),
-                             max_speakers=max_speakers)
-    except Exception as e:
-        print(f"  ERROR: could not reach Piper at {host}:{port}: {e}")
-        print("         Start it with `docker compose up -d piper` (in-Docker runs),")
-        print("         or `scripts/start-piper-host.sh` (host runs, Apple Silicon),")
-        print("         or point --piper-url at an already-running server.")
-        sys.exit(1)
+    found = PiperFleet(piper_url).probe(languages=languages,
+                                        max_speakers=max_speakers)
 
     bad = set(MISPRONOUNCING_PIPER_VOICES.get(safe_name, []))
     unaudited = set(UNAUDITED_PIPER_VOICES.get(safe_name, []))
@@ -505,8 +614,8 @@ def select_piper_voices(host, port, wake_word: str, languages=("en_US", "en_GB")
         print("           Nothing has been excluded, so any voice whose espeak-ng")
         print("           g2p guesses the wake word wrong is contributing")
         print("           MISLABELLED POSITIVES. Six of 42 Kokoro voices did exactly")
-        print("           that (~14% of that corpus). Run audit_voices.py --tts piper,")
-        print("           listen to the shortlist, and fill the list in.")
+        print("           that (~14% of that corpus). Run audit_voices.py --tts",)
+        print("           tcp://<that instance>, listen to the shortlist, and fill the list in.")
 
     # Match both forms. The audit scores SPEAKERS - en_US-l2arctic-medium ran from
     # :ASI at 0% to :PNV at 100% on identical phonemes - so most entries are

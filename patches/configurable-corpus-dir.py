@@ -33,6 +33,13 @@ path = sys.argv[1]
 with open(path) as f:
     content = f.read()
 
+# The anchor is re-pointed to `corpus_dir` during application, so it no longer
+# matches once the patch is in. The PATCHED comment survives, and it is the
+# sentinel: checking it first keeps re-application a clean no-op.
+if '    # PATCHED: corpus location is configurable' in content:
+    print("Already patched:", path)
+    sys.exit(0)
+
 anchor = ('    positive_train_output_dir = os.path.join('
           'config["output_dir"], config["model_name"], "positive_train")')
 if anchor not in content:

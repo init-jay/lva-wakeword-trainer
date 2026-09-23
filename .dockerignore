@@ -51,6 +51,8 @@ __pycache__/
 **/__pycache__/
 *.pyc
 *.egg-info/
+# uv build artifacts from tts-service/tts_protocol (see .gitignore).
+**/build/
 
 # Host-only steps and prose. Kept out of the context so a doc edit does not
 # re-send it; nothing in any image reads them.

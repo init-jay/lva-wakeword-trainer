@@ -4,15 +4,15 @@
 #
 #
 #     ./scripts/setup-mww-applesilicon-trainer.sh                     # once
-#     ./scripts/start-piper-host.sh                                   # in another terminal
-#     ./scripts/start-kokoro-host.sh                                  # another, for the default 30% mix
+#     uv run --project tts-service/engines/piper python -m piper_engine --port 8898   # another terminal
+#     uv run --project tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900  # another, for the default 30% mix
 #     ./scripts/run-mww-training-applesilicon.sh "hey seeree"
 #
 # KOKORO_FRACTION (default 0.3, or --kokoro-fraction on the command line) is the
 # share of the PHRASE-ALONE positive budget Kokoro renders instead of Piper -
 # substitution, not addition: the total clip count, the real-clip share, and the
 # Piper-only negative set all stay fixed, mirroring the 30% its openWakeWord
-# sibling already runs (engines swapped). 0.3 needs the Kokoro host server above;
+# sibling already runs (engines swapped). 0.3 needs the Kokoro engine above;
 # KOKORO_FRACTION=0 (or --kokoro-fraction 0) runs all-Piper, the historical corpus,
 # and needs only Piper. The module document: train/mww/corpus.py.
 #
@@ -34,12 +34,43 @@
 #
 # SKIP_CORPUS=1 / SKIP_FEATURES=1 behave exactly as in run-mww-training.sh.
 #
-# The corpus stage needs a Piper server, and - at the default 30% mix - a Kokoro
-# one too. This script starts nothing: the host servers are
-# scripts/start-piper-host.sh (uv venv, 127.0.0.1:10200) and
-# scripts/start-kokoro-host.sh (uv venv, 127.0.0.1:8880). PIPER_URL / KOKORO_URL
-# or --piper-url reach any other server; a piper:PORT value is rewritten to
-# 127.0.0.1:PORT, because the compose service name resolves to nothing here.
+# The corpus stage needs a Piper engine, and - at the default 30% mix - a Kokoro
+# one too. This script starts nothing: the engines are the uv projects in
+# tts-service/engines/ (commands above) - in-process piper-tts on 8898 and
+# in-process kokoro-mlx on 8900, both speaking the TTS protocol. PIPER_URL /
+# KOKORO_URL or --piper-url / --kokoro-url reach any other tcp:// server; a bare
+# host:port value is coerced to tcp:// (the protocol client accepts only that
+# form), because the old raw forms used to mean different backends with
+# different audio.
+#
+# PIPER FLEET - the fast path for the corpus stage. One Piper instance is one
+# serial lane: the engine holds one model resident and takes every call under
+# one lock, so client threads queue instead of run, and the single instance
+# measures 21.66 clips/s in tools/bench_tts.py, against the ~16 the mww corpus
+# stage ran at against it (improvement.md P2.1 - the corpus stage is the
+# serial wall of a Mac run, ~5 of its ~14 measured minutes). Throughput scales
+# with PROCESSES: PIPER_URLS takes the comma-joined list scripts/start-tts-fleet.sh
+# prints (it starts N instances on 8898+ in the background and waits for each
+# voices round trip), and the corpus shards the fleet BY VOICE - each model
+# pinned to one instance for the whole run, so an instance loads each of its
+# models once, not per request (corpus/piper.py, PiperFleet):
+#
+#     PIPER_URLS="$(./scripts/start-tts-fleet.sh 4)" \
+#         ./scripts/run-mww-training-applesilicon.sh "hey seeree"
+#
+# One server stays PIPER_URL, unchanged; PIPER_URLS wins over it when both are
+# set, because a comma list is an explicit statement and a bare PIPER_URL left
+# exported from another context is not.
+#
+# SMOKE=1: a few-minute end-to-end check that a changed train/ tree still runs the
+# whole pipeline: the corpus through the --skip path (no TTS servers; a
+# pre-manifest corpus is reused as-is), the pre-built features, 200-step
+# training, real tflite conversion. It implies SKIP_CORPUS=1 and appends --smoke
+# to both the tag computation and the train stage, so both resolve the same
+# smoke-<stamp> run directory (train/mww/train.py --smoke). The smoke-named model
+# files in output/<wake>/mww/ cannot be mistaken for a real run's archive:
+#
+#     SMOKE=1 ./scripts/run-mww-training-applesilicon.sh "hey seeree"
 
 set -euo pipefail
 
@@ -77,6 +108,10 @@ if [[ ! -x "$ENV_DIR/.venv/bin/python" ]]; then
 fi
 "$ENV_DIR/.venv/bin/python" - <<'PY' || exit 2
 import sys, numpy, microwakeword  # noqa: F401
+# __file__ is None when the clone ROOT shadows the package as a namespace
+# package (no editable install): the import above passes and the failure
+# surfaces two stages in, after the corpus TTS. 2026-09-22 smoke run.
+assert microwakeword.__file__, "microwakeword resolved as a namespace package"
 if numpy.__version__ < "2":
     print(f"numpy {numpy.__version__} in {sys.executable} - mWW needs >=2.", file=sys.stderr)
     print("A different venv is probably activated; re-run the setup script.", file=sys.stderr)
@@ -161,46 +196,87 @@ if [[ "$KOKORO_FRACTION" == "0" || "$KOKORO_FRACTION" == "0.0" ]]; then
 fi
 set -- "${TRAIN_ARGS[@]+"${TRAIN_ARGS[@]}"}"
 
-# PIPER_URL
-#
-# Same contract as the oww host script: piper:PORT is a COMPOSE-ONLY name - it
-# resolves inside the compose network and to nothing from a host process. The
-# intent is unambiguous - the same server, reached locally - so rewrite rather
-# than fail. Any other host:port (a Piper on the LAN, a box on the network)
-# passes through.
-PIPER_PORT_DEFAULT=10200
-if [[ "${PIPER_URL:-}" == piper:* ]]; then
-    PIPER_PORT="${PIPER_URL#piper:}"
-    [[ -z "$PIPER_PORT" || ! "$PIPER_PORT" =~ ^[0-9]+$ ]] && PIPER_PORT=$PIPER_PORT_DEFAULT
-    PIPER_URL="127.0.0.1:${PIPER_PORT}"
-    export PIPER_URL
-    echo "=== note: rewrote PIPER_URL to $PIPER_URL - the compose service name"
-    echo "          only resolves inside the compose network. For a local server:"
-    echo "          ./scripts/start-piper-host.sh"
-elif [[ -z "${PIPER_URL:-}" ]]; then
-    PIPER_URL="127.0.0.1:${PIPER_PORT_DEFAULT}"
-    export PIPER_URL
+# SMOKE=1 (header): the corpus stage goes through --skip and --smoke is added to
+# the train stage. It must land BEFORE the TTS probes (they are gated on
+# SKIP_CORPUS - a smoke run needs no servers) and BEFORE the tag is computed
+# (--print-tag has to resolve the same smoke-<stamp> directory the train stage
+# will claim, or the run would die on 'directory already exists').
+if [[ "${SMOKE:-}" == "1" ]]; then
+    SKIP_CORPUS=1
+    set -- "$@" --smoke
 fi
 
-# KOKORO_URL: the same rewrite, for the same reason - host.docker.internal is
-# how a CONTAINER reaches the host, and from the host it is a name that
-# resolves to nothing. mlx:// passes through untouched: it is a URL meaning
-# "in this process" (train/corpus/kokoro_mlx.py), and the probe below is the
-# one that tells you this venv cannot run it.
-KOKORO_URL="${KOKORO_URL:-http://127.0.0.1:8880}"
-if [[ "${KOKORO_URL:-}" == *host.docker.internal* ]]; then
-    KOKORO_URL="${KOKORO_URL//host.docker.internal/127.0.0.1}"
-    export KOKORO_URL
-    echo "=== note: rewrote KOKORO_URL to $KOKORO_URL - host.docker.internal"
-    echo "          only resolves inside a container. For a local server:"
-    echo "          ./scripts/start-kokoro-host.sh"
+# PIPER_URL / PIPER_URLS
+#
+# PIPER_URL: same contract as the oww host script: this is the protocol URL of
+# the in-process Piper engine (tts-service/engines/piper, port 8898). The old
+# piper:PORT compose form is rewritten - the compose service name resolves to
+# nothing from a host process - and any bare host:port is coerced to tcp://,
+# the only form the protocol client accepts.
+#
+# PIPER_URLS: a comma-separated list of them (start-tts-fleet.sh prints
+# exactly this). The corpus shards it BY VOICE (see the header), and every
+# element is normalised the same way as a PIPER_URL below.
+PIPER_PORT_DEFAULT=8898
+PIPER_RAW="${PIPER_URLS:-${PIPER_URL:-}}"
+if [[ -z "$PIPER_RAW" ]]; then
+    PIPER_RAW="127.0.0.1:${PIPER_PORT_DEFAULT}"
 fi
+IFS=',' read -r -a PIPER_PARTS <<< "$PIPER_RAW"
+PIPER_URL=""
+for part in "${PIPER_PARTS[@]}"; do
+    part="${part// /}"
+    [[ -z "$part" ]] && continue
+    if [[ "$part" == piper:* ]]; then
+        PIPER_PORT="${part#piper:}"
+        [[ -z "$PIPER_PORT" || ! "$PIPER_PORT" =~ ^[0-9]+$ ]] && PIPER_PORT=$PIPER_PORT_DEFAULT
+        part="127.0.0.1:${PIPER_PORT}"
+        echo "=== note: rewrote PIPER_URL(S) element to tcp://$part - the compose service name"
+        echo "          only resolves inside the compose network. For a local engine:"
+        echo "          uv run --project tts-service/engines/piper python -m piper_engine --port $PIPER_PORT"
+    fi
+    [[ "$part" != tcp://* ]] && part="tcp://$part"
+    PIPER_URL="${PIPER_URL:+$PIPER_URL,}$part"
+done
+[[ -n "$PIPER_URL" ]] || { echo "ERROR: PIPER_URL / PIPER_URLS resolved to nothing ($PIPER_RAW)." >&2; exit 2; }
+export PIPER_URL
+
+# KOKORO_URL: same treatment, with one exception. The Mac's Kokoro is the
+# in-process kokoro-mlx engine (tts-service/engines/kokoro_mlx, port 8900);
+# the old mlx:// form named that same engine, so it is still coerced. The old
+# http:// form is NOT: it meant a raw Kokoro-FastAPI host server, which does
+# not speak the protocol - coercing it to tcp:// just moved the failure from
+# connect time to every single render. Reject it and name the two real
+# options instead of guessing a port.
+KOKORO_URL="${KOKORO_URL:-tcp://127.0.0.1:8900}"
+if [[ "${KOKORO_URL}" == *host.docker.internal* ]]; then
+    KOKORO_URL="${KOKORO_URL//host.docker.internal/127.0.0.1}"
+    echo "=== note: rewrote KOKORO_URL to $KOKORO_URL - host.docker.internal"
+    echo "          only resolves inside a container."
+fi
+if [[ "${KOKORO_URL}" == http://* ]]; then
+    echo "ERROR: KOKORO_URL=${KOKORO_URL} is a raw http:// Kokoro-FastAPI URL." >&2
+    echo "       The protocol client speaks only tcp://, and a raw FastAPI port" >&2
+    echo "       does not speak the protocol - no port rewrite can fix that." >&2
+    echo "       Point KOKORO_URL at one of:" >&2
+    echo "         tcp://127.0.0.1:8900   the mlx engine, in-process on this Mac" >&2
+    echo "           (uv run --project tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900)" >&2
+    echo "         tcp://<box>:8899       the Docker kokoro wrapper (docker-compose.yml)" >&2
+    exit 1
+fi
+if [[ "${KOKORO_URL}" == mlx://* ]]; then
+    KOKORO_URL="tcp://${KOKORO_URL#*//}"
+    echo "=== note: rewrote KOKORO_URL to $KOKORO_URL - mlx:// named the mlx"
+    echo "          engine, which is now the protocol server on 8900"
+fi
+[[ "${KOKORO_URL}" != tcp://* ]] && KOKORO_URL="tcp://${KOKORO_URL}"
 export KOKORO_URL
 
 # THE CONTAINER MAY OWN THESE FILES. Both paths write data/corpus/ and output/,
 # and the trainer images run as root - train/ownership.py hands output/ back
 # afterwards, but data/corpus/ is left as root wrote it. A host run then fails on
-# permissions somewhere unhelpful, so check here where the fix is obvious.SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
+# permissions somewhere unhelpful, so check here where the fix is obvious.
+SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
 for d in "data/corpus/${SAFE_NAME}/mww" "output/${SAFE_NAME}/mww"; do
     if [[ -e "$d" && ! -w "$d" ]]; then
         echo "ERROR: $d is not writable by $(whoami) - a container run probably made it." >&2
@@ -213,27 +289,32 @@ done
 # not say why. Both probes are the round trip the corpus stage actually makes,
 # not a TCP connect: a bound port owned by a dead or foreign listener passes a
 # connect check and still fails the corpus stage. Piper is probed when it will
-# render anything (always, at any fraction in [0,1)); Kokoro when it will.
+# render anything (always, at any fraction in [0,1)) - EVERY URL of a PIPER_URLS
+# fleet, since the corpus sends each voice to a different one; Kokoro when it will.
 if [[ "${SKIP_CORPUS:-}" != "1" ]]; then
     if ! "$ENV_DIR/.venv/bin/python" - "$PIPER_URL" <<'PYEOF'
 import sys
 sys.path.insert(0, ".")
-from train.corpus.piper import piper_voices
-url = sys.argv[1].rstrip("/")
-host, _, port = url.partition(":")
-port = int(port) if port.isdigit() else 10200
-try:
-    pairs = piper_voices(host, port, languages=("en_US", "en_GB"))
-except Exception as e:
-    print(f"  Piper unreachable: {e}", file=sys.stderr)
-    sys.exit(1)
-print(f"  Piper probe OK: {len(pairs)} (voice, speaker) pairs at {host}:{port}")
+import train.corpus  # noqa: F401  (sys.path bootstrap for tts_protocol)
+from tts_protocol.client import TtsClient
+urls = [u.strip() for u in sys.argv[1].split(",") if u.strip()]
+bad = []
+for url in urls:
+    try:
+        pairs = TtsClient(url).voices(languages=["en_US", "en_GB"], max_speakers=0)
+    except Exception as e:
+        print(f"  Piper unreachable at {url}: {e}", file=sys.stderr)
+        bad.append(url)
+        continue
+    print(f"  Piper probe OK: {len(pairs)} (voice, speaker) pairs at {url}")
+sys.exit(1 if bad else 0)
 PYEOF
     then
         echo "  No reachable Piper at $PIPER_URL - the corpus stage would fail at its" >&2
-        echo "  first render, not now. Start the host server in another terminal:" >&2
-        echo "  ./scripts/start-piper-host.sh   (it downloads voices on first use)" >&2
-        echo "  or point PIPER_URL / --piper-url at an existing one." >&2
+        echo "  first render, not now. Start the engine in another terminal:" >&2
+        echo "  uv run --project tts-service/engines/piper python -m piper_engine --port 8898" >&2
+        echo "  (it uses the voices under data/external/piper) or point PIPER_URL / --piper-url at an existing one." >&2
+        echo "  A fleet:  PIPER_URLS=\"\$(./scripts/start-tts-fleet.sh 4)\"" >&2
         exit 1
     fi
 
@@ -241,33 +322,23 @@ PYEOF
         if ! "$ENV_DIR/.venv/bin/python" - "$KOKORO_URL" <<'PYEOF'
 import sys
 sys.path.insert(0, ".")
-url = sys.argv[1].rstrip("/")
-if url.startswith("mlx://"):
-    # This venv does not install kokoro-mlx (it lives in train-applesilicon/,
-    # because the two trainers are split on numpy); available() says exactly
-    # that, and it is the honest answer rather than a silent HTTP fallback.
-    from train.corpus import kokoro_mlx
-    ok, why = kokoro_mlx.available()
-    if not ok:
-        print(f"  Kokoro (mlx) unavailable: {why}", file=sys.stderr)
-        sys.exit(1)
-    print(f"  Kokoro probe OK: {why}")
-else:
-    import requests
-    try:
-        r = requests.get(f"{url}/v1/audio/voices", timeout=10)
-        r.raise_for_status()
-    except Exception as e:
-        print(f"  Kokoro unreachable: {e}", file=sys.stderr)
-        sys.exit(1)
-    voices = r.json()
-    voices = voices.get("voices", voices) if isinstance(voices, dict) else voices
-    print(f"  Kokoro probe OK: {len(voices)} voices at {url}")
+import train.corpus  # noqa: F401  (sys.path bootstrap for tts_protocol)
+from tts_protocol.client import TtsClient
+url = sys.argv[1]
+try:
+    c = TtsClient(url)
+    voices = c.voices()
+except Exception as e:
+    print(f"  Kokoro unreachable: {e}", file=sys.stderr)
+    sys.exit(1)
+engine = c.server_engine or "?"
+ts = "word timestamps yes" if c.supports_timestamps else "word timestamps NO"
+print(f"  Kokoro probe OK: engine={engine}, {len(voices)} voices, {ts} at {url}")
 PYEOF
         then
             echo "  No reachable Kokoro at $KOKORO_URL - the corpus stage would fail at" >&2
-            echo "  its first Kokoro render, not now. Start the host server in another" >&2
-            echo "  terminal:  ./scripts/start-kokoro-host.sh" >&2
+            echo "  its first Kokoro render, not now. Start the engine in another" >&2
+            echo "  terminal:  uv run --project tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900" >&2
             echo "  or run all-Piper:  KOKORO_FRACTION=0  (or --kokoro-fraction 0)" >&2
             exit 1
         fi
@@ -289,7 +360,8 @@ run() {
 }
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
-LOG="training-${SAFE_NAME}-macos-${STAMP}.log"
+mkdir -p logs
+LOG="logs/training-${SAFE_NAME}-macos-${STAMP}.log"
 
 # === 1. corpus ====================================================================
 #
@@ -306,8 +378,17 @@ CORPUS_EXTRA=()
 [[ -n "$SAMP_PER_VOICE" ]] && CORPUS_EXTRA+=(--samples-per-voice "$SAMP_PER_VOICE")
 [[ -n "$NEGATIVES_PER_VOICE" ]] && CORPUS_EXTRA+=(--negatives-per-voice "$NEGATIVES_PER_VOICE")
 if [[ "${SKIP_CORPUS:-}" == "1" ]]; then
-    echo
-    echo "=== $(date '+%H:%M:%S')  corpus (skipped)"
+    # --skip validates the corpus.json manifest against the shaping this stage
+    # would request and exits with a diff on a mismatch - SKIP_CORPUS used to be
+    # a blind reuse, and a corpus built with different depth than the one a
+    # resumed run thinks it asked for is the measurement that goes wrong
+    # silently. Same flags the build branch would use (CORPUS_EXTRA included),
+    # because those are exactly what the check has to see.
+    SKIP_CORPUS_ARGS=(--wake-word "$WAKE_WORD" --piper-url "$PIPER_URL" --piper-speakers 12 --skip)
+    [[ -n "${KOKORO_FRACTION:-}" ]] && SKIP_CORPUS_ARGS+=(--kokoro-url "$KOKORO_URL" --kokoro-fraction "$KOKORO_FRACTION")
+    run "verifying existing corpus (data/corpus/${SAFE_NAME}/mww)" \
+        "$ENV_DIR/.venv/bin/python" -m train.mww.corpus \
+            "${SKIP_CORPUS_ARGS[@]}" "${CORPUS_EXTRA[@]+"${CORPUS_EXTRA[@]}"}"
 elif [[ -n "${KOKORO_FRACTION:-}" ]]; then
     run "corpus (Piper ${PIPER_URL} + Kokoro ${KOKORO_URL}, fraction ${KOKORO_FRACTION})" \
         "$ENV_DIR/.venv/bin/python" -m train.mww.corpus \
@@ -352,11 +433,14 @@ fi
 # The tag is computed HERE, after the corpus exists and before training starts -
 # the same reason run-mww-training.sh documents: the corpus is part of the tag,
 # and model_train_eval refuses to train into an existing directory. The checksum
-# guard in train/mww/train.py still applies - it is in the code, not in the shell.TAG="$("$ENV_DIR/.venv/bin/python" -m train.provenance --wake-word "$WAKE_WORD" --tag --fallback "$STAMP")"
-DIRTY=""
-git diff --quiet 2>/dev/null || DIRTY="-dirty"
-run "run tag: $TAG"
-
+# guard in train/mww/train.py still applies - it is in the code, not in the shell.
+#
+# Computed THROUGH train.mww.train --print-tag, not through train.provenance: the
+# tag's config half (-h) is a hash of the resolved hyperparameters, which only
+# exists where the config is built. Computing it twice (here and in train.py) is
+# how the archive and the run directory would drift apart. Same arguments as the
+# real run below, so the tag is exactly the one the run will get.
+#
 # The ambient sets live under data/external/mww_ambient/ (download-external-data.sh),
 # in the same directory as the augmentation impulse/background sets the features
 # stage already used. Pass every subdirectory present: mWW's model_train_eval
@@ -367,6 +451,13 @@ if [[ -d data/external/mww_ambient ]]; then
         AMBIENT_ARGS+=("$dir")
     done < <(find data/external/mww_ambient -mindepth 1 -maxdepth 1 -type dir | sort)
 fi
+
+TAG="$("$ENV_DIR/.venv/bin/python" -m train.mww.train \
+    --wake-word "$WAKE_WORD" --print-tag \
+    --ambient "${AMBIENT_ARGS[@]+"${AMBIENT_ARGS[@]}"}" "$@" 2>&1 | tail -1)"
+DIRTY=""
+git diff --quiet 2>/dev/null || DIRTY="-dirty"
+run "run tag: $TAG"
 
 run "training"
 set +e
@@ -444,12 +535,18 @@ echo "    $TAGGED_MODEL  ($(du -h "$TAGGED_MODEL" | cut -f1))"
 [[ -f "$TAGGED_MANIFEST" ]] && echo "    $TAGGED_MANIFEST  (model: $(basename "$TAGGED_MODEL"))"
 [[ -f "$TAGGED_ROC" ]] && echo "    $TAGGED_ROC"
 [[ -n "$DIRTY" ]] && echo "    NOTE: working tree was dirty - the code half of $TAG is not reproducible"
+if [[ "${SMOKE:-}" == "1" ]]; then
+    echo "    SMOKE RUN: the model is smoke-named, the results are not measurable,"
+    echo "    and no real run's archive was touched. Delete it when done:"
+    echo "      rm -rf output/${SAFE_NAME}/mww/${TAG}"
+else
 echo
 echo "    Compare the wall time against the container's 26m06s (this machine, 2026-09-06)"
 echo "    and the per-stage numbers against tools/tf_probe.py and tools/bench_tts.py."
 echo
-echo "    Evaluate (Docker, unchanged):"
-echo "      cd eval && docker compose run --rm eval python -m eval.eval_model \\"
-echo "          --model $TAGGED_MODEL"
+echo "    Evaluate (host, P2.4; Docker still works):"
+echo "      eval/.venv/bin/python eval/src/eval_model.py --model $TAGGED_MODEL"
+echo "      # or: cd eval && docker compose run --rm eval python -m eval.eval_model \\ --model ..."
 echo "    Confirm the cutoff against the held-out recordings before deploying it;"
 echo "    the per-speaker rows are the ones that decide it."
+fi

@@ -1,0 +1,25 @@
+[project]
+name = "tts-protocol"
+version = "0.1.0"
+description = "The TTS wire protocol of this repo: the contract (wire), the generic server, and the client the trainers speak"
+requires-python = ">=3.11"
+
+dependencies = [
+    # The protocol's only imports. Both sides of the wire need them - numpy and
+    # scipy for the wav codec (wire.py), nothing else. Deliberately no requests:
+    # the wire is plain sockets, so a client process never needs an HTTP stack.
+    "numpy",
+    "scipy",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Flat layout: the package directory is tts_protocol/ inside the project root
+# tts-service/tts_protocol/. The trainers and the eval image do not pip-install
+# this at all - train/corpus/__init__.py puts the project root on sys.path -
+# but the engine uv projects take it as a path dependency, which needs the
+# build backend.
+packages = ["tts_protocol"]

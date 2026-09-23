@@ -9,8 +9,18 @@ WHAT IS SHARED IS THE CODE, NOT THE OUTPUT. Everything here comes from corpus/ -
 same trimming, the same child-range copies, the same audited Piper voices, the same
 tuned phrase texts and speed grid. Two corpora built by one set of rules.
 
-    python -m train.mww.corpus --wake-word "hey seeree" --piper-url piper:10200 \
-        --kokoro-url http://127.0.0.1:8880 --kokoro-fraction 0.3
+    python -m train.mww.corpus --wake-word "hey seeree" \
+        --piper-url tcp://127.0.0.1:8898 \
+        --kokoro-url tcp://127.0.0.1:8900 --kokoro-fraction 0.3
+
+A Piper FLEET is one comma-separated --piper-url
+(tcp://127.0.0.1:8898,tcp://127.0.0.1:8899,... - the list scripts/
+start-tts-fleet.sh prints): the corpus shards it BY VOICE, each model pinned to
+one instance for the whole run, so an instance loads each of its models once
+rather than reloading on most requests (corpus/piper.py, PiperFleet). One
+instance is one serial lane - the lane is the engine's lock, not the client's -
+so throughput scales with instances, and this is the fast path for the corpus
+stage (improvement.md P2.1).
 
 DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
 
@@ -36,10 +46,10 @@ DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
    second engine would blur attribution of a false accept to an engine. The Kokoro
    voices get the same exclusions the oWW corpus applies (MISPRONOUNCING_VOICES and
    the v0 legacy set, corpus/negatives.py) and the shared speed grid, so the two
-   engines differ in timbre, not in speed or text. The mlx:// in-process backend
-   works here too but is not installed in this environment (see
-   corpus/kokoro_mlx.py) - from this venv, use the host server:
-   scripts/start-kokoro-host.sh.
+   engines differ in timbre, not in speed or text. Both URLs are tcp://
+   tts-protocol servers (tts-service/): on a Mac that is the in-process
+   kokoro-mlx engine (`uv run --project tts-service/engines/kokoro_mlx
+   python -m kokoro_mlx_engine`), in Docker the wrapped Kokoro-FastAPI service.
 
 3. NO RUN-ON POSITIVES YET. Their cut point comes from Kokoro's word timestamps, and
    Wyoming exposes no equivalent - the fallback estimate measured a median +153 ms
@@ -87,9 +97,13 @@ DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
 
 import argparse
 import os
+import random
 import shutil
 import sys
+import time
 from pathlib import Path
+
+import numpy as np
 
 # The REPO ROOT. This package sits at train/mww/ since the reorg, so the root is
 # two levels up, not one - the old value now points at train/.
@@ -106,22 +120,29 @@ from train.corpus.piper import (generate_piper_samples,  # noqa: E402
 from train.corpus.positives import (PLAIN_SPEED_GRID,  # noqa: E402
                                     plain_positive_texts)
 from train.corpus.real import copy_real_samples  # noqa: E402
+from train.corpus import manifest as corpus_manifest  # noqa: E402
+from wordlists import exclude_voice_holdout, load_voice_holdout  # noqa: E402
+from wordlists import path_for, voice_holdout_path  # noqa: E402
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--wake-word", default="hey seeree")
-    p.add_argument("--piper-url", default="piper:10200",
-                   help="Wyoming TTS host:port (default: %(default)s)")
+    p.add_argument("--piper-url", default=os.environ.get("PIPER_URL", "tcp://127.0.0.1:8898"),
+                   help="Piper protocol server(s), tcp:// URLs, comma-separated "
+                        "to run a fleet (sharded by VOICE - every model pinned "
+                        "to one instance for the run, so an instance never "
+                        "reloads a model per request; scripts/start-tts-fleet.sh "
+                        "N launches N on this Mac) (default: %%(default)s)")
     p.add_argument("--piper-speakers", type=int, default=12,
                    help="speakers sampled per multi-speaker voice (default: "
                         "%(default)s). libritts_r alone carries 904.")
     p.add_argument("--piper-languages", default="en_US,en_GB")
     p.add_argument("--kokoro-url",
-                   default=os.environ.get("KOKORO_URL", "http://localhost:8880"),
-                   help="Kokoro TTS URL, comma-separated for a pool; 'mlx://' is "
-                        "in-process (default: %%(default)s). Used only when "
+                   default=os.environ.get("KOKORO_URL", "tcp://127.0.0.1:8899"),
+                   help="Kokoro protocol server(s), tcp:// URLs, comma-separated "
+                        "for a pool (default: %%(default)s). Used only when "
                         "--kokoro-fraction > 0.")
     p.add_argument("--kokoro-fraction", type=float, default=0.0,
                    help="Share of the PHRASE-ALONE positive budget rendered by "
@@ -145,15 +166,178 @@ def main():
                    help="delete an existing corpus first. Required to regenerate - "
                         "appending merges two runs and keeps clips from voices "
                         "excluded since.")
+    p.add_argument("--skip", action="store_true",
+                   help="reuse the existing corpus instead of building one, for a "
+                        "run whose corpus is a held-fixed variable. Requires the "
+                        "corpus to exist; when a corpus.json manifest exists it is "
+                        "checked against the shaping flags AND the effective voice "
+                        "set (live catalog minus exclusions minus the voice holdout) "
+                        "this invocation would use, and a mismatch exits with a "
+                        "diff - silently reusing a differently-shaped corpus or one "
+                        "built from a different voice set is the failure this "
+                        "refuses (the cf9c065b reuse, 2026-09-22, on the oww side, "
+                        "matched every shaping flag and still trained on held-out "
+                        "voices). The voice set is probed first: the catalog fetch "
+                        "is cheap (no rendering), but the engines must be UP for a "
+                        "--skip run - an unverifiable catalog is exactly the reuse "
+                        "this check exists to refuse.")
     p.add_argument("--no-trim", action="store_true",
                    help="skip silence trimming. Almost certainly wrong: Piper "
                         "renderings carry a median 248 ms of trailing silence "
                         "(p90 555 ms), against 0 ms for real recordings.")
+    p.add_argument("--seed", type=int, default=0,
+                   help="seed the drawing/sampling of the corpus (default: "
+                        "%(default)s = unseeded). Seeds which voices, speakers, "
+                        "phrases and speeds get chosen - NOT how they are rendered: "
+                        "the TTS engines sample noise per call and cannot be "
+                        "seeded, so a same-seed rebuild is a same-shape corpus with "
+                        "different audio. That is why a sweep REUSES this corpus "
+                        "(the manifest written at the end of this stage) rather "
+                        "than rebuilding it.")
     args = p.parse_args()
+
+    if args.seed:
+        # BEFORE any draw below: the whole stage must be a function of the seed,
+        # not of the clock. numpy carries the corpus helpers' draws (piper speed
+        # choice, child-stretch draws, trim jitter); random is seeded too because
+        # the helpers are allowed to use either.
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        print(f"[seed] {args.seed} (drawing is seeded; rendering is not - the "
+              f"TTS engines cannot be)")
+
+    t_start = time.time()
 
     safe = args.wake_word.replace(" ", "_").lower()
     root = Path(args.corpus_root) / safe / "mww"
     positives, negatives = root / "positives", root / "negatives"
+
+    # The fraction gates which engines are probed below, so validate it first.
+    if not 0.0 <= args.kokoro_fraction < 1.0:
+        sys.exit("  --kokoro-fraction must be in [0, 1) - Piper stays primary in "
+                 "this corpus, because the negatives are Piper-only")
+
+    # VOICE SET: resolved BEFORE the --skip decision, from the same code path
+    # the build below uses - one computation, so the check and the build cannot
+    # drift apart. The cf9c065b reuse, 2026-09-22 (oww side) showed the hole
+    # this mirrors: every shaping flag matched, but the check never compared
+    # the voice set, so a post-reservation run reused a pre-reservation corpus
+    # and trained on seven held-out voices. The probes are cheap catalog
+    # fetches (no rendering, no model load), but they DO need the fleet up -
+    # a --skip run no longer works with the engines down, because an
+    # unverifiable catalog is exactly the reuse the check exists to refuse.
+
+    # The voice holdout (improvement.md P1.2): loaded once here, enforced below
+    # against whichever engine is actually in play - the live catalog is the
+    # source of truth, so a list that drifted from it fails loudly instead of
+    # silently excluding nothing. No tracked file (a checkout predating it) is
+    # a no-op, and says so.
+    holdout = load_voice_holdout()
+    voices = []
+    if args.kokoro_fraction < 1.0:
+        print(f"[Piper] {args.piper_url}")
+        voices = select_piper_voices(
+            args.piper_url, args.wake_word,
+            languages=tuple(args.piper_languages.split(",")),
+            max_speakers=args.piper_speakers)
+        if not voices:
+            sys.exit("  no usable Piper voices - nothing to generate")
+        if holdout.get("piper"):
+            # Same fail-loudly rule as the openWakeWord side: a holdout pair the
+            # audited selection no longer carries (dropped by the audit tables,
+            # or gone from the catalog) cannot serve as an eval voice either,
+            # so the tracked list must move, not the audit.
+            n_before = len(voices)
+            voices, holdout_missing = exclude_voice_holdout("piper", voices, holdout)
+            if holdout_missing:
+                sys.exit(f"  ERROR: the voice holdout ({voice_holdout_path()}) names "
+                         f"Piper (voice, speaker) pair(s) the live audited "
+                         f"selection does not carry: {holdout_missing}. Update the "
+                         f"tracked list to match the catalog this corpus is "
+                         f"built from.")
+            print(f"  Excluding {n_before - len(voices)} voice-holdout (voice, speaker) "
+                  f"pair(s) reserved for the synthetic ranking set")
+        else:
+            print(f"  NOTE: no voice holdout at {voice_holdout_path()} - the "
+                  f"synthetic ranking set has no reserved voices")
+
+    # KOKORO SUPPLEMENTS THE PHRASE-ALONE BUDGET (see the module docstring):
+    # a share of what Piper would have rendered is rendered by it instead.
+    kokoro_voices, kokoro_pool = [], None
+    if args.kokoro_fraction > 0.0:
+        print(f"\n[Kokoro] {args.kokoro_url}")
+        kokoro_pool = KokoroPool(args.kokoro_url.split(","))
+        kokoro_voices = probe_kokoro_servers(kokoro_pool)
+        # The same exclusions the openWakeWord corpus applies, for the same
+        # reason: a voice that says something other than the wake word is a
+        # mislabelled positive regardless of engine, and the v0 legacy set is
+        # older renderings of speakers already in the set. Six of 42 Kokoro
+        # voices did exactly this for "hey seeree" and went unnoticed for
+        # eleven runs - this list is not optional.
+        excluded = set(MISPRONOUNCING_VOICES.get(safe, []))
+        legacy = sorted(v for v in kokoro_voices if LEGACY_VOICE_MARKER in v)
+        if legacy:
+            excluded.update(legacy)
+            print(f"  Skipping {len(legacy)} v0 legacy voice(s) - older "
+                  f"renderings of speakers already in the set, for no measured "
+                  f"gain")
+        mispron = sorted(excluded & set(kokoro_voices))
+        if mispron:
+            print(f"  Excluding {len(mispron)} voice(s) that mispronounce the "
+                  f"wake word: {', '.join(mispron)}")
+        kokoro_voices = [v for v in kokoro_voices if v not in excluded]
+        if holdout.get("kokoro"):
+            n_before = len(kokoro_voices)
+            kokoro_voices, holdout_missing = exclude_voice_holdout(
+                "kokoro", kokoro_voices, holdout)
+            if holdout_missing:
+                sys.exit(f"  ERROR: the voice holdout ({voice_holdout_path()}) names "
+                         f"Kokoro voice(s) the live catalog does not offer: "
+                         f"{holdout_missing}. Update the tracked list.")
+            print(f"  Excluding {n_before - len(kokoro_voices)} voice-holdout "
+                  f"voice(s) reserved for the synthetic ranking set: "
+                  f"{', '.join(holdout.get('kokoro') or [])}")
+        if not kokoro_voices:
+            sys.exit("  no usable Kokoro voices - re-run with "
+                     "--kokoro-fraction 0 (all Piper)")
+
+    # What a --skip run validates against, and what the manifest records at
+    # the end of a build: the requested shaping flags plus the TOP-LEVEL
+    # voice set (manifest["voices"]), a different axis from every flag -
+    # piper entries are (voice, speaker) pairs, the same shape select_piper_
+    # voices returns and the manifest stores.
+    requested = {
+        "samples_per_voice": args.samples_per_voice,
+        "negatives_per_voice": args.negatives_per_voice,
+        "kokoro_fraction": args.kokoro_fraction,
+        "child_fraction": args.child_fraction,
+        "real_copies": args.real_copies,
+        "piper_speakers": args.piper_speakers,
+        "piper_languages": args.piper_languages,
+        "negatives_file": args.negatives_file,
+        "no_trim": args.no_trim,
+        "voices": {"kokoro": kokoro_voices, "piper": voices},
+    }
+
+    # REUSE MODE: the sweep's front door. Decided AFTER the probes, because
+    # the check diffs the voice set the probes just resolved (module: the
+    # cf9c065b reuse was blind on exactly that axis).
+    if args.skip:
+        existing = {d: len(list(d.glob("*.wav"))) for d in (positives, negatives)
+                    if d.is_dir()}
+        if not any(existing.values()):
+            sys.exit(f"\n--skip, but no corpus at {root} - build it first "
+                     f"(drop --skip)")
+        manifest = corpus_manifest.load_manifest(root)
+        if manifest is not None:
+            corpus_manifest.check_reuse(root, requested)
+        else:
+            print(f"  NOTE: no corpus.json manifest at {root} - the corpus predates "
+                  f"the manifest stage, so its shaping and voice set cannot be "
+                  f"verified. Reusing as-is; a rebuild would write one.")
+        for d, n in existing.items():
+            print(f"  reusing {d} ({n} wav)")
+        return
 
     # REFUSE TO APPEND TO AN EXISTING CORPUS. Generating into a non-empty directory
     # silently merges two runs, and the merge is worse than it sounds:
@@ -185,50 +369,6 @@ def main():
     positives.mkdir(parents=True, exist_ok=True)
     negatives.mkdir(parents=True, exist_ok=True)
 
-    host, _, port = args.piper_url.rpartition(":")
-    if not 0.0 <= args.kokoro_fraction < 1.0:
-        sys.exit("  --kokoro-fraction must be in [0, 1) - Piper stays primary in "
-                 "this corpus, because the negatives are Piper-only")
-
-    voices = []
-    if args.kokoro_fraction < 1.0:
-        print(f"[Piper] {args.piper_url}")
-        voices = select_piper_voices(
-            host, port, args.wake_word,
-            languages=tuple(args.piper_languages.split(",")),
-            max_speakers=args.piper_speakers)
-        if not voices:
-            sys.exit("  no usable Piper voices - nothing to generate")
-
-    # KOKORO SUPPLEMENTS THE PHRASE-ALONE BUDGET (see the module docstring):
-    # a share of what Piper would have rendered is rendered by it instead.
-    kokoro_voices, kokoro_pool = [], None
-    if args.kokoro_fraction > 0.0:
-        print(f"\n[Kokoro] {args.kokoro_url}")
-        kokoro_pool = KokoroPool(args.kokoro_url.split(","))
-        kokoro_voices = probe_kokoro_servers(kokoro_pool)
-        # The same exclusions the openWakeWord corpus applies, for the same
-        # reason: a voice that says something other than the wake word is a
-        # mislabelled positive regardless of engine, and the v0 legacy set is
-        # older renderings of speakers already in the set. Six of 42 Kokoro
-        # voices did exactly this for "hey seeree" and went unnoticed for
-        # eleven runs - this list is not optional.
-        excluded = set(MISPRONOUNCING_VOICES.get(safe, []))
-        legacy = sorted(v for v in kokoro_voices if LEGACY_VOICE_MARKER in v)
-        if legacy:
-            excluded.update(legacy)
-            print(f"  Skipping {len(legacy)} v0 legacy voice(s) - older "
-                  f"renderings of speakers already in the set, for no measured "
-                  f"gain")
-        mispron = sorted(excluded & set(kokoro_voices))
-        if mispron:
-            print(f"  Excluding {len(mispron)} voice(s) that mispronounce the "
-                  f"wake word: {', '.join(mispron)}")
-        kokoro_voices = [v for v in kokoro_voices if v not in excluded]
-        if not kokoro_voices:
-            sys.exit("  no usable Kokoro voices - re-run with "
-                     "--kokoro-fraction 0 (all Piper)")
-
     # The split, in TOTAL clips: Piper keeps its per-voice budget scaled down by
     # the fraction, and the difference is spread over however many Kokoro voices
     # there are. The two engines do not have the same voice count, so a
@@ -244,7 +384,7 @@ def main():
 
     print(f"\n[Positives] -> {positives}")
     texts = plain_positive_texts(args.wake_word)
-    generate_piper_samples(host, int(port), voices, positives,
+    generate_piper_samples(args.piper_url, voices, positives,
                            piper_per_voice,
                            texts,
                            PLAIN_SPEED_GRID, "Piper positives")
@@ -260,7 +400,7 @@ def main():
     # signal lives, and a second engine would blur the attribution.
     print(f"\n[Negatives] -> {negatives}")
     phrases = build_negative_phrases(args.wake_word, args.negatives_file)
-    generate_piper_samples(host, int(port), voices, negatives,
+    generate_piper_samples(args.piper_url, voices, negatives,
                            args.negatives_per_voice, phrases,
                            PLAIN_SPEED_GRID, "Piper negatives")
 
@@ -282,6 +422,39 @@ def main():
 
     n_pos = len(list(positives.glob("*.wav")))
     n_neg = len(list(negatives.glob("*.wav")))
+
+    # FREEZE THE CORPUS: the manifest is the identity the run tag hashes and the
+    # check a later `--corpus reuse` (or the sweep runner) validates against. It
+    # is written last, after trimming and the child copies, so its digest covers
+    # the final tree - the state training will actually consume.
+    corpus_manifest.write_manifest(
+        root, args.wake_word, "mww",
+        seed=args.seed,
+        # The REQUESTED shaping (what a later --skip reuse check diffs) plus the
+        # holdout list, so the manifest names the exclusion: the voice set the
+        # manifest records is already holdout-free, and the list says why.
+        shaping={
+            "samples_per_voice": args.samples_per_voice,
+            "negatives_per_voice": args.negatives_per_voice,
+            "kokoro_fraction": args.kokoro_fraction,
+            "child_fraction": args.child_fraction,
+            "real_copies": args.real_copies,
+            "piper_speakers": args.piper_speakers,
+            "piper_languages": args.piper_languages,
+            "negatives_file": args.negatives_file,
+            "no_trim": args.no_trim,
+            "voice_holdout": holdout,
+        },
+        engines={
+            "piper": {"url": args.piper_url, "version": None},
+            **({"kokoro": {"url": args.kokoro_url, "version": None}}
+               if args.kokoro_fraction > 0 else {}),
+        },
+        voices={"kokoro": kokoro_voices, "piper": voices},
+        per_voice_counts={"positives": n_pos, "negatives": n_neg},
+        wordlist_path=path_for(args.wake_word),
+        wall_time_s=time.time() - t_start)
+
     print(f"\nDONE  {n_pos} positives, {n_neg} negatives under {root}")
     print("\nNext - FEATURES, not config: the config points at "
           "features/positives, which the next step creates.")

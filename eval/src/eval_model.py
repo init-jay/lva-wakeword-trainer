@@ -29,6 +29,14 @@ Two details of the method matter enough to state:
 * "End of speech" is the last sample above 2% of peak amplitude. Latency is the audio
   offset where the score first crosses the threshold, minus that marker.
 
+The --json output also records a THRESHOLD SWEEP over a fixed 0.05-0.95 grid: a
+re-threshold of the per-clip peaks already computed in this one run, so the run
+ledger (train/ledger.py) can compare models at a matched false-accept budget
+instead of a single threshold - 'Never compare models at a fixed threshold'
+(CLAUDE.md); bug.md C3 step 2 (2026-09-22), the 40-eval manual 0.25-0.85 job.
+
+Usage, from the repo root:
+
 Negatives are reported PER CATEGORY, never pooled. The corpus from
 generate_negatives.py is adversarial by construction - a fifth of it is
 phrase-extending - so a pooled false-accept rate means nothing. Category comes from
@@ -53,7 +61,8 @@ builds its own command-following case by concatenating a command onto a plain cl
 so a real run-on recording among the positives would be scored as the phrase alone.
 
 Usage, from the repo root:
-    python -m eval.eval_model --model output/hey_seeree/oww/hey_seeree_705c23b.onnx
+    python -m eval.eval_model --model output/hey_seeree/oww/hey_seeree_705c23b.onnx   # the eval image
+    eval/.venv/bin/python eval/src/eval_model.py --model output/hey_seeree/oww/hey_seeree_705c23b.onnx   # the host env
     python -m eval.eval_model --model M --positives data/recordings/holdout/speaker1
     python -m eval.eval_model --model M --threshold 0.7 --verbose
 
@@ -65,16 +74,27 @@ all of it and runs on the Mac:
 """
 
 import argparse
+import json
+import math
 import re
 import sys
 import zlib
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 import scipy.io.wavfile
 
-from eval import backends, paths
+# Runnable as `python eval/src/eval_model.py` as well as `python -m
+# eval.eval_model`. The module form is the eval image's: src/ is mounted as the
+# `eval` package, so the package is importable. The plain-path form - the host
+# invocation, scripts/setup-eval-host.sh - only has this directory on
+# sys.path, so try both. The same guard the other scripts here carry.
+try:
+    from eval import backends, paths
+except ImportError:
+    import backends, paths
 
 SR = 16000
 NOISE_FLOOR = 30.0          # std dev in 16-bit counts; stands in for room tone
@@ -104,6 +124,29 @@ def read_wav(path):
     if sr != SR:
         return None
     return data.astype(np.int16)
+
+
+def wilson_interval(k, n, z=1.959964):
+    """95% Wilson interval on a proportion k/n, as (low, high). None when n=0.
+
+    The Wilson interval is the right one here because the holdout is TINY: ryan is
+    n=6, so one clip is 16.7 points, and jen n=10, one clip is 10 points. A bare
+    rate on that n swings 16.7 points per clip, which is exactly the scale of the
+    10-point run-to-run variance this repo has measured at an identical config - so
+    without the interval a tuning loop will chase a 10-point 'win' that is one clip.
+    Wilson rather than the normal approximation because it stays sane at small n
+    and at 0/100 (the normal interval goes negative).
+    """
+    if n == 0:
+        return None
+    z2 = z * z
+    p = k / n
+    denom = 1 + z2 / n
+    centre = p + z2 / (2 * n)
+    spread = z * math.sqrt(p * (1 - p) / n + z2 / (4 * n * n))
+    # The interval is on a proportion, so it cannot leave [0, 1]; the formula can
+    # overshoot by a rounding hair (which prints as "-0%"), so clamp it back.
+    return (max(0.0, (centre - spread) / denom), min(1.0, (centre + spread) / denom))
 
 
 def speech_end(data):
@@ -148,6 +191,46 @@ def stream(backend, audio):
 def first_crossing(scores, offsets, threshold):
     hit = np.flatnonzero(scores >= threshold)
     return (offsets[hit[0]] if hit.size else None)
+
+
+# The grid the sweep re-thresholds over: 0.05..0.95, 19 points (SWEEP_GRID).
+# 0.5 is on it, so the sweep's own 0.5 point cross-checks the single-threshold
+# numbers the report printed above it - the two cannot drift apart silently.
+SWEEP_GRID = [round(0.05 * i, 2) for i in range(1, 20)]
+
+
+def threshold_sweep(pos_peaks, adv_peaks, grid=SWEEP_GRID):
+    """Re-threshold already-computed per-clip PEAK scores over a fixed grid.
+
+    A pure filter, not a re-scoring: a clip fires at threshold t iff its peak
+    is >= t, because both the positive and negative paths above decide on any
+    frame crossing t (first_crossing / scores.max() >= t) and the peak is the
+    max over frames. The model runs exactly once, in stream(); everything here
+    is arithmetic on the peaks it left behind.
+
+    The false-accept axis is the extend+hey_other subset (ADVERSARIAL), never
+    pooled with the other categories: 'Never pool negative categories'
+    (CLAUDE.md) applies to the curve exactly as it does to the gate - a pooled
+    rate would let general's background dilute the extend signal. Both subsets
+    (extend+hey_other and the full negative set) re-threshold identically
+    because by_category holds a peak for every clip; the FA axis here is the
+    adversarial one, matching the eval block's "adversarial" field.
+
+    bug.md C3 step 2 (2026-09-22): the training-steps verdict cost 40
+    hand-driven evals (one per 0.25-0.85 threshold) for a two-point sweep,
+    because this harness took one --threshold and the ledger had no curve to
+    compare on. This is what lets a sweep runner conclude itself.
+    """
+    pos = np.asarray(pos_peaks, dtype=np.float64)
+    adv = np.asarray(adv_peaks, dtype=np.float64)
+    thr = [float(t) for t in grid]
+    return {
+        "thresholds": thr,
+        "positives_rate": [float((pos >= t).mean()) for t in thr],
+        "adv_rate": [float((adv >= t).mean()) for t in thr],
+        "pos_n": int(pos.size),
+        "adv_n": int(adv.size),
+    }
 
 
 def load_dir(directory, recursive=True):
@@ -220,9 +303,13 @@ def report_by_speaker(rows, spans):
         lats = [e[2] for e in entries if e[2] is not None]
         peaks = np.array([e[3] for e in entries])
         lat = f"{np.median(lats):.0f}ms" if lats else "-"
+        # n= and the Wilson CI travel with the rate (wilson_interval for why).
+        ci = wilson_interval(ok, len(entries))
+        ci_text = (f" (n={len(entries)}, 95% CI {ci[0]:.0%}-{ci[1]:.0%})"
+                   if ci else " (n=0)")
         print(f"  {speaker[:19]:<20}{len(entries):>4}{f'{ok}/{len(entries)}':>12}"
-              f"{np.median(peaks):>14.3f}{lat:>16}")
-        rates.append((ok / len(entries), speaker, ok, len(entries)))
+              f"{np.median(peaks):>14.3f}{lat:>16}  {ci_text}")
+        rates.append((ok / len(entries), speaker, ok, len(entries), ci))
 
     if len(rates) > 1:
         worst, best = min(rates), max(rates)
@@ -324,12 +411,25 @@ def main():
                         help="Break positives down by the sweep encoded in their "
                              "filename (speed_0.55_af_bella -> speed_0.55), as "
                              "generate_positives.py names them")
+    parser.add_argument("--voice-holdout-set", default=None,
+                        help="Directory of the voice-holdout synthetic ranking set "
+                             "(generate_positives.py --voice-holdout, with its "
+                             "set.json label). Scored as a SEPARATE, clearly "
+                             "labelled block after the gates - a synthetic voice "
+                             "is not a person, so it is a low-variance ranking "
+                             "signal for sweep points, never merged into the "
+                             "gates above, which stay on the real held-out "
+                             "recordings (improvement.md P1.2)")
     parser.add_argument("--verbose", action="store_true", help="Print a row per positive")
     parser.add_argument("--sliding-window-size", type=int, default=None,
                         help="microWakeWord only: probabilities averaged before "
                              "thresholding, as the runtime does. A cutoff is only "
                              "meaningful alongside this. Default: whatever the "
                              "manifest says, so the manifest is under test too")
+    parser.add_argument("--json", dest="json_path", default=None, metavar="PATH",
+                        help="Also write every number printed here as machine-readable "
+                             "JSON to PATH (same values, for the run ledger - see "
+                             "improvement.md P0.5). Does not change the report.")
     args = parser.parse_args()
 
     # The backend picks itself by inspecting the model, so the gates can be scored on
@@ -453,6 +553,19 @@ def main():
     else:
         print(f"\nNo command_*.wav in {args.negatives}; skipping the command-following gate.")
 
+    # --- threshold sweep (bug.md C3 step 2, 2026-09-22) -------------------------
+    # The scores are all in hand: rows holds a peak per positive, by_category a
+    # peak per negative, so the sweep is one pure pass over the peaks, not 19
+    # model runs. It goes in the --json output (and the ledger verbatim with
+    # it) so a matched-FA comparison is a lookup instead of a 40-eval manual
+    # job.
+    sweep = None
+    if adversarial_n and positives:
+        sweep = threshold_sweep(
+            [r[3] for r in rows],
+            [p for c in ADVERSARIAL for _, p in by_category.get(c, [])],
+            SWEEP_GRID)
+
     # --- gates -------------------------------------------------------------------
     print("\n" + "=" * 70)
     print("GATES")
@@ -472,7 +585,7 @@ def main():
     # that reads PASS pooled while failing one voice is not shippable to that person,
     # and the pooled row cannot show it - which is the whole reason this gate exists.
     if speaker_rates:
-        rate, speaker, ok_n, total = min(speaker_rates)
+        rate, speaker, ok_n, total, _ci = min(speaker_rates)
         checks.append((f"weakest speaker ({speaker[:14]})".ljust(32)
                        + f"{ok_n}/{total} ({rate:.0%})",
                        f">= {GATE_POSITIVE:.0%}", rate >= GATE_POSITIVE))
@@ -487,6 +600,145 @@ def main():
     for text, gate, ok in checks:
         print(f"  [{verdict(ok)}]  {text:<48}{gate}")
     print("=" * 70)
+
+    # One compact line, the detection@FA readings a human would have produced
+    # by hand-driving this harness across 0.25-0.85 (40 evals; bug.md C3,
+    # 2026-09-22). At-most-B semantics: the best detection on the curve with
+    # FA <= B - the curve is a step function, never interpolated.
+    if sweep:
+        print()
+        print(f"THRESHOLD SWEEP (re-thresholded over {len(sweep['thresholds'])} "
+              "points; the model ran once)")
+        parts = []
+        for b in (0.005, 0.01, 0.02, 0.05):
+            cands = [(d, a, t) for t, a, d in
+                     zip(sweep["thresholds"], sweep["adv_rate"],
+                         sweep["positives_rate"])
+                     if a <= b]
+            if cands:
+                det, fa, t = max(cands, key=lambda c: (c[0], -c[1]))
+                parts.append(f"det@FA<={b:.1%}: {det:.1%} (t={t:.2f})")
+            else:
+                parts.append(f"det@FA<={b:.1%}: - (no grid point at or below it)")
+        print("  " + "   ".join(parts))
+
+    # --- voice-holdout synthetic ranking set (improvement.md P1.2) ------------
+    # A separate block on purpose: these clips are rendered from the voices the
+    # corpus builders never train on, at in-distribution speeds, so the held-out
+    # axis is the voice alone. They rank sweep points (low variance, a real n),
+    # they do not gate anything - the gates above stay on real recordings, and
+    # a synthetic voice is not a person.
+    voice_holdout_result = None
+    if args.voice_holdout_set:
+        vdir = Path(args.voice_holdout_set)
+        vclips, vskipped = load_dir(vdir)
+        if vskipped:
+            print(f"WARNING: skipped {vskipped} voice-holdout clips not at {SR} Hz")
+        print("=" * 70)
+        print("VOICE-HOLDOUT SYNTHETIC RANKING SET (NOT A GATE)")
+        print(f"  {vdir}  ({len(vclips)} clips)")
+        print("  Every clip is a voice wordlists/voice_holdout.yaml holds out of every")
+        print("  corpus build, at speeds inside the 0.7-1.3 training range: voice-"
+              "disjoint from training, in-distribution everywhere else. A synthetic")
+        print("  voice is not a person - this is a low-variance ranking signal for")
+        print("  sweep points. It never stands in for the gates above, which stay on")
+        print("  the real held-out recordings; the top two or three of the points it")
+        print("  ranks go there.")
+        if vclips:
+            vrows = evaluate_positives(backend, vclips, args.threshold, rng, False)
+            vdet = sum(1 for r in vrows if r[1])
+            vlat = [r[2] for r in vrows if r[2] is not None]
+            vrate = vdet / len(vclips)
+            vlat_med = float(np.median(vlat)) if vlat else None
+            voice_holdout_result = {
+                "directory": str(vdir),
+                "n": len(vclips),
+                "detected": vdet,
+                "rate": vrate,
+                "latency_median_ms": vlat_med,
+                "missed": [r[0] for r in vrows if not r[1]],
+            }
+            print(f"  threshold {args.threshold}: detected {vdet}/{len(vclips)} "
+                  f"({vrate:.0%})"
+                  + (f", median latency {vlat_med:.0f} ms" if vlat_med is not None else ""))
+            print("  Compare this rate ACROSS sweep points; a movement smaller than")
+            print("  this set's own run-to-run variance is not a result (see the five")
+            print("  misreadings above). The set's set.json names its voices and the")
+            print("  holdout file they came from - read it before trusting a comparison.")
+        else:
+            print("  no clips found - render it with:")
+            print(f"    python -m eval.generate_positives --wake-word <phrase> --voice-holdout")
+        print("=" * 70)
+
+    # --- machine-readable copy of the same numbers -------------------------------
+    # --json is the hook the run ledger (improvement.md P0.5) reads; the values are
+    # exactly what the report above printed, nothing recomputed a second way.
+    if args.json_path:
+        per_speaker = {}
+        for speaker, start, end in speaker_spans:
+            entries = rows[start:end]
+            ok = sum(1 for e in entries if e[1])
+            ci = wilson_interval(ok, len(entries))
+            lats = [e[2] for e in entries if e[2] is not None]
+            per_speaker[speaker] = {
+                "n": len(entries),
+                "detected": ok,
+                "rate": ok / len(entries),
+                "ci95": [round(x, 4) for x in ci] if ci else None,
+                "median_latency_ms": float(np.median(lats)) if lats else None,
+            }
+        out = {
+            "model": str(args.model),
+            "threshold": args.threshold,
+            "backend": backend.describe(),
+            "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "false_accepts_by_category": {
+                c: {
+                    "n": len(r),
+                    "fired": int((np.array([p for _, p in r]) >= args.threshold).sum()),
+                    "rate": float((np.array([p for _, p in r]) >= args.threshold).mean()),
+                    "median_peak": float(np.median([p for _, p in r])),
+                    "worst_peak": float(max(p for _, p in r)),
+                }
+                for c, r in by_category.items()
+            },
+            "adversarial": {
+                "n": adversarial_n, "fired": adversarial_fired,
+                "rate": adversarial_fired / adversarial_n if adversarial_n else None,
+            },
+            "positives": {
+                "n": len(positives), "detected": detected,
+                "rate": detected / len(positives),
+                "latency_median_ms": float(np.median(latencies)) if latencies else None,
+                "latency_p90_ms": float(np.percentile(latencies, 90)) if latencies else None,
+                "missed": [n for n, _ in misses],
+            },
+            "per_speaker": per_speaker,
+            "command_following": (
+                {"n": len(positives),
+                 "immediately_after": detected_cmd,
+                 "pause_then_command": detected_gap,
+                 "pause_ms": args.command_gap_ms}
+                if detected_cmd is not None else None
+            ),
+            "gates": [{"check": text, "gate": gate, "pass": ok} for text, gate, ok in checks],
+            # The matched-FA curve (bug.md C3 step 2, 2026-09-22): 19 x 2 rates
+            # plus two counts - a few hundred bytes, one model run. The FA axis
+            # is the extend+hey_other subset, exactly the "adversarial" field
+            # above, never the pooled set. None for a run with no adversarial
+            # clips or no positives; the ledger then falls back to the
+            # one-threshold reading, as for every pre-sweep record on file.
+            "threshold_sweep": sweep,
+            # Deliberately a top-level sibling of "positives" and "gates", never
+            # inside either: the voice-holdout set is a synthetic ranking signal
+            # and a ledger reader must not be able to mistake it for the
+            # real-speaker numbers it sits beside (improvement.md P1.2).
+            "voice_holdout_set": voice_holdout_result,
+        }
+        path = Path(args.json_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(out, indent=2) + "\n")
+        print(f"\nJSON written to {path}")
 
 
 if __name__ == "__main__":

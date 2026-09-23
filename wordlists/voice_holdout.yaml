@@ -1,0 +1,48 @@
+# THE VOICE HOLDOUT (improvement.md P1.2).
+#
+# The per-wake-word wordlists keep the eval and training corpora disjoint on
+# PHRASE (wordlists/__init__.py enforces that). This file keeps them disjoint
+# on VOICE: every entry below is excluded from every corpus build
+# (train/oww/train.py and train/mww/corpus.py remove it from the live catalog
+# and exit when an entry the catalog no longer offers), and
+# eval/src/generate_positives.py --voice-holdout renders the synthetic eval
+# positives from these voices ONLY, into its own output directory.
+#
+# WHAT THE RESULTING SET IS, in one line for whoever renders it next: a
+# low-variance RANKING SIGNAL for sweep points - voice disjoint from training,
+# every other axis inside the training distribution, a synthetic voice with a
+# real n. A synthetic voice is not a person, so it never stands in for the
+# real-speaker gates on data/recordings/holdout/; the top two or three of the
+# twenty sweep points go there, on real recordings.
+#
+# Kokoro - N = 7, chosen from the 22 usable voices of the kokoro-mlx catalog
+# (the 28 it offers minus the v0-legacy set and the 6 that
+# MISPRONOUNCING_VOICES excludes for hey_seeree): four American women, two
+# American men (am_santa is the catalog's baritone; am_fenrir the deepest),
+# one British woman - the same accent/pitch spread generate_positives.py
+# justifies for its own VOICES list. Deliberately none of them appear in that
+# list, so this set COMPLEMENTS the regular eval positives instead of
+# overlapping them: the regular set is the training-distribution sanity check,
+# this one holds the voice axis out.
+kokoro:
+  - af_aoede
+  - af_jessica
+  - af_kore
+  - af_river
+  - am_fenrir
+  - am_santa
+  - bf_isabella
+
+# Piper - M = 2 (voice, speaker) pairs, the same "voice:speaker" spelling as
+# the exclusion tables in train/corpus/piper.py. Both are audited
+# single-speaker models (speaker None: one British man, one American man) from
+# the English set select_piper_voices serves, and neither appears in its
+# mispronouncing/unaudited tables for hey_seeree. Rendered 2026-09-22 with
+# the tts-service Piper engine on 8898 (generate_positives.py --voice-holdout
+# --tts piper) into the same labelled directory as the Kokoro clips -
+# distinct voice_speaker filename tags keep the two halves from colliding;
+# the enforcement below still applies and will fail loudly if this
+# instance's catalog has moved.
+piper:
+  - en_GB-alan-medium
+  - en_US-lessac-medium

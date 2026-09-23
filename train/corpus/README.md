@@ -4,16 +4,17 @@ Everything here operates on 16 kHz mono WAVs and knows nothing about how those c
 later become features. That is the seam between openWakeWord (melspectrogram →
 embedding model → 96-dim embeddings, 2000 ms window) and microWakeWord (40 features
 per 10 ms into a streaming MixConv net, 1500 ms clip): shared up to a directory of
-WAVs, separate after it. See `../ARCHITECTURE.md`.
+WAVs, separate after it. The TTS half speaks the protocol in `tts-service/` - the
+`__init__` puts that package on the path and the generators program against the
+`Engine` interface, so no engine class is named anywhere in this directory.
 
 | module | what it holds |
 |---|---|
 | `augment.py` | silence trimming, and the child-range pitch/formant copies |
-| `kokoro.py` | the Kokoro TTS client (server pool, voice probe, single/timed/batched render), moved verbatim out of `train/oww/train.py` so both trainers can use it; the run-on generator stays in the oWW trainer until mWW has run-on positives |
-| `kokoro_mlx.py` | the in-process `mlx://` backend for the Kokoro client |
+| `kokoro.py` | the Kokoro corpus client over the TTS protocol (server pool, voice probe, single/timed/batched render), moved verbatim out of `train/oww/train.py` so both trainers can use it; it speaks `tcp://` engines only (the MLX one on a Mac, the Docker one on the box); the run-on generator stays in the oWW trainer until mWW has run-on positives |
 | `negatives.py` | the negative wordlist, and the Kokoro mispronunciation list |
 | `real.py` | real recordings into a corpus, weighted by repetition |
-| `piper.py` | Piper generation over Wyoming, plus Piper voice metadata |
+| `piper.py` | Piper generation over the TTS protocol, plus the Piper voice metadata (exclusion tables, sex map) |
 | `positives.py` | the plain-positive sentence templates and their speed grid, shared by both engines |
 
 These were moved out of `train/oww/train.py` without behaviour change — sixteen tuning
@@ -34,22 +35,17 @@ is wrong, while `af_v0sky` is 16% below median and is fine.
 
 ### Running it
 
-`tools/audit_voices.py` needs only numpy, scipy and requests — it is a network client, and
-all the work happens on the TTS and ASR services. **It does not need the CUDA trainer
-image**, so run it anywhere, including a laptop:
+`tools/audit_voices.py` needs only numpy, scipy and the protocol client (it pulls
+`tts_protocol` from the repo, no venv needed) — it is a network client, and all the
+work happens on the TTS and ASR services. The TTS side speaks the repo protocol, so
+point it at the same server the corpus runs against; the ASR side is a plain
+Wyoming service. **It does not need the CUDA trainer image**, so run it anywhere,
+including a laptop:
 
 ```bash
-.venv-eval/bin/python -m tools.audit_voices --wake-word "hey seeree" --tts piper \
-    --piper <piper-host>:10200 --asr <asr-host>:10300 \
-    --out-dir voice_audit_piper
-```
-
-or with no venv at all:
-
-```bash
-uv run --with numpy --with scipy --with requests \
-    audit_voices.py --wake-word "hey seeree" --tts piper \
-    --piper <piper-host>:10200 --asr <asr-host>:10300 --out-dir voice_audit_piper
+uv run --with numpy --with scipy \
+    audit_voices.py --wake-word "hey seeree" --tts tcp://<tts-host>:8899 \
+    --asr <asr-host>:10300 --out-dir voice_audit_piper
 ```
 
 Kokoro is the same command with `--tts kokoro --kokoro-url http://<host>:8880`.

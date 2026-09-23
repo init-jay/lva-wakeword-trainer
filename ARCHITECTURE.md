@@ -75,11 +75,10 @@ far.
 │   ├── provenance.py             run tag: the commit AND the audio it trained on
 │   ├── corpus/                   shared by both trainers
 │   │   ├── augment.py
-│   │   ├── kokoro.py             the Kokoro TTS client (both trainers)
-│   │   ├── kokoro_mlx.py         the in-process mlx:// backend for it
+│   │   ├── kokoro.py             protocol client + generator (both trainers use it)
 │   │   ├── negatives.py
 │   │   ├── positives.py
-│   │   ├── piper.py
+│   │   ├── piper.py              Piper voice policy + protocol generator
 │   │   └── real.py
 │   ├── oww/
 │   │   ├── train.py
@@ -90,6 +89,11 @@ far.
 │       ├── config.py
 │       ├── train.py
 │       └── manifest.py
+├── tts-service/                  the TTS protocol and the engines that speak it:
+│                                 tts_protocol/ (the client + shared audio code, what
+│                                 trainers and eval depend on) and engines/ (one uv
+│                                 project per engine - kokoro_mlx and piper, each its
+│                                 own venv and protocol port; README.md there)
 ├── eval/                         3 · eval model - self-contained: everything the step needs
 │   ├── docker-compose.yml        its own compose project, out of the base training file
 │   ├── Dockerfile                CPU only, native on Apple Silicon
@@ -119,24 +123,34 @@ far.
 │   ├── Dockerfile.mww.cuda       trains on an NVIDIA GPU, linux/amd64
 │   ├── Dockerfile.oww.cpu        same trainer, no GPU - multi-arch, native on arm64
 │   ├── Dockerfile.mww.cpu        same, on python:3.12-slim - the TF image is amd64-only
-│   ├── Dockerfile.piper          CUDA base, but runs CPU-only by choice
-│   ├── Dockerfile.kokoro         CPU by default; CUDA via docker-compose.cuda.yml
+│   ├── Dockerfile.piper          piper-tts in-process (protocol 8898) in place of the
+│   │                             Wyoming image the trainers no longer speak directly
+│   ├── Dockerfile.kokoro         Kokoro-FastAPI + a protocol wrapper (8899), one container
+│   ├── tts_engines/              the kokoro wrapper's source: kokoro_http_engine
+│   │                             (the piper image bakes in tts-service/engines/piper)
 │   └── requirements.txt          shared by BOTH oww trainers, cuda and cpu
 ├── scripts/
 │   ├── download-external-data.sh  -> data/external/  [all|oww|mww]
 │   ├── run-oww-training.sh        2 · one command, corpus built by the run
 │   ├── run-mww-training.sh        2 · four stages, corpus built separately
-│   ├── start-kokoro-host.sh       TTS outside Docker - 3.7x the container on arm64
-│   ├── start-piper-host.sh        same, for Piper - 2.4x the container on arm64
+│   ├── start-kokoro-host.sh       Kokoro-FastAPI outside Docker - raw-API debugging
+│   │                              only now (audit/bench speak the protocol);
+│   │                              the Mac's training engine is the mlx one (tts-service)
+│   ├── start-piper-host.sh        Wyoming host server - raw-protocol debugging only
+│   │                              now; the Mac's training piper is in-process on 8898
 │   ├── setup-applesilicon-trainer.sh   what Dockerfile.oww.cpu does, on the host
 │   ├── run-oww-training-applesilicon.sh  2 · same trainer, no container
 │   ├── setup-mww-applesilicon-trainer.sh what Dockerfile.mww.cpu does, on the host
 │   └── run-mww-training-applesilicon.sh  2 · four stages, no container
 ├── .dockerignore                 keeps data/ (~43 GB) out of every build context
 ├── docker-compose.yml            no GPU required; the eval step has its own file in eval/
-├── docker-compose.cuda.yml       overlay: NVIDIA devices - kokoro, trainers, piper
+├── docker-compose.cuda.yml       overlay: NVIDIA devices - kokoro, trainers
 ├── docker-compose.cpu.yml        overlay: CPU trainers - Apple Silicon, or any non-NVIDIA box
 ├── SPEED.md                      measured timings - the evidence for the README's route calls
 ├── train-applesilicon/           host uv env for the oww trainer - SPEED.md
 └── train-mww-applesilicon/       host uv env for the mww trainer - SPEED.md
 ```
+
+The host envs are Python 3.12 uv venvs (`train-applesilicon/`,
+`train-mww-applesilicon/`) and eval runs under its own pinned env; `cpython-311`/`314`
+bytecode in any `__pycache__/` is from one-off interpreters and is not canonical.

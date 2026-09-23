@@ -19,6 +19,13 @@ new = '''\
         sys.path.insert(0, os.path.abspath(config["piper_sample_generator_path"]))
         from generate_samples import generate_samples'''
 
+if new in content:
+    print("Already patched:", path)
+    sys.exit(0)
+
+# Check the applied state BEFORE the anchor: once applied, `old` is indented one
+# level deeper and no longer matches, so a bare anchor check misreports an
+# applied patch as "target not found" on every setup re-run.
 if old not in content:
     print("WARNING: patch target not found in", path)
     sys.exit(0)

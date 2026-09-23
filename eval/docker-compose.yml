@@ -29,6 +29,10 @@ services:
       # train/ for `python -m train.mww.manifest`, which cuts the ESPHome manifest
       # from a measured cutoff - an evaluation decision, so it belongs in this image.
       - ../train:/app/train:ro
+      # The TTS protocol client, for the corpus generators' --tts-url. The eval
+      # scripts add it to sys.path themselves (their REPO_ROOT is /app here) -
+      # the engines are NOT in this image, same as the trainers: pure client.
+      - ../tts-service:/app/tts-service:ro
       # The per-wake-word phrase lists the eval corpus is generated from. Read-only:
       # generate_negatives.py renders them, it does not edit them - they are written
       # by hand or by the `write-wordlists` skill, and a corpus that silently stopped
@@ -42,10 +46,11 @@ services:
       - ../data/corpus/eval:/app/data/corpus/eval
     extra_hosts:
       # This is its own compose project, so it cannot resolve the base file's
-      # `kokoro` service by name - different project, different network. TTS is
-      # reached through kokoro's published port instead, on whatever machine the
-      # eval runs on:
-      #     --url http://host.docker.internal:8880/v1/audio/speech
+      # `kokoro`/`piper` services by name - different project, different network.
+      # TTS is reached through their PUBLISHED protocol ports instead, on whatever
+      # machine the eval runs on:
+      #     --url tcp://host.docker.internal:8899    (Docker box, kokoro service)
+      #     --url tcp://host.docker.internal:8900    (Mac, the in-process mlx engine)
       # On Docker Desktop that name is defined by default; host-gateway is what
       # defines it on Linux.
       - "host.docker.internal:host-gateway"

@@ -51,12 +51,15 @@ new = '''        # macOS spawns rather than forks, and neither the label-transfo
                                               batch_size=None, num_workers=n_cpus,
                                               prefetch_factor=16, **_dl_kwargs)'''
 
-if old not in content:
-    print("WARNING: patch target not found in", path)
-    sys.exit(0)
-
+# Check the applied state BEFORE the anchor: application replaces the DataLoader
+# line itself, so `old` is gone once patched and a bare anchor check misreports
+# an applied patch as "target not found" on every setup re-run.
 if "multiprocessing_context" in content:
     print("Already patched:", path)
+    sys.exit(0)
+
+if old not in content:
+    print("WARNING: patch target not found in", path)
     sys.exit(0)
 
 content = content.replace(old, new)

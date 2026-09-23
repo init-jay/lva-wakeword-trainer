@@ -41,7 +41,7 @@ if [[ ! "$WAKE_WORD" =~ ^[A-Za-z][A-Za-z\'â€™-]*([[:space:]]+[A-Za-z][A-Za-z\'â€
         echo >&2
         echo "       It contains '='. Environment assignments must come BEFORE the" >&2
         echo "       script, and a pasted line continuation often loses them:" >&2
-        echo "         export KOKORO_EXTERNAL=1 KOKORO_URL=http://...:8882" >&2
+        echo "         export KOKORO_EXTERNAL=1 KOKORO_URL=tcp://<box>:8899" >&2
         echo "         $0 \"hey seeree\"" >&2
     fi
     exit 2
@@ -57,7 +57,8 @@ SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
 MODEL="output/${SAFE_NAME}/oww/${SAFE_NAME}.onnx"
 CORPUS="data/corpus/${SAFE_NAME}/oww"
 STAMP="$(date +%Y%m%d-%H%M%S)"
-LOG="training-${SAFE_NAME}-${STAMP}.log"
+mkdir -p logs
+LOG="logs/training-${SAFE_NAME}-${STAMP}.log"
 
 # Record the current model so a stale one cannot be mistaken for this run's output.
 BEFORE_SUM=""
@@ -127,9 +128,12 @@ elif [[ -n "${KOKORO_EXTERNAL:-}" ]]; then
     # KOKORO_URL exactly as given.
     #
     # THE CASE THIS EXISTS FOR IS METAL. Docker Desktop passes no Metal device
-    # through, so an MPS Kokoro has to be a HOST process - and then `docker compose
-    # up -d kokoro kokoro2` cannot even start, because the host process already holds
-    # 8880. Measured on an M1 Max, same Kokoro-FastAPI v0.8.1 install throughout,
+    # through, so a Metal Kokoro has to be a HOST process. On a Mac that host
+    # engine is the in-process mlx one on 8900, and it takes precedence: the
+    # Mac does not run docker kokoro at all - which is also why no compose
+    # service publishes 8900 (docker-compose.yml).
+    #
+    # Measured on an M1 Max, same Kokoro-FastAPI v0.8.1 install throughout,
     # only DEVICE_TYPE changed:
     #
     #     host, DEVICE_TYPE=mps    8.02 clips/s   120 ms median
@@ -147,9 +151,12 @@ elif [[ -n "${KOKORO_EXTERNAL:-}" ]]; then
     # measured SLOWER, because batching amortises latency and not the ~640 KB a
     # batch of 16 sends back.
     #
-    # From inside the compose network the host is `host.docker.internal`:
+    # From inside the compose network the host is `host.docker.internal`.
+    # KOKORO_URL is a protocol spec (tcp://host:port), not an HTTP URL - since the
+    # tts-service split every server, local or external, speaks the protocol - so a
+    # host engine (the in-process mlx one on a Mac, say) is:
     #
-    #     KOKORO_EXTERNAL=1 KOKORO_URL=http://host.docker.internal:8880 \
+    #     KOKORO_EXTERNAL=1 KOKORO_URL=tcp://host.docker.internal:8900 \
     #         ./scripts/run-oww-training.sh "hey seeree"
     if [[ -z "${KOKORO_URL:-}" ]]; then
         echo "ERROR: KOKORO_EXTERNAL=1 but KOKORO_URL is unset." >&2
@@ -159,16 +166,19 @@ elif [[ -n "${KOKORO_EXTERNAL:-}" ]]; then
     echo "=== $(date '+%H:%M:%S')  KOKORO_EXTERNAL=1 - using $KOKORO_URL, starting nothing"
 
     # Probe from INSIDE the network, not the host. The whole point of this path is
-    # that the server is somewhere compose did not put it, so a host-side curl can
+    # that the server is somewhere compose did not put it, so a host-side check can
     # succeed against a URL the trainer cannot resolve - host.docker.internal being
-    # exactly that case. Fail here rather than after the voice probe.
+    # exactly that case. The probe speaks the protocol itself (a `voices` op):
+    # a server that answers that with the right capabilities is the only kind
+    # the corpus generator can use.
     docker compose run --rm --no-deps --entrypoint python3 oww-trainer -c "
-import sys, urllib.request
-for url in '${KOKORO_URL}'.split(','):
-    try:
-        urllib.request.urlopen(url.rstrip('/') + '/v1/audio/voices', timeout=10).read(1)
-    except Exception as e:
-        sys.exit(f'cannot reach {url} from inside the compose network: {e}')
+import sys
+sys.path.insert(0, '/app/tts-service/tts_protocol')
+from tts_protocol import TtsClient
+for spec in '${KOKORO_URL}'.split(','):
+    c = TtsClient(spec)
+    voices = c.voices()
+    print(f'  {spec}: engine={getattr(c, \"server_engine\", None)} {len(voices)} voices')
 print('  reachable from the trainer')
 "
 else
@@ -177,37 +187,39 @@ else
 
     # Wait for readiness rather than assuming: the GPU image spends a while loading
     # voices, and train.py's probe would otherwise fail on a container that is up but
-    # not yet serving.
-    for name in kokoro:8880 kokoro2:8881; do
+    # not yet serving. The check is a TCP connect to the PROTOCOL port, not the raw
+    # API port: the wrapper's serve() only starts listening after its own available()
+    # check passed, so a listener IS the readiness signal.
+    for name in kokoro:8899 kokoro2:8901; do
         port="${name##*:}"
         for _ in $(seq 1 60); do
-            curl -sf "http://localhost:${port}/v1/audio/voices" >/dev/null 2>&1 && break
+            (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null && { exec 3>&-; break; }
             sleep 2
         done
     done
     echo "=== $(date '+%H:%M:%S')  Kokoro ready"
 fi
 
-# WAIT FROM INSIDE THE COMPOSE NETWORK, NOT FROM THE HOST. Piper speaks Wyoming over
-# TCP rather than HTTP, so readiness is a connect check - and a host-side connect to
-# localhost:10200 is a FALSE POSITIVE. Docker's port proxy accepts as soon as the
-# container starts, before wyoming-piper has loaded its default voice and bound the
-# port inside it. That check passed on its first attempt, printed "Piper ready" in
-# the same second as "starting Piper", and the corpus container then died on
-# "Connection refused" dialling piper:10200.
-#
-# The Kokoro loop above is unaffected: it issues a real HTTP request, which the proxy
-# cannot answer on the app's behalf.
+# WAIT FROM INSIDE THE COMPOSE NETWORK, NOT FROM THE HOST. The piper image now
+# runs the same in-process engine as the Mac - the protocol server IS the
+# container's main process - so readiness is again a plain connect check, but
+# it must still be done from inside the network. A host-side connect to the
+# published port is a FALSE POSITIVE: Docker's port proxy accepts as soon as
+# the container starts, before the engine has bound the port inside it. That
+# was the old failure mode (the Wyoming server bound late, the host check
+# passed instantly, and the corpus container died on "Connection refused"),
+# and the in-network dialling of piper:8898 is the same check the trainer's
+# own client performs - if it connects, the render will too.
 if [[ -n "$WANTS_PIPER" ]]; then
     docker compose run --rm --no-deps --entrypoint python3 oww-trainer -c "
 import socket, sys, time
 for _ in range(90):
     try:
-        socket.create_connection(('piper', 10200), 2).close()
+        socket.create_connection(('piper', 8898), 2).close()
         sys.exit(0)
     except OSError:
         time.sleep(2)
-sys.exit('piper did not start listening on piper:10200 within 180s')
+sys.exit('piper did not start listening on piper:8898 within 180s')
 "
     echo "=== $(date '+%H:%M:%S')  Piper ready"
 fi
@@ -265,7 +277,7 @@ fi
 # `script` as a single string.
 CMD="docker compose run --rm"
 # -e OVERRIDES THE SERVICE'S OWN KOKORO_URL, and without it this whole path is inert.
-# docker-compose.yml sets KOKORO_URL=http://kokoro:8880,http://kokoro2:8880 in the
+# docker-compose.yml sets KOKORO_URL=tcp://kokoro:8899,tcp://kokoro2:8899 in the
 # oww-trainer service, and a value in `environment:` beats the one inherited from the
 # shell - so exporting KOKORO_URL alone would be silently ignored and the run would
 # dial the containers KOKORO_EXTERNAL=1 deliberately did not start.
@@ -328,9 +340,16 @@ if [[ $STATUS -ne 0 ]]; then
 fi
 
 # Name the output by the code AND the audio that produced it - see
-# train/provenance.py. Computed HERE, after training, on purpose: the synthetic
-# corpus is built by the run itself, so hashing it beforehand would name the model
-# after the previous run's audio.TAG="$(python3 -m train.provenance --wake-word "$WAKE_WORD" --tag --fallback "$STAMP")"
+# train/provenance.py. train.py files the tag itself - corpus half from the
+# manifest written this run, config half from the resolved config - so the
+# archive and the <tag>.config.json beside it are named by one number. Reading it
+# back here rather than recomputing it in the shell is what keeps the two from
+# drifting apart; the fallback only runs if the run died before filing it.
+TAG="$(cat "output/${SAFE_NAME}/oww/.last_run_tag" 2>/dev/null)"
+if [[ -z "$TAG" ]]; then
+    echo "    NOTE: no run tag filed by train.py - computing it here (corpus half only)"
+    TAG="$(python3 -m train.provenance --wake-word "$WAKE_WORD" --target oww --tag --fallback "$STAMP")"
+fi
 DIRTY=""
 git diff --quiet 2>/dev/null || DIRTY="-dirty"
 TAGGED="output/${SAFE_NAME}/oww/${SAFE_NAME}_${TAG}.onnx"

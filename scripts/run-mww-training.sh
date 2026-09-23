@@ -60,7 +60,8 @@ cd "$(dirname "$0")/.."
 # tr rather than ${x,,} so this does not need bash 4 (macOS ships 3.2).
 SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
 STAMP="$(date +%Y%m%d-%H%M%S)"
-LOG="training-mww-${SAFE_NAME}-${STAMP}.log"
+mkdir -p logs
+LOG="logs/training-mww-${SAFE_NAME}-${STAMP}.log"
 CORPUS="data/corpus/${SAFE_NAME}/mww"
 OUT_DIR="output/${SAFE_NAME}/mww"
 MAX_FAPH="${MAX_FAPH:-0.2}"
@@ -111,44 +112,52 @@ run "ambient sets: ${AMBIENT[*]}"
 # --- 1. corpus -------------------------------------------------------------------
 
 if [[ "${SKIP_CORPUS:-}" == "1" ]]; then
-    run "SKIP_CORPUS=1 - reusing $CORPUS"
+    # --skip validates the corpus.json manifest against the shaping this stage
+    # would request and exits with a diff on a mismatch - SKIP_CORPUS used to be
+    # a blind reuse, and a corpus built with different depth than the one a
+    # resumed run thinks it asked for is the measurement that goes wrong silently.
+    # The same --kokoro-fraction 0 the build branch passes: a manifest written by
+    # a mixed run has to fail this check, not pass it by silence.
+    run "verifying existing corpus ($CORPUS)"
+    docker compose run --rm mww-trainer python -m train.mww.corpus \
+        --wake-word "$WAKE_WORD" --piper-url tcp://piper:8898 --kokoro-fraction 0 \
+        --skip 2>&1 | tee -a "$LOG"
 else
     run "starting Piper"
     docker compose up -d piper
 
-    # WAIT FROM INSIDE THE COMPOSE NETWORK, NOT FROM THE HOST. Piper speaks Wyoming
-    # over TCP, so readiness is a connect check - and a host-side connect to
-    # localhost:10200 is a FALSE POSITIVE: Docker's port proxy accepts as soon as the
-    # container starts, before wyoming-piper has bound the port inside it. That check
-    # passed on its first attempt, printed "Piper ready" in the same second as
-    # "starting Piper", and the corpus container then died on "Connection refused"
-    # dialling piper:10200. Polling the same DNS name the real command uses is the
-    # only check that means anything.
-    #
-    # (Kokoro's check in run-oww-training.sh is unaffected: it issues a real HTTP
-    # request, which the proxy cannot answer on the app's behalf.)
+    # WAIT FROM INSIDE THE COMPOSE NETWORK, NOT FROM THE HOST. The piper image
+    # now runs the same in-process engine as the Mac - the protocol server IS the
+    # container's main process - so readiness is a plain connect check, but it
+    # must be done from inside the network: a host-side connect to the published
+    # port is a FALSE POSITIVE (Docker's port proxy accepts as soon as the
+    # container starts, before the engine has bound the port inside it). That
+    # was the old failure mode (the Wyoming server bound late, the host check
+    # passed instantly, and the corpus container died on "Connection refused").
+    # Polling the same DNS name the real command uses is the only check that
+    # means anything.
     docker compose run --rm --no-deps --entrypoint python3 mww-trainer -c "
 import socket, sys, time
 for _ in range(90):
     try:
-        socket.create_connection(('piper', 10200), 2).close()
+        socket.create_connection(('piper', 8898), 2).close()
         sys.exit(0)
     except OSError:
         time.sleep(2)
-sys.exit('piper did not start listening on piper:10200 within 180s')
+sys.exit('piper did not start listening on piper:8898 within 180s')
 "
     run "Piper ready"
 
     run "building corpus (log: $LOG)"
     : > "$LOG"
-    # --kokoro-fraction 0 is EXPLICIT, not the module default, on purpose: the
-    # compose mww-trainer service has no KOKORO_URL and no kokoro service dependency
-    # (unlike oww-trainer), so the moment someone wires those in, this line is where
-    # the mix should change - and a silent default change here would make container
-    # corpora drift from each other without a visible diff. The Apple Silicon route
-    # (run-mww-training-applesilicon.sh) already runs 0.3.
+    # --kokoro-fraction 0 is EXPLICIT, not the module default, on purpose: this
+    # script never starts the kokoro services, so a container corpus here is
+    # all-Piper by construction, and a silent default change (the module default
+    # is 0.3, the same as the Apple Silicon route) would make container corpora
+    # drift from each other without a visible diff - and would die at runtime
+    # dialling Kokoro services nobody started.
     docker compose run --rm mww-trainer python -m train.mww.corpus \
-        --wake-word "$WAKE_WORD" --piper-url piper:10200 --kokoro-fraction 0 2>&1 | tee -a "$LOG"
+        --wake-word "$WAKE_WORD" --piper-url tcp://piper:8898 --kokoro-fraction 0 2>&1 | tee -a "$LOG"
 fi
 
 # --- 2. features -----------------------------------------------------------------
@@ -175,7 +184,15 @@ fi
 # directory, so the tag has to be decided before the run rather than after it. That
 # is the opposite of the openWakeWord side, where the corpus is built by the training
 # command itself and the tag is therefore computed at the end.
-TAG="$(python3 -m train.provenance --wake-word "$WAKE_WORD" --tag --fallback "$STAMP")"
+#
+# --target mww scopes the corpus half to THIS trainer's corpus: the legacy whole-
+# tree hash also read the openWakeWord corpus and stray backup directories (13.9 s
+# per tag, measured) and moved when audio this run never touched moved. The config
+# half (-h) is what train.mww.train adds for direct invocations - the sweep runner
+# path - and it is what lets two hyperparameter points at the same corpus coexist;
+# through this script a second config at the same corpus still collides loudly at
+# the existing-directory check, which is fine for a manual run.
+TAG="$(python3 -m train.provenance --wake-word "$WAKE_WORD" --target mww --tag --fallback "$STAMP")"
 DIRTY=""
 git diff --quiet 2>/dev/null || DIRTY="-dirty"
 run "run tag: $TAG"

@@ -5,9 +5,13 @@ description: Score trained wake-word models against held-out recordings and deci
 
 # Evaluating trained wake-word models
 
-Step 3. Runs in the eval container built from `eval/` — its own compose project,
-carrying both inference stacks and neither trainer, because scoring a model and
-training one have incompatible pins.
+Step 3. On a Mac it runs in the host uv env - `eval/.venv`, set up by
+`./scripts/setup-eval-host.sh` - no Docker (improvement.md P2.4); everywhere else,
+in the eval container built from `eval/` - its own compose project. Both carry
+both inference stacks and neither trainer, because scoring a model and training
+one have incompatible pins - and both pin the SAME deployment-runtime wheels
+(`eval/pyproject.toml` and `eval/Dockerfile` must stay equal), so a number from
+one checks against a number from the other.
 
 ## You can run this one yourself
 
@@ -17,8 +21,19 @@ harness prints has a way of being read wrongly, and the sections below are those
 
 ## Preflight
 
-The whole step is self-contained in `eval/` — compose file, image and sources. From
-there:
+The whole step is self-contained in `eval/` — the uv project and the Python
+sources, or (container) a compose file and an image over the same sources.
+
+Host, the Mac default, from the repo root:
+
+```bash
+./scripts/setup-eval-host.sh          # once per machine; idempotent
+ls output/*/oww output/*/mww          # models to score
+ls data/recordings/holdout/           # what to score them against
+ls data/corpus/eval/negatives_tts/    # the adversarial corpus
+```
+
+The same checks, for the container:
 
 ```bash
 cd eval
@@ -29,26 +44,49 @@ ls ../data/corpus/eval/negatives_tts/    # the adversarial corpus
 ```
 
 If the negatives are missing, `eval_model.py` and `compare_models.py` both exit before
-scoring anything — 100 utterances across 6 categories, so it is not a long run.
+scoring anything — 366 clips across 6 categories for this corpus, so it is not a long run.
 
-Generation is self-contained — the `kokoro` service defaults to the CPU image, which
-publishes linux/arm64, so it runs natively on the same Mac as the eval image. Measured
-on an M-series Mac: ready in ~5 s, ~1 s per clip, the whole 100-clip corpus in under
-two minutes.
+Generation is self-contained — it speaks the TTS protocol to whichever Kokoro
+engine you point it at. On a Mac that is the mlx engine (a uv project, not
+Docker — see `tts-service/README.md`); on the training box it is the `kokoro`
+compose service (CPU image, or the CUDA overlay).
 
-The eval project cannot reach `kokoro` by service name — different project, different
-network — so it goes through kokoro's published port via `host.docker.internal`
-(`eval/docker-compose.yml` maps the name to `host-gateway`, which Linux needs):
+Host, the mlx engine is a process on this same machine, so its loopback port is
+the URL:
+
+```bash
+# the mlx engine, in another terminal on the Mac
+uv run --project tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900
+
+# from the repo root, plain-path form
+eval/.venv/bin/python eval/src/generate_negatives.py --url tcp://127.0.0.1:8900
+eval/.venv/bin/python eval/src/generate_positives.py \
+    --url tcp://127.0.0.1:8900 --wake-word "hey seeree"
+```
+
+In the container, the eval project cannot reach the Mac's mlx engine by a name
+it owns — the engine is a HOST process — so it goes through the host's
+published port via `host.docker.internal` (`eval/docker-compose.yml` maps that
+name to `host-gateway`, which Linux needs):
+
+```bash
+# from eval/
+docker compose run --rm eval python -m eval.generate_negatives \
+    --url tcp://host.docker.internal:8900
+docker compose run --rm eval python -m eval.generate_positives \
+    --url tcp://host.docker.internal:8900 --wake-word "hey seeree"
+```
+
+On the training box, `docker compose up -d kokoro` instead (with the GPU
+overlay for the faster image — same command otherwise, and the two render the
+same voices, so the corpora are interchangeable), and the URL is its compose
+name:
 
 ```bash
 # from the repo root
 docker compose up -d kokoro
-
 # from eval/
-docker compose run --rm eval python -m eval.generate_negatives \
-    --url http://host.docker.internal:8880/v1/audio/speech
-cd ..
-docker compose stop kokoro
+docker compose run --rm eval python -m eval.generate_negatives --url tcp://kokoro:8899
 ```
 
 If the image pull hangs at "Pulling fs layer" with no bytes moving, it is the
@@ -75,25 +113,39 @@ retargeting for a different one.
 
 ## The commands
 
-All from `eval/`. Model paths are relative to the container's `/app` workdir, which
-is the mounted repo root:
+Two invocation forms, and which is which is load-bearing. Inside the image,
+`eval/src/` is mounted AS the `eval` package, so the tools run as modules —
+`python -m eval.X`, all from `eval/`, with model paths relative to the
+container's `/app` workdir, which is the mounted repo root. On the host there
+is no such package (`eval/` is a namespace directory, `eval/src/` its sources),
+so the invocation is the plain-path form, from the repo root:
 
 ```bash
+# HOST (the Mac default) - plain-path form, from the repo root
+
 # the four gates, one model
-docker compose run --rm eval python -m eval.eval_model \
+eval/.venv/bin/python eval/src/eval_model.py \
     --model output/hey_seeree/oww/hey_seeree_705c23b.onnx
 
 # is the new run better than the last one
-docker compose run --rm eval python -m eval.compare_models \
+eval/.venv/bin/python eval/src/compare_models.py \
     --models output/hey_seeree/oww/<new>.onnx output/hey_seeree/oww/<previous-best>.onnx
 
 # openWakeWord candidate against the microWakeWord build
-docker compose run --rm eval python -m eval.compare_models --models \
+eval/.venv/bin/python eval/src/compare_models.py --models \
     output/hey_seeree/oww/hey_seeree_705c23b.onnx \
     output/hey_seeree/mww/hey_seeree_705c23b.json
 
 # choosing a deployment operating point for one model
-docker compose run --rm eval python -m eval.compare_models --models M --sweep
+eval/.venv/bin/python eval/src/compare_models.py --models M --sweep
+
+# CONTAINER - module form, from eval/
+# the four gates, one model
+docker compose run --rm eval python -m eval.eval_model \
+    --model output/hey_seeree/oww/hey_seeree_705c23b.onnx
+
+# the other three commands, with `docker compose run --rm eval python -m
+# eval.compare_models` in place of `eval/.venv/bin/python eval/src/compare_models.py`
 ```
 
 **Pass the microWakeWord `.json`, not its `.tflite`.** `MicroWakeWord.from_config()`
@@ -215,6 +267,35 @@ sets, not on this repo's adversarial negatives, so `extend` false accepts are no
 at all. Confirm any cutoff with `compare_models.py` against the holdout before
 deploying it.
 
+## Check the ledger before comparing two models
+
+Before spending an eval — and before making any "this one is better" claim — look at
+what has already been measured. Every completed run is appended to
+`output/<wake_word>/runs.jsonl` (the sweep runner `scripts/sweep.py` files each grid
+point there; a manual run files a line the same way), and
+`train-mww-applesilicon/.venv/bin/python train/ledger.py --wake-word "X"` (any python
+with PyYAML; the system `python3` works too) prints each `(target, setting)` group's
+false-accept and detection rates as mean [min–max] across repeats, grouped by corpus
+ID. If both models you are about to compare are already in the ledger, the answer is
+in the file — read it instead of re-measuring. And remember what the min–max column
+is: two runs of an *identical* config measured 77% and 67%, so the spread on a line is
+the resolution of the measurement, not noise to average away. A candidate whose mean
+lands inside the spread of an earlier config is inside the noise floor, and
+"replacing the candidate in `deploy/` requires a measured win" holds across sessions,
+not just within one.
+
+The corpus-ID column is the independent variable, read before anything else: two runs
+are comparable at all only if they share one (same corpus half of the tag). Different
+corpus ID means different audio, and a "win" between the two can only have been caused
+by the corpus, not the setting — exactly the uncontrolled variable the gates exist to
+keep out of a comparison.
+
+And never edit the file. It is append-only history: deleting or rewriting the
+"not better" result is the same failure this whole section exists to stop, just with a
+longer shelf life. A record with a null eval block means the eval did not run — it is
+not a failed measurement and not a bad result, and it is deliberately distinguishable
+from both.
+
 ## When a model is not better
 
 The pipeline is the loop, and the rule is **change ONE thing**. Two runs of an
@@ -229,11 +310,30 @@ five points has told you nothing. Say which single variable moved, and re-run.
   runs cannot be flattened. The commit-tagged files sitting directly in
   `output/<wake_word>/mww/` are a hand-made collection step; there is no script for
   it yet (`run-oww-training.sh` does the equivalent for the openWakeWord `.onnx` only).
-- `check_model_alignment.py` on a `.tflite` needs `ai-edge-litert`, which the eval
-  image does not carry. Use the `.onnx`, or the trainer image.
+- `check_model_alignment.py` on a `.tflite` needs `ai-edge-litert`, which neither
+  the eval image nor the host env carries. Use the `.onnx`, or the trainer image.
 - The comments refer to "the tuning log" and "tuning run N" — seventeen runs of this
   pipeline whose write-up is not published with the repo. The gate values above are
   the part that matters; treat a run number as provenance for a measurement, not as
   something you can go and read.
 - `pymicro_wakeword/microwakeword.py:158` has an upstream `print(config)`, so every
   mWW run dumps the manifest dict to stdout. Not this repo's bug; ignore the line.
+
+## The voice-holdout ranking set (improvement.md P1.2)
+
+A third corpus at `data/corpus/eval/voice_holdout_tts/`, rendered by
+`make render-voice-holdout` (Kokoro on 8900): positives from the voices
+`wordlists/voice_holdout.yaml` **holds out of every corpus build** (oww and
+mww trainers enforce the exclusion; the live TTS catalog is the source of
+truth, so a stale list is an error, not a skip), at speeds inside the
+0.7-1.3 training range. The held-out axis is therefore the voice alone:
+it is a low-variance *ranking* signal for sweep points — a real n per
+point — not a speaker-generalisation gate. A synthetic voice is not a
+person, and the four gates above stay on the real held-out recordings in
+`data/recordings/holdout/`, which the top two or three of the ranked
+points go to. The directory is labelled by its own `set.json`; score it
+with the separate block, never merged into the gates:
+
+```bash
+eval/.venv/bin/python eval/src/eval_model.py --model M --voice-holdout-set data/corpus/eval/voice_holdout_tts
+```

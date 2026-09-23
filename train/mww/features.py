@@ -39,9 +39,12 @@ training never sees its own validation clips.
 """
 
 import argparse
+import random
 import shutil
 import sys
 from pathlib import Path
+
+import numpy as np
 
 # The REPO ROOT. This package sits at train/mww/ since the reorg, so the root is
 # two levels up, not one - the old value now points at train/.
@@ -120,11 +123,33 @@ def main():
     p.add_argument("--data-dir", default="data/external")
     p.add_argument("--split-seed", type=int, default=10)
     p.add_argument("--split-count", type=float, default=0.1)
+    p.add_argument("--seed", type=int, default=0,
+                   help="seed the augmentation draws (RIR/background choice, "
+                        "jitter) for the spectrogram pass (default: %(default)s = "
+                        "unseeded). The train/validation/test partition is already "
+                        "fixed by --split-seed; this covers the augmentation, which "
+                        "was the one unseeded draw between the corpus and the model.")
     p.add_argument("--clean", action="store_true",
                    help="rebuild features that already exist. Required after "
                         "regenerating the corpus - otherwise the old spectrograms "
                         "are kept and silently trained on.")
     args = p.parse_args()
+
+    if args.seed:
+        # The augmentation (microwakeword's Augmentation) draws RIR, background
+        # and jitter from the numpy global RNG; seeding here makes a same-seed,
+        # same-corpus features pass draw the same augmentation. The TF global seed
+        # is set too, guarded: this stage is numpy-only today, but the venv carries
+        # TensorFlow and a future import that initialises from it must not become
+        # a silent variance source.
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        try:
+            import tensorflow as tf
+            tf.keras.utils.set_random_seed(args.seed)
+        except ImportError:
+            pass
+        print(f"[seed] {args.seed}")
 
     safe = args.wake_word.replace(" ", "_").lower()
     corpus = Path(args.corpus_root) / safe / "mww"

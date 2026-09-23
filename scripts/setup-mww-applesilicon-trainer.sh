@@ -78,6 +78,19 @@ echo "==> syncing $ENV_DIR"
 # source tree, where the directory is a namespace subpackage and imports fine -
 # which is also why the Dockerfile's `pip install -e .` works.
 ( cd "$ENV_DIR" && VIRTUAL_ENV="$ENV_DIR/.venv" uv pip install --no-deps -e "../$CLONE" --quiet )
+# uv's PEP 660 editable is FINDER-based (appended to sys.meta_path). A
+# finder loses to a namespace package: when the caller's cwd is the repo
+# root, the clone ROOT directory is a namespace portion via the cwd path
+# entry, the PathFinder records it and never consults the finder, and
+# `import microwakeword` resolves to the clone root (.__file__ is None) -
+# the preflight `import` passes and the train stage dies with
+# "No module named microwakeword.model_train_eval" (2026-09-22 host smoke
+# run). The Docker image is immune: pip's classic editable writes
+# easy-install.pth, a real sys.path entry, which the PathFinder honours.
+# Repair: also write a path .pth with the clone root. Idempotent - the
+# content is exactly one absolute path.
+SITE="$("$ENV_DIR/.venv/bin/python" -c 'import site; print(site.getsitepackages()[0])')"
+printf '%s\n' "$(cd "$CLONE" && pwd)" > "$SITE/microwakeword-clone.pth"
 
 # --- prove it ----------------------------------------------------------------------
 #
@@ -92,6 +105,12 @@ assert numpy.__version__ >= "2", "mWW needs numpy>=2 - that is why this env is s
 assert datasets.__version__.split(".")[0] == "3", "datasets must stay <4 - 4.x needs torchcodec (Dockerfile.mww.cpu)"
 import pymicro_features          # noqa: F401
 from mmap_ninja.ragged import RaggedMmap   # noqa: F401
+# __file__ is None when the clone root shadows the package as a namespace
+# package from this cwd (the PEP 660-finder case above) - the imports below
+# would still pass for some submodules and fail for others, so assert the
+# resolution, not just the import.
+import microwakeword
+assert microwakeword.__file__, "microwakeword resolved as a namespace package - see the .pth step above"
 from microwakeword.audio.clips import Clips            # noqa: F401
 from microwakeword.audio.spectrograms import SpectrogramGeneration  # noqa: F401
 from microwakeword.audio.augmentation import Augmentation  # noqa: F401
@@ -99,11 +118,18 @@ import microwakeword.model_train_eval  # noqa: F401
 import tensorboard                 # noqa: F401
 import ai_edge_litert              # noqa: F401
 print("  microwakeword + dependencies import OK")
+import sys
+sys.path.insert(0, ".")
+import train.corpus  # noqa: F401  (sys.path bootstrap for tts_protocol)
+from tts_protocol import TtsClient  # noqa: F401
+TtsClient("tcp://127.0.0.1:8898")   # the URL policy the run script relies on
+print("  tts-protocol OK")
 PY
 
 echo
 echo "==> ready. Train with:"
 echo "      ./scripts/run-mww-training-applesilicon.sh \"hey seeree\""
 echo
-echo "    The corpus stage needs a Piper server; start one in another terminal:"
-echo "      ./scripts/start-piper-host.sh"
+echo "    The corpus stage needs the engines running; start them in other terminals:"
+echo "      uv run --project tts-service/engines/piper python -m piper_engine --port 8898"
+echo "      uv run --project tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900   # only for the 30% Kokoro mix"

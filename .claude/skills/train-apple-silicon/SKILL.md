@@ -17,60 +17,68 @@ openWakeWord at the pinned commit, applies the patches in `patches/`, builds
 `train-applesilicon/.venv` (Python 3.12), downloads the spacy model, and
 verifies.
 
-## The TTS services
+## The TTS engines
 
-- **Kokoro, in-process MLX**: `--kokoro-url mlx://` on the run
-  script. No server, no `KOKORO_URL`; the same Kokoro-82M model renders inside
-  the training process, on the GPU, and if any other URL is in the pool it is
-  ignored. Word timestamps are exact (agreed with the server to 3 ms on the
-  same phrase — durations are predicted per phoneme and rendered from them, so
-  run-on cuts come from measurement, not the estimation fallback), which is
-  what the run-on cuts are built on. 
-- **Piper, host** The Wyoming `describe` event returns the **whole** embedded voice catalog
-  (163 entries in the pinned `wyoming-piper` 2.4.3), not just what is
-  downloaded — a fresh install answers a preflight instantly, then downloads
-  each voice on demand (~7 s for the first of each, 0.1 s after). Voices persist
-  in `data/external/piper/voices/` across rebuilds; `--venv-only` rebuilds the
-  venv without touching them.
+The Mac's launch mode is the two **uv projects in `tts-service/engines/`**, each
+its own venv, each a protocol server in one terminal (see `tts-service/README.md`
+for the protocol itself):
+
+- **Kokoro, in-process MLX** (`kokoro_mlx`, port 8900, `uv sync`'d by the setup
+  script): the same Kokoro-82M model renders inside that process, on the GPU.
+  Word timestamps are exact (agreed with the FastAPI service to 3 ms on the same
+  phrase - durations are predicted per phoneme and rendered from them, so run-on
+  cuts come from measurement, not the estimation fallback). The trainer reaches
+  it as `tcp://127.0.0.1:8900` - the run script's `KOKORO_URL` default.
+- **Piper, in-process piper-tts** (`piper`, port 8898): piper-tts 1.7.0 loaded
+  directly - no Wyoming process at all (the old host route was a Wyoming client
+  to a separate server; the in-process engine keeps the identical pins and voice
+  directory, `data/external/piper/voices/`, and the serial one-voice-resident
+  behaviour). The `tts-protocol` client is what the trainer venv carries of this
+  whole stack.
 - **Which TTS a MWW run uses depends on its route and its mix.** MWW's corpus is
   Piper-majority with a 30% Kokoro mix by default on the host route (the mirror
   of OWW's 0.30 Piper fraction; `KOKORO_FRACTION=0` for all-Piper) - and the
   negatives are Piper-only on both routes, so Piper is always needed.
 
+(`scripts/start-kokoro-host.sh` / `start-piper-host.sh` still exist but are for
+raw-API debugging now - `tools/audit_voices.py` and `tools/bench_tts.py` speak the
+protocol, against the same engines the corpus uses - not for training.)
 
 ## Running openWakeWord
 
 
 ```bash
-./scripts/start-piper-host.sh        # only if --piper-fraction > 0
+uv run --project tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900   # terminal 2
+uv run --project tts-service/engines/piper python -m piper_engine --port 8898              # terminal 3, only if --piper-fraction > 0
 
-./scripts/run-oww-training-applesilicon.sh "hey seeree" --kokoro-url mlx:// --piper-fraction 0.3
+./scripts/run-oww-training-applesilicon.sh "hey seeree" --piper-fraction 0.3
 ```
 
-`--kokoro-url mlx://` selects the in-process MLX engine (28 voices, GPU, no
-`KOKORO_URL`). `--skip-corpus` reuses the existing corpus. What the script checks before `train.py` ever starts, and why each
+`KOKORO_URL` defaults to the mlx engine (`tcp://127.0.0.1:8900`); `--skip-corpus`
+reuses the existing corpus. What the script checks before `train.py` ever starts, and why each
 check exists:
 
-- **espeak-ng (mlx path)**: `brew`'s espeak-ng data must be present or the run
-  dies at clip 1 with a `/Users/runner/...` path that mentions neither TTS nor
-  MLX — the script checks for it up front and says `brew install espeak-ng`.
+- **espeak-ng (the mlx engine)**: `brew`'s espeak-ng data must be present or the
+  ENGINE refuses to start with a message that says exactly that - misaki loads
+  it through a wheel that otherwise hardcodes its build path.
 - **Arg validation**: every custom flag must start with `--` and unknowns must
   not collide with `train.py`'s own flags. This has caught real typos,
   including a collapsed line continuation that turned the wake word into
   `"hey seereeKOKORO_EXTERNAL=1"`.
-- **`KOKORO_URL` / env-var traps** (server path): `host.docker.internal` is a
+- **`KOKORO_URL` / env-var traps**: `host.docker.internal` is a
   container-only name that tends to linger in a shell after container-path
-  work; left, it fails with a DNS error ("no usable Kokoro servers") — the
-  script rewrites it to `localhost` with a notice. A leftover
+  work; the script rewrites it to `127.0.0.1` with a notice. A leftover
   `KOKORO_RUNON_URL` is simply ignored: run-ons render through the same pool
-  now. `KOKORO_EXTERNAL` is unset, since here every Kokoro is either in-process
-  or a server you pointed at.
+  now. `KOKORO_EXTERNAL` is unset, since here every Kokoro is external.
 - **`PIPER_URL` rewrite**: `piper:10200` (the compose service name) never
-  resolves on the host, so it is rewritten to `127.0.0.1:10200` with a notice;
-  the log records the URL actually used.
-- **Piper preflight**: one real `describe` round-trip; on failure it prints the
-  fix (start the service) and exits 1. Without it the corpus stage dies
-  mid-run with a raw `ConnectionRefusedError`.
+  resolves on the host, so it is rewritten to a loopback protocol URL with a
+  notice; the log records the URL actually used. The protocol client accepts
+  only `tcp://` specs - the old bare `host:port` / `http://` forms are coerced
+  by the script with a note, and rejected outright by the client, because they
+  used to mean different backends with different audio.
+- **TTS preflights**: a `voices` round trip against each engine that will render
+  anything; on failure they print the exact start command and exit 1. Without
+  them the corpus stage dies mid-run with a raw `ConnectionRefusedError`.
 - **Ownership**: the Docker trainers run as root and leave `data/corpus/`
   root-owned; a host run then fails on permissions somewhere unhelpful, so the
   script checks writability up front and prints the `sudo chown -R` fix.
@@ -82,7 +90,7 @@ check exists:
   do not hand-patch — re-run `./scripts/setup-applesilicon-trainer.sh`; nothing
   in the run script ever writes to the clone.
 
-The log lands in the **repo root** as `training-<word>-macos-YYYYMMDD-HHMMSS.log`
+The log lands in the repo's **logs/** as `training-<word>-macos-YYYYMMDD-HHMMSS.log`
 (three stages to watch: corpus generation, feature extraction, training).
 
 **The real signal is the footer, not the exit code.** Whether the model was
@@ -107,9 +115,12 @@ libc++abi: terminating due to uncaught exception of type
 
 That is a C++ thread-state failure after a long torch/OpenMP run, not a model
 problem; do not try to fix it inside the trainer venv. The `.onnx` is already
-written at this point. Convert in the Docker image that carries the full
-tensorflow + onnx2tf stack (multi-arch, native on Apple Silicon —
-`docker compose build oww-trainer` first if the image is absent):
+written at this point. Since 2026-09-21 this repo's wrapper runs the converter
+in a SUBPROCESS (`train/oww/train.py: convert_to_tflite`), so the SIGABRT dies
+with the child and the run still exits 0 with a WARNING — but the converter
+still cannot succeed in this venv (the onnx2tf stack aborts even on a cold
+import), so the .tflite still comes from Docker (multi-arch, native on Apple
+Silicon — `docker compose build oww-trainer` first if the image is absent):
 
 ```bash
 docker run --rm -v "$PWD:/work" -w /work lva-wakeword-trainer-oww-trainer:latest \
@@ -125,13 +136,13 @@ One quirk, checked and harmless: `onnx2tf` re-saves the input `.onnx`
 ## Running microWakeWord
 ```bash
 ./scripts/setup-mww-applesilicon-trainer.sh   # once per machine; idempotent
-./scripts/start-piper-host.sh                 # in another terminal
-./scripts/start-kokoro-host.sh                # another, for the default 30% mix
+uv run --project tts-service/engines/piper python -m piper_engine --port 8898      # in another terminal
+uv run --project tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900  # another, for the default 30% mix
 ./scripts/run-mww-training-applesilicon.sh "hey seeree"
 ```
 
 `KOKORO_FRACTION=0` (or `--kokoro-fraction 0`) runs the historical all-Piper
-corpus and needs only the Piper server.
+corpus and needs only the Piper engine.
 
 The setup script pins the `microwakeword/` clone at repo root to one commit of
 the fork, builds `train-mww-applesilicon/.venv` (Python 3.12, tensorflow
@@ -143,8 +154,8 @@ drops it from the wheel. The run script preflights a real `describe` / voices
 round trip to each TTS server it will use before spending the run, checks the shared `data/corpus`/`output`
 directories are writable (the Docker trainers run as root), and verifies the
 clone is still at the pinned commit. Same knobs as the container path:
-`SKIP_CORPUS=1`, `SKIP_FEATURES=1`, `MAX_FAPH=…`. The log lands in the repo
-root as `training-<word>-macos-<stamp>.log`.
+`SKIP_CORPUS=1`, `SKIP_FEATURES=1`, `MAX_FAPH=…`. The log lands in the repo's
+logs/ dir as `training-<word>-macos-<stamp>.log`.
 
 
 ## What survives a run, and what doesn't

@@ -1,0 +1,27 @@
+# Demo sweep: the training-steps lever on the oww target.
+#
+# Why this grid: steps is the most basic quality/compute tradeoff and the
+# one oww knob the sweep can vary on the host (the configurable-lr patch
+# reads config["lr"], which is not a train.oww.train CLI option). 25k vs
+# the parser default 50k: if 25k holds the per-speaker numbers inside the
+# measured 10-point seed noise, half the wall time is free.
+#
+# HISTORY, 2026-09-22: this grid was run (twice - see the erratum in
+# improvement.md) on the frozen cf9c065b corpus, which is GONE: it was
+# rebuilt in place as c348af7b (post-reservation, P1.2 voices excluded). A
+# re-run would fail the pinned-digest check, and should - its results are
+# historical, and the lever's verdict (not a win) stands. A future sweep
+# pins the corpus digest that exists on disk when it is written.
+#
+# Corpus: the frozen dd6ccf8 corpus (22,144 clips, manifest present),
+# features REUSED via the sidecar (same rounds/seed as its build). No TTS
+# servers needed. ~10 min (25k) to ~18 min (50k) of training per point.
+wake_word: "hey seeree"
+target: oww
+base: {}
+grid:
+  training-steps: [25000, 50000]
+repeats: 2
+eval:
+  enabled: true
+  python: eval/.venv/bin/python

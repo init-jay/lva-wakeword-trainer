@@ -1,0 +1,8 @@
+# This directory is the build context of the image beside it, and compose
+# uploads the context whole on every build. The host eval venv (setup-eval-host.sh)
+# lives inside it: numpy, scipy, onnxruntime and scikit-learn are hundreds of MB,
+# so without this line every `docker compose build` uploads them for no reason -
+# the image copies nothing from the context anyway (the sources are mounted).
+.venv/
+__pycache__/
+*.pyc

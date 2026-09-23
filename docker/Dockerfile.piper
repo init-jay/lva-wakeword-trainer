@@ -1,58 +1,62 @@
-# Piper TTS behind a Wyoming server. CPU, on every architecture.
+# Piper TTS behind the repo's TTS protocol port (8898). CPU, on every architecture.
 #
-# THIS USED TO BE A CUDA IMAGE, AND THE MEASUREMENT IS WHY IT IS NOT.
+# SAME ENGINE AS THE MAC, NOT A WYOMING CLIENT. The trainer no longer speaks
+# Wyoming: it speaks the TTS protocol (tts-service/tts_protocol/), and both the
+# Docker image and the Mac's engine project (tts-service/engines/piper) run the
+# SAME in-process piper-tts code behind it. One implementation to audit, one
+# G2P to pin, and the measured behaviour transfers across machines.
 #
-# It was built on nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04, installing
-# piper-tts and wyoming-piper and then swapping the CPU onnxruntime for
-# onnxruntime-gpu, purely so that `--use-cuda` was available to A/B against the
-# Kokoro services. That A/B has since been run and CUDA LOST:
+# THIS USED TO BE A WYOMING CLIENT, AND THE HISTORY IS WHY IT IS NOT.
 #
-#     --use-cuda measured 2.5x SLOWER
-#       - scripts/run-oww-training.sh, and docker/Dockerfile.kokoro
+# The image was `FROM rhasspy/wyoming-piper:2.4.3` (a CPU base, chosen after the
+# CUDA A/B - it was once built on nvidia/cuda with onnxruntime-gpu, and
+# --use-cuda measured 2.5x SLOWER because wyoming-piper starts a fresh session
+# per request, so every render paid CUDA context setup on a model small enough
+# that the setup dominates). The published image was the right pick for the
+# CLIENT it served at the time - multi-arch, pinned, voices on demand - but the
+# protocol split made the client irrelevant: what this image needs now is an
+# engine that can host the protocol, and the in-process one IS the engine.
 #
-# train/corpus/piper.py explains the mechanism: wyoming-piper starts a fresh session
-# per request, so under --use-cuda every request pays CUDA context setup. Piper's
-# VITS models are small enough that the setup dominates the inference.
+# PINNED, not floating - the same discipline the old header applied to the
+# base tag, one level deeper. piper-tts 1.7.0 is the version the old
+# wyoming-piper:2.4.3 image carried in its /usr/src/.venv (verified 2026-09-07
+# by running the image); a fresh `pip install piper-tts` today resolves 1.8.0 -
+# a newer G2P, which changes what the voices say. The exclusion lists in
+# train/corpus/piper.py were audited against 1.7.0, so bumping this MUST happen
+# together with tts-service/engines/piper/pyproject.toml (the Mac's copy of the
+# same pin) and scripts/start-piper-host.sh, with a re-audit. onnxruntime is
+# pinned to the version 1.7.0 resolves, so the inference runtime matches what
+# was measured.
 #
-# So the CUDA base was carrying a flag nobody should enable, and on Apple Silicon it
-# was actively harmful: nvidia/cuda images are linux/amd64 only, so `docker compose
-# up piper` on an M-series Mac ran the ENTIRE microWakeWord corpus stage under qemu
-# emulation - silently, since emulation succeeds. A CPU baseline measured that way
-# times the emulator.
-#
-# WHAT REPLACED IT, AND WHY THERE IS NOTHING LEFT TO BUILD. Strip CUDA from the old
-# file and what remains is `pip install piper-tts wyoming-piper` on a Debian base,
-# plus an entrypoint - which is precisely what rhasspy/wyoming-piper already is, and
-# it publishes linux/amd64 and linux/arm64. The old header called the published
-# image inadequate because it "cannot use a GPU no matter what flags it is given".
-# That is now a description of what we want.
-#
-# PINNED, not :latest. The onnx2tf drift between the CUDA and CPU trainer images is
-# the cautionary tale: a floating dependency makes the artefact a function of WHEN an
-# image was built, and the run tag (<commit>-d<audio hash>) records neither the date
-# nor the version. Bump this deliberately.
-#
-# The freeze goes one level deeper than the tag: the image's own venv
-# (/usr/src/.venv) carries piper-tts 1.7.0 (verified 2026-09-07), while a fresh
-# `pip install piper-tts` today resolves 1.8.0 - a newer G2P, which changes what
-# the voices say. The exclusion lists in train/corpus/piper.py were audited
-# against the 1.7.0 voice set, so bumping this tag and the host counterpart
-# scripts/start-piper-host.sh (same pins, for the same reason) must happen
-# together, with a re-audit.
-FROM rhasspy/wyoming-piper:2.4.3
+# THE BASE IS THE ONLY FLOATING THING, AND IT IS A STABLE ONE: python:3.12-slim
+# publishes linux/amd64 and linux/arm64, so this runs native on a Mac (which is
+# where the eval corpus most needs to be generatable) as well as on the box.
+# The old header's warning about amd64-only bases running the whole corpus
+# stage under silent qemu emulation still applies - keep it multi-arch.
+FROM python:3.12-slim
 
-# Voices are downloaded on demand into --download-dir and get large once a
-# multi-speaker model like libritts_r is pulled - it carries 904 speakers - so this
-# wants to be a mounted volume rather than image layers. See docker-compose.yml.
+# Everything in one layer: the G2P + inference stack, then the two repo
+# packages (the protocol, then the engine). --no-deps on the repo packages:
+# their only dependencies are the four pip packages installed just above, and
+# resolving them from PyPI here would re-fetch versions this file just pinned.
+RUN pip install --no-cache-dir \
+        numpy scipy \
+        piper-tts==1.7.0 \
+        onnxruntime==1.29.0
+
+COPY tts-service/tts_protocol/ /tmp/tts_protocol/
+COPY tts-service/engines/piper/ /tmp/piper_engine/
+RUN pip install --no-cache-dir --no-deps /tmp/tts_protocol /tmp/piper_engine \
+    && rm -rf /tmp/tts_protocol /tmp/piper_engine
+
+# Voices are downloaded on demand into --voices and get large once a
+# multi-speaker model like libritts_r is pulled - it carries 904 speakers - so
+# this wants to be a mounted volume rather than image layers.
 VOLUME ["/data"]
-EXPOSE 10200
+EXPOSE 8898
 
-# INHERITED FROM THE BASE, NOT RESTATED: the entrypoint and the default command.
-# docker-compose.yml passes --uri, --data-dir, --download-dir and --voice explicitly,
-# so the CMD here would be shadowed anyway - and restating an entrypoint that
-# upstream owns is how the two silently diverge on the next base bump.
-#
-# `--voice` stays required in that compose command even though voices download on
-# demand: without it wyoming-piper exits 2 before binding the port. It is only the
-# default for requests that do not name a voice, and train/corpus/piper.py always
-# names one.
+# One voice loaded at a time, serial by design: the protocol server holds a
+# single lock (tts_protocol/server.py), and the voice-outer order of
+# train/corpus/piper.py is a correctness property on top of that.
+CMD ["python", "-m", "piper_engine", "--host", "0.0.0.0", "--port", "8898", \
+     "--voices", "/data"]
