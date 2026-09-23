@@ -23,6 +23,8 @@ Runs on the eval env (host: eval/.venv; container: the eval image, module form).
 """
 import argparse
 import sys
+import hashlib
+import json
 from pathlib import Path
 
 import numpy as np
@@ -43,6 +45,26 @@ def peaks_for(backend, clips, rng):
         scores, _ = backend.score(audio)
         out.append((name, float(np.max(scores))))
     return out
+
+
+def artifact_of(model):
+    """The file whose bytes get loaded, plus its md5 prefix.
+
+    A microWakeWord ``.json`` names its ``.tflite`` by relative path, so the pair can
+    come from two different runs and the report will still print numbers - they will
+    just belong to neither model. That is how one arm of the 2026-09-24 balance
+    sweep was scored against the wrong tag, and why a mismatched pair is worth
+    failing on rather than printing. Returns (path, md5_8).
+    """
+    path = Path(model)
+    if path.suffix == ".json":
+        named = json.loads(path.read_text()).get("model")
+        if not named:
+            raise SystemExit(f"{path}: manifest names no model")
+        path = path.parent / named
+    if not path.exists():
+        raise SystemExit(f"model artifact named by {model} does not exist: {path}")
+    return path, hashlib.md5(path.read_bytes()).hexdigest()[:8]
 
 
 def operating_threshold(adv_peaks, budget, grid=ev.SWEEP_GRID):
@@ -71,16 +93,30 @@ def report(model, pos_dirs, neg_dir, budget, top_n, csv_path=None, window=None):
     all_pos = [p for rows in pos_peaks.values() for _, p in rows]
 
     t = operating_threshold(adv, budget)
+    artifact, digest = artifact_of(model)
     print("=" * 78)
-    print(Path(model).name)
+    # The resolved artifact, not the argument: mww manifests are all named
+    # hey_seeree.json and their tflites all stream_state_internal_quant.tflite, so
+    # the basename cannot tell one run's model from another's.
+    print(f"{model}  ->  {artifact}  md5 {digest}")
     print(backend.describe())
-    if t is None:
+    # A separate flag, not `t is None`: the fallback below overwrites t, and reading
+    # the budget back off the threshold is what made an unreachable curve look
+    # matched in the first place.
+    reachable = t is not None
+    if not reachable:
         print(f"  curve never reaches adv FA <= {budget} on the grid; lowest grid point "
               f"reads {sum(1 for p in adv if p >= min(ev.SWEEP_GRID))} fires")
         t = min(ev.SWEEP_GRID)
     fired = sum(1 for p in adv if p >= t)
-    print(f"  matched-FA operating point: threshold {t:.2f} at adv FA {fired}/{len(adv)} "
-          f"({fired / len(adv):.1%}), budget {budget}")
+    print(f"  {'matched-FA' if reachable else 'BEST-AVAILABLE'} operating point: "
+          f"threshold {t:.2f} at adv FA {fired}/{len(adv)} ({fired / len(adv):.1%}), "
+          f"budget {budget}")
+    if not reachable:
+        # Unreachable-budget fallback: the detection figure below is read at an FA
+        # the caller did not ask for. Say so next to it, not eight lines earlier.
+        print("  !! NOT AT BUDGET - the detection figures below are at this FA, not "
+              f"{budget / len(adv):.1%}. Do not quote them as matched-FA.")
 
     print("\n  PER SPEAKER at that threshold  (peak = median of the clip peaks)")
     det_all = 0
@@ -127,14 +163,22 @@ def report(model, pos_dirs, neg_dir, budget, top_n, csv_path=None, window=None):
         print(f"    {s:<8}{n[:40]:<42}{p:.3f}")
 
     if csv_path:
+        # Key on the artifact, not the argument's basename: every mww model inside a
+        # run dir is named stream_state_internal_quant.tflite, so a CSV keyed on that
+        # cannot tell two runs apart - the ambiguity that mislabelled one arm of the
+        # 2026-09-24 balance sweep. The digest is the tie-breaker that cannot lie.
+        key = artifact.name
+        if key == "stream_state_internal_quant.tflite":
+            key = f"{artifact.parents[1].name}/{key}"
+        key += f"#{digest}"
         with open(csv_path, "w") as fh:
             fh.write("model,set,clip,peak\n")
             for s, rows in pos_peaks.items():
                 for n, p in rows:
-                    fh.write(f"{Path(model).name},pos/{s},{n},{p:.6f}\n")
+                    fh.write(f"{key},pos/{s},{n},{p:.6f}\n")
             for c, rows in neg_peaks.items():
                 for n, p in rows:
-                    fh.write(f"{Path(model).name},neg/{c},{n},{p:.6f}\n")
+                    fh.write(f"{key},neg/{c},{n},{p:.6f}\n")
         print(f"\n  per-clip peaks written to {csv_path}")
     return t
 
