@@ -86,6 +86,10 @@ YAML SHAPE
       enabled: true
       python: <path>           # optional; the interpreter with the eval stack
       compare_against: <tag>   # optional; a previously filed run tag
+      voice-holdout-set: <path>  # optional; the synthetic voice-holdout set
+                                # (wordlists/voice_holdout.yaml); passed to eval
+                                # as --voice-holdout-set so the filed eval block
+                                # carries the arm-ranking number
 """
 
 import argparse
@@ -127,9 +131,10 @@ MWW_CORPUS_KEYS = {"samples-per-voice", "negatives-per-voice", "kokoro-fraction"
                    "child-fraction", "real-copies", "piper-speakers",
                    "piper-languages", "negatives-file", "no-trim"}
 OWW_CORPUS_KEYS = {"samples-per-voice", "runon-fraction", "child-fraction",
-                   "piper-fraction", "real-copies", "piper-speakers",
-                   "piper-languages", "negatives-file", "exclude-voices",
-                   "include-legacy-voices", "no-trim"}
+                   "piper-fraction", "real-copies", "real-copies-override",
+                   "real-vtlp",
+                   "piper-speakers", "piper-languages", "negatives-file",
+                   "exclude-voices", "include-legacy-voices", "no-trim"}
 
 MWW_QUANT_DIR = "tflite_stream_state_internal_quant"
 MWW_MODEL_FILE = "stream_state_internal_quant.tflite"
@@ -165,6 +170,23 @@ def is_first_job(pi, repeat):
     job may build; every later job verifies.
     """
     return pi == 0 and repeat == 0
+
+
+def job_corpus_reuse(first_job, repeat, corpus_axes):
+    """Whether an oww job runs with --corpus reuse (True) or auto (False).
+
+    Default is C5's rule: only the first job is auto, every later job
+    reuses-and-refuses. The exception is a sweep whose GRID varies a corpus
+    axis, declared explicitly in `corpus_axes:` (2026-09-23, real-vtlp): then
+    the corpus is frozen per POINT, not per sweep - each point's repeat 0
+    runs auto (verify, or rebuild because the grid itself changed the
+    shaping), and repeats inside a point still refuse a mismatch. The
+    rebuild is the experiment's intent, not drift; the difference is that
+    the YAML SAYS SO. Cross-point rows therefore carry different corpus ids
+    in the ledger, and TTS noise rides between arms - the arms' own repeats
+    are what separate the lever from the redraw.
+    """
+    return not (first_job or (repeat == 0 and corpus_axes))
 
 
 def options_to_args(options):
@@ -212,11 +234,20 @@ def run_stage(name, cmd, stage_times):
 def load_spec(path):
     """The sweep YAML. Unknown top-level keys are a typo waiting to be
     silently ignored, which in a tuning loop means a comparison run that
-    believes it varied a knob it never varied - refused here, now."""
+    believes it varied a knob it never varied - refused here, now.
+
+    `corpus_axes:` - optional; grid keys that change the CORPUS identity
+    (oww only, e.g. real-vtlp). The corpus is then frozen PER POINT: each
+    arm's repeat 0 runs --corpus auto (verify, or rebuild because the grid
+    itself changed the shaping - the rebuild is the experiment's intent,
+    not drift), and repeats inside a point still refuse a mismatch
+    (job_corpus_reuse). Cross-arm rows therefore carry different corpus ids
+    and TTS redraw noise; the within-arm repeats separate the lever from
+    the redraw."""
     spec = yaml.safe_load(Path(path).read_text())
     unknown = set(spec) - {"wake_word", "target", "python", "eval", "corpus",
                            "base_seed", "max_faph", "ambient", "base", "grid",
-                           "repeats"}
+                           "repeats", "corpus_axes"}
     if unknown:
         die(f"unknown keys in {path}: {sorted(unknown)}")
     if not spec.get("wake_word"):
@@ -242,16 +273,50 @@ def load_spec(path):
             "remove it from `base`")
     grid = spec.get("grid") or {}
     corpus_keys = MWW_CORPUS_KEYS if spec["target"] == "mww" else OWW_CORPUS_KEYS
+    axes = spec.get("corpus_axes") or []
+    if axes:
+        if spec["target"] == "mww":
+            die("corpus_axes is oww-only: the mww corpus stage is owned by "
+                "the sweep runner (build-once, --skip-verify), not the trainer")
+        for key in axes:
+            if key not in grid:
+                die(f"corpus_axes names {key!r}, but the grid does not vary it")
+            if key not in corpus_keys:
+                die(f"corpus_axes names {key!r}, which is not a corpus-shaping "
+                    f"flag - a rebuild would change nothing and the point-"
+                    f"frozen mode would only add TTS noise")
     for key in grid:
         if key == "seed":
             die("the sweep owns --seed (deterministic per point); it cannot be a grid key")
-        if key in corpus_keys:
+        if key in corpus_keys and key not in axes:
             die(f"{key!r} shapes the CORPUS, which is frozen once for the whole "
                 f"sweep: it cannot be a grid key. Put it in `base` (it then applies "
-                f"identically to every point) or in `corpus`, and note that changing "
-                f"it changes the corpus identity, not just the model.")
+                f"identically to every point) or in `corpus`; or, if the point is "
+                f"the experiment, declare it under `corpus_axes:` - the corpus is "
+                f"then frozen PER POINT and each arm rebuilds it.")
     if "tag" in (spec.get("base") or {}):
         die("the sweep names its own runs by run tag; remove --tag from `base`")
+    eval_section = spec.get("eval")
+    if eval_section is not None and not isinstance(eval_section, bool):
+        # Same typo refusal as the top level, one level down: an unknown key
+        # here means a flag the operator believes they passed never reaches
+        # eval_model.py. (bool: `eval: true` is the shorthand main() expands.)
+        unknown_eval = set(eval_section) - {"enabled", "python",
+                                            "compare_against",
+                                            "voice-holdout-set"}
+        if unknown_eval:
+            die(f"unknown keys in the eval section of {path}: "
+                f"{sorted(unknown_eval)}")
+        vhs = eval_section.get("voice-holdout-set")
+        if vhs and not (REPO_ROOT / vhs).is_dir():
+            # A typo'd path here would not fail at eval time loudly enough:
+            # the eval subprocess would error, the run would still be filed,
+            # and the ledger record would simply lack the ranking number -
+            # the block silently dropped, exactly what a pre-flight check
+            # exists to stop.
+            die(f"eval voice-holdout-set {vhs!r} does not exist (looked for "
+                f"{REPO_ROOT / vhs}) - fix the path or remove the key; a "
+                f"missing holdout set must not silently drop the ranking arm")
     if spec["target"] == "mww":
         # The mww TRAIN stage does not take the corpus-shaping flags (the run
         # script consumes them itself); in this YAML they live in `corpus:`.
@@ -320,7 +385,8 @@ def corpus_exists(corpus):
 
 
 def corpus_action(wake_word, target, corpus, features, first_point, dry_run,
-                  python, corpus_args, stage_times, first_job=False):
+                  python, corpus_args, stage_times, first_job=False,
+                  auto_point=False):
     """The frozen-corpus rule (module docstring), as a stage or two.
 
     mww point 1: build (train.mww.corpus, then train.mww.features) - or, if
@@ -352,6 +418,9 @@ def corpus_action(wake_word, target, corpus, features, first_point, dry_run,
             return (("build" if target == "mww"
                      else "build (by the first train run, corpus auto mode)"),
                     stage_times)
+        if auto_point:
+            return ("auto per point (corpus_axes: verify, or rebuild - the "
+                    "grid itself changed the corpus shaping)", stage_times)
         return "reuse (manifest verified per point)", stage_times
 
     manifest = corpus / "corpus.json"
@@ -427,6 +496,28 @@ def artifact_for(target, wake_word, out_dir, tag):
     return out_dir / f"{safe}_{tag}.onnx"
 
 
+def eval_cmd(eval_python, artifact, json_path, voice_holdout_set=None):
+    """The eval subprocess command for one filed run.
+
+    Plain-path invocation, not `python -m eval.eval_model`: the module form
+    exists only in the Docker image, where the mount makes the package name
+    `eval` with eval_model.py at its top level. On the host the sources live
+    in eval/src/ (a namespace package at eval/), so the module path does not
+    resolve - the same lesson as generate_negatives.py (CLAUDE.md "Verify
+    before asserting"). One builder for both targets: the oww and mww loops
+    share this single call site, so a flag added here reaches both. With
+    `voice_holdout_set` set, --voice-holdout-set is passed through and
+    eval_model.py writes the voice_holdout_set block into the JSON, which the
+    ledger stores verbatim (the synthetic arm-ranking number, low-variance
+    versus the real holdout - wordlists/voice_holdout.yaml).
+    """
+    cmd = [str(eval_python), str(REPO_ROOT / "eval" / "src" / "eval_model.py"),
+           "--model", str(artifact), "--json", str(json_path)]
+    if voice_holdout_set:
+        cmd += ["--voice-holdout-set", str(voice_holdout_set)]
+    return cmd
+
+
 def _fmt_grid_value(value):
     return "on" if value is True else "off" if value is False else value
 
@@ -453,6 +544,7 @@ def main():
     eval_enabled = bool(eval_spec.get("enabled", True))
     eval_python = Path(eval_spec.get("python") or sys.executable)
     compare_against = eval_spec.get("compare_against")
+    voice_holdout_set = eval_spec.get("voice-holdout-set")
     max_faph = float(spec.get("max_faph", 0.2))
 
     base_args = options_to_args(spec.get("base") or {})
@@ -501,11 +593,15 @@ def main():
             skip = "  [SKIP - already in the ledger]" if tag in this_target else ""
             action, _ = corpus_action(wake_word, target, corpus, features,
                                       pi == 0, True, python, corpus_args, {},
-                                      first_job=is_first_job(pi, repeat))
+                                      first_job=is_first_job(pi, repeat),
+                                      auto_point=(repeat == 0
+                                                  and bool(spec.get("corpus_axes"))))
             cmd = trainer_cmd(target, python, wake_word, base_args, point_args,
                               seed, tag=tag if target == "mww" else None,
                               corpus_reuse=(target == "oww"
-                                            and not is_first_job(pi, repeat)))
+                                            and job_corpus_reuse(
+                                                is_first_job(pi, repeat), repeat,
+                                                spec.get("corpus_axes"))))
             print(f"\n  point {pi}  {combo}")
             print(f"    repeat {repeat}  seed {seed}  corpus: {action}")
             print(f"    tag: {tag}{skip}")
@@ -571,9 +667,12 @@ def main():
                           first_job=first_job)
             # C5: NOT (not first_point) - that left every repeat of point 0
             # in auto mode, where a manifest mismatch rebuilds the frozen
-            # corpus silently (bug.md, 2026-09-22).
+            # corpus silently (bug.md, 2026-09-22). The one exemption is a
+            # declared corpus_axes grid, where the point-0 job of each arm
+            # rebuilds on purpose (job_corpus_reuse).
             cmd = trainer_cmd("oww", python, wake_word, base_args, point_args,
-                              seed, corpus_reuse=(not first_job))
+                              seed, corpus_reuse=job_corpus_reuse(
+                                  first_job, repeat, spec.get("corpus_axes")))
 
         if target == "oww":
             # The model was WRITTEN is the real signal, not the exit code -
@@ -634,16 +733,9 @@ def main():
         if eval_enabled:
             json_path = out_dir / "eval" / f"{tag}.json"
             json_path.parent.mkdir(parents=True, exist_ok=True)
-            # Plain-path invocation, not `python -m eval.eval_model`: the
-            # module form exists only in the Docker image, where the mount
-            # makes the package name `eval` with eval_model.py at its top
-            # level. On the host the sources live in eval/src/ (a namespace
-            # package at eval/), so the module path does not resolve - the
-            # same lesson as generate_negatives.py (CLAUDE.md "Verify
-            # before asserting").
-            result = run_stage("eval", [eval_python, str(REPO_ROOT / "eval" / "src" / "eval_model.py"),
-                                        "--model", str(artifact),
-                                        "--json", str(json_path)],
+            result = run_stage("eval",
+                               eval_cmd(eval_python, artifact, json_path,
+                                        voice_holdout_set),
                                stage_times)
             if result.returncode != 0 or not json_path.is_file():
                 print(f"  EVAL FAILED (exit {result.returncode}) - the run is filed "
