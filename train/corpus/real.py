@@ -58,11 +58,16 @@ def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10
     per speaker (samples/speaker1/, samples/speaker2/, ...). Both layouts are
     picked up, so speakers can be added, re-recorded, or dropped independently.
 
-    NOTE FOR THE microWakeWord PORT: the repetition trick is specific to a pipeline
-    that augments by globbing a directory. microWakeWord generates spectrogram
-    features up front, so N identical copies would be N identical feature rows
-    rather than N augmented variants - actively worse than one. Weighting there has
-    to happen through its own sampling/class weights instead. See ARCHITECTURE.md.
+    NOTE FOR THE microWakeWord PORT (verified there 2026-09-23,
+    train/mww/corpus.py): only the SHIFTS port. mww generates its features up
+    front but augments each row per read (background p=0.75, RIR, gain), so N
+    raw copies are N DIFFERENTLY-augmented rows, not identical feature rows -
+    the reason they must not port is stronger: mww's train/val/test split is
+    per FILE (microwakeword/audio/clips.py:140-156), so N copies of one clip
+    scatter that speaker into all three splits - validation/test leak.
+    Vocal-tract-shifted copies are distinct clips and do not leak, which is
+    what mww's --real-vtlp consumes. See train/mww/corpus.py's NOTE at its
+    copy call.
     """
     real_samples_dir = Path(real_samples_dir)
     if not real_samples_dir.exists():
