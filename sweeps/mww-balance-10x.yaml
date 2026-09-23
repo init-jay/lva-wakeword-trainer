@@ -21,6 +21,10 @@
 # repeats<2 anyway. The comparison against the un-balanced 10x arm is a second sweep on a
 # second corpus (the mww corpus stage is frozen per sweep), so it is not in this file.
 #
+# The corpus section lists ONLY what differs from the defaults: the reuse check compares
+# the whole request structure, so restating a default is a diff against a corpus that never
+# asked for it (learned on launch: an explicit child-fraction 1.0 - the default - made the
+# request differ from c19a7898's, which is correct but noisy).
 # ~9 min corpus + ~8 min features (once) + 4 x (train ~4 + eval ~1) = ~45 min here.
 wake_word: "hey seeree"
 target: mww

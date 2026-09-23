@@ -469,8 +469,12 @@ def corpus_action(wake_word, target, corpus, features, first_point, dry_run,
             cmd.append("--clean")
             print(f"\n=== corpus WAVs already at {corpus} without a manifest - "
                   f"rebuilding (--clean)")
-        run_stage("corpus (build - frozen for this whole sweep)",
-                  cmd, stage_times)
+        result = run_stage("corpus (build - frozen for this whole sweep)",
+                           cmd, stage_times)
+        if result.returncode != 0:
+            die(f"the corpus build exited {result.returncode}. There is no frozen "
+                f"corpus to train on; a sweep that trained anyway would measure a "
+                f"corpus it did not ask for.")
         if not manifest.is_file():
             die(f"corpus built but no {manifest} written - the corpus stage "
                 f"predates the manifest stage. Re-run the current version.")
@@ -484,7 +488,10 @@ def corpus_action(wake_word, target, corpus, features, first_point, dry_run,
             # rebuild are the stale-spectrogram failure features.py documents.
             cmd = [python, "-m", "train.mww.features",
                    "--wake-word", wake_word, "--clean"]
-        run_stage("features (built once for the whole sweep)", cmd, stage_times)
+        result = run_stage("features (built once for the whole sweep)", cmd, stage_times)
+        if result.returncode != 0:
+            die(f"the features stage exited {result.returncode}; every point of this "
+                f"sweep would train on the features that were on disk before it.")
         return "build (+ features, built once for the whole sweep)"
 
     # REUSE (first point with an existing manifest, or any later point):
@@ -492,14 +499,34 @@ def corpus_action(wake_word, target, corpus, features, first_point, dry_run,
     # set THIS invocation would use and exits with the diff on any mismatch;
     # it probes the catalogs first (no rendering) because the voice set is
     # resolved from them.
-    run_stage("corpus (verify frozen - --skip)",
-              [python, "-m", "train.mww.corpus",
-               "--wake-word", wake_word, "--skip", *corpus_args],
-              stage_times)
+    result = run_stage("corpus (verify frozen - --skip)",
+                       [python, "-m", "train.mww.corpus",
+                        "--wake-word", wake_word, "--skip", *corpus_args],
+                       stage_times)
+    # The refusal is fatal, not advisory. run_stage returns the CompletedProcess and
+    # the training stages below deliberately carry on when one fails (a failed point is
+    # skipped and a re-run retries it); that is the WRONG rule here. --skip exits 1 when
+    # the manifest disagrees with this invocation's shaping, and the return code was
+    # dropped: on 2026-09-24 a sweep whose grid asked for --balance-real-copies jay,jen
+    # printed "refusing to reuse a corpus shaped differently" for every point and then
+    # trained four runs against c574e978, last night's flat-10x corpus, so the balance
+    # arm measured no balance at all. Corpus verification is the frozen-independent-variable
+    # rule (module docstring), so disagreement means the operator must rebuild - not that
+    # the sweep should proceed on the old audio.
+    if result.returncode != 0:
+        die(f"the corpus on disk is not the corpus this sweep asked for "
+            f"(verify --skip exited {result.returncode}, above). The mww corpus is "
+            f"frozen for a whole sweep and the sweep never rebuilds a manifest that "
+            f"exists, so rebuild it first: "
+            f"scripts/run-mww-training-applesilicon.sh (or move the corpus dir aside), "
+            f"then re-run this sweep.")
     if first_point and not features.is_dir():
-        run_stage("features (none on disk yet)",
-                  [python, "-m", "train.mww.features", "--wake-word", wake_word],
-                  stage_times)
+        result = run_stage("features (none on disk yet)",
+                           [python, "-m", "train.mww.features", "--wake-word", wake_word],
+                           stage_times)
+        if result.returncode != 0:
+            die("the features stage exited non-zero on a corpus with no features on "
+                "disk; there is nothing to train on.")
     return "reuse (manifest verified, --skip)"
 
 
