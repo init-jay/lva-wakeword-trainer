@@ -31,9 +31,25 @@ load-bearing - a set outside them is silently invisible.
 frames from the end, which imitates the sequential inputs a streaming model sees.
 Testing wants the real thing, so it uses 1. Those are upstream's notebook values.
 
-THE SPLIT COMES FROM Clips, NOT FROM US. Clips(random_split_seed, split_count)
-partitions the directory, so the same seed gives the same partition every run and
-training never sees its own validation clips.
+THE SPLIT IS OURS, NOT Clips'. It used to be `Clips(random_split_seed, split_count)`
+partitioning the directory, which is per FILE - and a person's real recordings enter the
+corpus as N copies of each (`--real-copies`, and their shifted variants), so per-file
+scattering put copy 3 of jen_0012 in training and copy 7 of it in validation. The
+consequence is not only a flattering validation number: mWW SELECTS checkpoints on
+`average_viable_recall` over that validation set, so the leak biases which weights ship.
+`group_partition` below splits by the identity of the underlying recording instead,
+which is what lets `--real-copies` be used at all on this target - the lever that
+measured jen 3/10 -> 8/10 on the holdout (2026-09-24, sweeps/mww-real-copies-probe.yaml,
+run there WITH the leak, which is why it is a probe and not a recipe).
+
+The budget is 2 * split_count of the RECORDINGS, one row of each held out: at 10x a ROW
+budget would hold out a tenth of the recordings and count them ten times, which is the
+wrong shape for the number that picks the weights (measured the first time: pooled
+detection 59%->90% and one all-fire collapse across four runs of one config). The
+partition is a stable hash (hashlib, not `hash()` - that one is salted per process, which
+would make the split move between runs of identical input), so the same corpus gives the
+same split every run, and no RNG state is consumed by the corpus order the way Clips'
+shuffle did.
 
     python -m train.mww.features --wake-word "hey seeree"
 """
@@ -56,6 +72,9 @@ from microwakeword.audio.clips import Clips  # noqa: E402
 from microwakeword.audio.spectrograms import SpectrogramGeneration  # noqa: E402
 
 from train.mww import config as mww_config  # noqa: E402
+# The partition rules live in their own dependency-free module so they can be
+# tested without microwakeword; see train/mww/split.py.
+from train.mww.split import group_partition, recording_identity  # noqa: E402, F401
 
 # split -> (Clips generator mode, slide_frames). Upstream's notebook values.
 SPLITS = {
@@ -63,7 +82,6 @@ SPLITS = {
     "validation": ("validation", 10),
     "testing": ("test", 1),
 }
-
 
 def build_split(clips_dir: Path, out_root: Path, name: str, impulse, background,
                 split_seed=10, split_count=0.1, step_ms=None, clean=False):
@@ -74,9 +92,47 @@ def build_split(clips_dir: Path, out_root: Path, name: str, impulse, background,
         # Already trimmed by corpus/augment.py, with a method calibrated on this
         # corpus - letting webrtcvad trim again stacks two silence definitions.
         remove_silence=False,
-        random_split_seed=split_seed,
+        # No random_split_seed: the partition below is identity-aware, and passing the
+        # seed here would use upstream's per-FILE shuffle instead.
+        random_split_seed=None,
         split_count=split_count,
     )
+
+    # THE SPLIT, OURS. Clips leaves split_clips unset when random_split_seed is None, so
+    # build it here in the shape SpectrogramGeneration expects: three HF subsets of the
+    # same rows Clips already filtered (duration etc), selected by position.
+    import datasets as hf_datasets          # noqa: PLC0415  (Clips pulls it in anyway)
+    # Read the paths back with decoding OFF. `clips.clips["audio"]` on the column Clips
+    # already cast to Audio(sampling_rate=16000) DECODES every clip to a numpy array -
+    # 9,529 of them, to get a filename - and yields dicts, not paths, which is how this
+    # first attempt failed. cast_column with decode=False returns the {path, bytes} rows
+    # without touching the audio, and does not reorder, so the indices still address
+    # clips.clips' rows.
+    paths = [Path(row["path"]).name for row in
+             clips.clips.cast_column("audio", hf_datasets.Audio(decode=False))["audio"]]
+    assignment = group_partition(paths, split_count, seed=split_seed)
+    by_mode = {"train": [], "validation": [], "test": [], "dropped": []}
+    # Index by the ORIGINAL row order: clips.clips.select() addresses rows of that
+    # dataset, while group_partition iterates groups in hash order. Enumerating its
+    # values instead of `paths` would select the wrong rows - and every count would
+    # still look right.
+    for idx, p in enumerate(paths):
+        by_mode[assignment[p]].append(idx)
+    dropped = by_mode.pop("dropped")
+    if not by_mode["validation"] or not by_mode["test"]:
+        # Unreachable in practice - group_partition refuses first - but the cost of it
+        # ever being wrong is a run that selects nothing, so keep the guard on both sides.
+        raise SystemExit(f"ERROR: empty validation/test split for {clips_dir}")
+    clips.split_clips = hf_datasets.DatasetDict(
+        {mode: clips.clips.select(idxs) for mode, idxs in by_mode.items()})
+    if dropped:
+        # Rows that exist in the corpus and in no split. Silent would be the worst
+        # property of this number - it is how a 10x corpus stops being 10x.
+        print(f"  split: {len(by_mode['train'])} train / "
+              f"{len(by_mode['validation'])} validation / {len(by_mode['test'])} test "
+              f"rows, {len(dropped)} copy rows DROPPED so held-out recordings stay "
+              f"shallow")
+
     augmenter = Augmentation(
         augmentation_duration_s=mww_config.CLIP_DURATION_MS / 1000.0,
         impulse_paths=[str(p) for p in impulse],

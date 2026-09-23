@@ -24,21 +24,27 @@ stage (improvement.md P2.1).
 
 DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
 
-1. REAL RECORDINGS ARE COPIED ONCE, not ten times. openWakeWord's --real-copies 10
-   exists because it augments by globbing the directory once, so N copies become N
-   independently augmented variants - the largest single lever measured there (run
-   10, run-on 53% -> 77%). microWakeWord generates its feature rows UP FRONT
-   (features.py) and augments on every read instead, so raw copies would only bias
-   sampling, and `sampling_weight` in the feature set is the honest knob for that -
-   and the oww-side per-speaker raw-copy weight (--real-copies-override) does not
-   port at all: the split is per FILE, so N copies of one clip leak that speaker
-   into validation and testing (the NOTE at the copy call below). What DID port
-   from the 2026-09-23 oww clean-detection work is --real-vtlp: formant-shifted
-   copies of the named speakers' real clips. A shifted wav is a DISTINCT feature
-   row, not another draw of the same voice, so the diversity that fixed ryan on
-   the oww side (raw 40x moved him 1/6 -> 3/6 but diluted jay 33/35 -> 23/35; 30
-   shifted copies at the base weight kept jay at 30/35) lands here as new rows,
-   not dilution.
+1. REAL RECORDINGS ARE COPIED ONCE BY DEFAULT - and 10x is the candidate, not the
+   rule. openWakeWord's --real-copies 10 exists because it augments by globbing the
+   directory once, so N copies become N independently augmented variants - the largest
+   single lever measured there (run 10, run-on 53% -> 77%). microWakeWord generates its
+   feature rows UP FRONT (features.py) and augments on every read instead, so raw copies
+   only bias sampling - and for as long as the split was per FILE they were worse than
+   useless: N copies of one recording scattered that speaker across train, validation
+   and testing, and mWW SELECTS the weights it ships on validation
+   average_viable_recall. That obstacle is gone: train/mww/features.py's group_partition
+   splits by the identity of the underlying recording, so copies and vocal-tract
+   variants of one utterance always land together (verified on the 2026-09-24 corpus:
+   3,310 real rows -> 331 recordings, 0 straddling). What 10x is worth is measured in
+   sweeps/mww-real-copies-probe.yaml and its leak-free follow-up
+   sweeps/mww-real-copies-leakfree.yaml - jen 3/10 -> 8/10 with the leak in place - and
+   the default stays at 1 until the leak-free run says the same thing.
+   What also ported from the 2026-09-23 oww clean-detection work is --real-vtlp:
+   formant-shifted copies of the named speakers' real clips. A shifted wav is a DISTINCT
+   feature row, not another draw of the same voice, so the diversity that fixed ryan on
+   the oww side (raw 40x moved him 1/6 -> 3/6 but diluted jay 33/35 -> 23/35; 30 shifted
+   copies at the base weight kept jay at 30/35) lands here as new rows, not dilution -
+   and it never needed the split fix, which is why it is what ported first.
 
 2. PIPER-MAJORITY, WITH KOKORO AS A SUPPLEMENT. --kokoro-fraction renders that
    share of the PHRASE-ALONE positive budget with Kokoro instead of Piper. It
@@ -128,7 +134,10 @@ from train.corpus.piper import (generate_piper_samples,  # noqa: E402
                                 select_piper_voices)
 from train.corpus.positives import (PLAIN_SPEED_GRID,  # noqa: E402
                                     plain_positive_texts)
-from train.corpus.real import copy_real_samples  # noqa: E402
+from train.corpus.real import (  # noqa: E402
+    balanced_copy_weights, copy_real_samples, parse_balance_spec,
+    speaker_clip_counts,
+)
 from train.corpus import manifest as corpus_manifest  # noqa: E402
 from wordlists import exclude_voice_holdout, load_voice_holdout  # noqa: E402
 from wordlists import path_for, voice_holdout_path  # noqa: E402
@@ -200,10 +209,25 @@ def main():
                         "voices against ~36 Kokoro ones.")
     p.add_argument("--negatives-per-voice", type=int, default=12)
     p.add_argument("--real-copies", type=int, default=1,
-                   help="copies of each real recording (default: %(default)s). See "
-                        "the module docstring for why this is not 10, and the NOTE "
-                        "at the copy call for why the oww per-speaker override does "
-                        "not port.")
+                   help="copies of each real recording (default: %(default)s - 10 is "
+                        "the openWakeWord value, and the candidate here: with the "
+                        "identity-aware split in train/mww/features.py the copies no "
+                        "longer leak across splits, and 10x measured jen 3/10 -> 8/10 "
+                        "on the holdout (sweeps/mww-real-copies-probe.yaml). See the "
+                        "module docstring, point 1, for what is and is not settled.")
+    p.add_argument("--balance-real-copies", default="",
+                   help="Derive per-speaker --real-copies so each named speaker "
+                        "contributes the SAME number of positive rows: 'all' or 'jay,jen'. "
+                        "Computed from the clip counts under --real-samples at build time, "
+                        "so recording more of a thin speaker shrinks their lift without "
+                        "touching a flag. Equalise UP only. WHY: jen is 93 clips against "
+                        "jay's 161, so at any flat weight she is the thinnest adult voice "
+                        "in the positive set - and she reads 37/93 on her OWN training "
+                        "clips at the 1x default against 80/93 on openWakeWord at 10x. "
+                        "Part of the corpus identity (the spec; the multipliers follow "
+                        "from the clip counts, which already are).")
+    p.add_argument("--balance-max-multiplier", type=float, default=0.0,
+                   help="Cap the derived lift at this multiple of --real-copies (0 = none).")
     p.add_argument("--real-vtlp", default="",
                    help="Per-speaker formant-shifted variants of the REAL clips, "
                         "'speaker=N[,speaker=N]' (speaker = the directory name under "
@@ -376,6 +400,7 @@ def main():
         "child_fraction": args.child_fraction,
         "real_copies": args.real_copies,
         "real_vtlp": real_vtlp,
+        "balance_real_copies": args.balance_real_copies,
         "piper_speakers": args.piper_speakers,
         "piper_languages": args.piper_languages,
         "negatives_file": args.negatives_file,
@@ -482,22 +507,28 @@ def main():
     # acoustic variant, and in this pipeline it is a DISTINCT feature row, not
     # another draw of one voice (module docstring, point 1).
     #
-    # NOTE - the oww-side raw-copy weight (--real-copies-override) does NOT port,
-    # and this module deliberately has no equivalent. corpus/real.py's NOTE FOR
-    # THE microWakeWord PORT says N identical raw copies would be N identical
-    # feature rows; that mechanism is not exactly what this pipeline does - the
-    # features stage augments per row (features.py build_split hands every clip
-    # to an Augmentation that draws background p=0.75, RIR p=0.5, gain, color
-    # noise and jitter per read) - but its conclusion holds, and it is worse:
-    # the train/validation/test split is per FILE (microwakeword Clips does
-    # train_test_split over the directory listing), so N copies of one clip
-    # take N slots and scatter that speaker's clips into ALL THREE splits,
-    # leaking them into validation and testing. And the honest sampling knob
-    # (sampling_weight, config.py) is one number per FEATURE SET - the
-    # positives are one directory holding synthetic and real together - so it
-    # cannot aim at one speaker. Per-speaker row weights would need upstream
-    # microwakeword support; the pinned clone has none.
+    # NOTE - what does NOT port is the oww-side PER-SPEAKER raw-copy weight
+    # (--real-copies-override), and this module deliberately has no equivalent. The
+    # reason is no longer the split: train/mww/features.py's group_partition keeps every
+    # copy and every shifted variant of a recording in one split, which is what made
+    # --real-copies safe to raise here at all (see corpus/real.py's NOTE FOR THE
+    # microWakeWord PORT, rewritten to that effect 2026-09-24). What remains is
+    # granularity: the honest sampling knob (sampling_weight, config.py) is ONE number
+    # per FEATURE SET, and the positives are one directory holding synthetic and real
+    # clips together - so it cannot aim at one speaker. Per-speaker row weights would
+    # need upstream microwakeword support; the pinned clone has none. Per-speaker
+    # DIVERSITY is available, and is what --real-vtlp below consumes.
+    real_overrides = None
+    balance_spec = parse_balance_spec(args.balance_real_copies)
+    if balance_spec is not None:
+        real_overrides, balance_notes = balanced_copy_weights(
+            speaker_clip_counts(Path(args.real_samples)), args.real_copies,
+            None if balance_spec == "all" else balance_spec,
+            max_multiplier=args.balance_max_multiplier)
+        print("  --balance-real-copies "
+              f"{args.balance_real_copies!r}: " + "; ".join(balance_notes))
     copy_real_samples(Path(args.real_samples), positives, args.real_copies,
+                      per_speaker_copies=real_overrides,
                       per_speaker_vtlp=real_vtlp)
 
     if not args.no_trim:
@@ -529,6 +560,7 @@ def main():
             # structure, and a manifest that recorded "ryan=3" as a string
             # could not be diffed against a later request parsed to {ryan: 3}.
             "real_vtlp": real_vtlp,
+            "balance_real_copies": args.balance_real_copies,
             "piper_speakers": args.piper_speakers,
             "piper_languages": args.piper_languages,
             "negatives_file": args.negatives_file,

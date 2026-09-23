@@ -14,6 +14,109 @@ import numpy as np
 import scipy.io.wavfile
 
 
+def speaker_clip_counts(real_samples_dir: Path) -> dict:
+    """{speaker: wav count} over the samples tree, the same way copy_real_samples reads it.
+
+    Recursive, so loose files and one-directory-per-speaker both count; loose files
+    share the "(loose files)" key because there is no speaker to attribute them to.
+    """
+    root = Path(real_samples_dir)
+    counts = {}
+    if not root.exists():
+        return counts
+    for wav_file in sorted(root.rglob("*.wav")):
+        rel = wav_file.relative_to(root)
+        speaker = rel.parts[0] if len(rel.parts) > 1 else "(loose files)"
+        counts[speaker] = counts.get(speaker, 0) + 1
+    return counts
+
+
+def parse_balance_spec(spec: str, flag: str = "--balance-real-copies"):
+    """'' -> None (off); 'all' -> "all"; else a validated list of speaker names.
+
+    The spec is kept as written in the corpus manifest, so the *rule* is the identity
+    and the multipliers are derived fresh each build - which is what lets recording more
+    clips of a thin speaker shrink their lift without editing a flag.
+    """
+    if not spec or not spec.strip():
+        return None
+    if spec.strip().lower() == "all":
+        return "all"
+    names = [s.strip() for s in spec.split(",") if s.strip()]
+    if not names:
+        raise ValueError(f"{flag}={spec!r} parses to no speaker names")
+    return names
+
+
+def balanced_copy_weights(counts: dict, base_copies: int, speakers=None,
+                          explicit: dict = None, max_multiplier: float = 0.0):
+    """Per-speaker copy counts that EQUALISE each speaker's rows, auto-derived from clip counts.
+
+    WHY. `--real-copies` is one weight for everybody, so a speaker's share of the
+    positive class is whatever accident of recording left them with: jay 161 clips, jen
+    93, ryan 78 - at 10x that is 12.0%, 7.0% and 5.9% of the real rows. The measured
+    consequence is this repo's most stubborn result: jen reads 37/93 on her OWN training
+    clips on microWakeWord, where the copies are 1x and she is 1.4% of the positives, and
+    80/93 on openWakeWord, where she is 7%. Presence, not timbre - so derive the weight
+    from the counts instead of carrying it by hand, and let recording more of jen shrink
+    the correction rather than change a flag.
+
+    The rule is EQUALISE UP, never down: the target is the richest named speaker's row
+    count at the base weight, and every other named speaker is lifted to it.
+    Cutting jay back to jen's row count would balance the table by removing the
+    representation that is working, and the only measured way to spend one speaker's
+    presence to buy another's came out negative (2026-09-23, sweeps/oww-real-vtlp.yaml:
+    60 shifted variants per ryan clip moved him 3/12 -> 6/12 and cost jay 88.6% -> 62.9%).
+
+    `speakers` is None (= every speaker) or an explicit list. A speaker named in
+    `explicit` keeps that weight: a hand-set override is a decision, a derived number is
+    arithmetic, and the decision wins.
+
+    `max_multiplier` caps the lift (>0, as a multiple of base_copies) and the cap being
+    hit is REPORTED, because "balance these three" silently turning into "one voice is
+    40% of the corpus" is the dilution failure above wearing a different hat.
+
+    Returns ({speaker: copies}, notes:list[str]) - the notes are for printing: the table
+    is the point of the exercise, so it has to be visible in the run log.
+    """
+    explicit = dict(explicit or {})
+    if not counts:
+        return {}, ["no real recordings found - nothing to balance"]
+    named = list(counts) if speakers is None else [s for s in speakers]
+    unknown = [s for s in named if s not in counts]
+    if unknown:
+        raise ValueError(f"unknown speaker(s) {unknown}; the samples tree has "
+                         f"{sorted(counts)}")
+    target = max(counts[s] for s in named) * base_copies
+    richest = max(named, key=lambda s: counts[s])
+    weights, notes = {}, []
+    for s, n in sorted(counts.items()):
+        if s in explicit:
+            weights[s] = explicit[s]
+            notes.append(f"{s}: {n} clips -> {explicit[s]}x (explicit override, "
+                         f"not balanced)")
+            continue
+        if s not in named:
+            weights[s] = base_copies
+            notes.append(f"{s}: {n} clips -> {base_copies}x (not in the balance set)")
+            continue
+        want = -(-target // n) if n else base_copies      # ceil division
+        cap = int(base_copies * max_multiplier) if max_multiplier else 0
+        if cap and want > cap:
+            want = cap
+            notes.append(f"{s}: capped at {max_multiplier:g}x the base weight - "
+                         f"{n} clips cannot reach {target} rows")
+        weights[s] = max(want, base_copies)
+    notes.insert(0, f"balanced against {richest} at {target} rows "
+                   f"({counts[richest]} clips x {base_copies})")
+    total = sum(weights[s] * counts[s] for s in counts)
+    for s in sorted(counts):
+        rows = weights[s] * counts[s]
+        notes.append(f"  {s:<10} {counts[s]:>4} clips x {weights[s]:>3}x = {rows:>6} rows"
+                     f" ({rows / total:5.1%} of the real rows)")
+    return weights, notes
+
+
 def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10,
                       per_speaker_copies: dict = None,
                       per_speaker_vtlp: dict = None) -> int:
@@ -58,16 +161,25 @@ def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10
     per speaker (samples/speaker1/, samples/speaker2/, ...). Both layouts are
     picked up, so speakers can be added, re-recorded, or dropped independently.
 
-    NOTE FOR THE microWakeWord PORT (verified there 2026-09-23,
-    train/mww/corpus.py): only the SHIFTS port. mww generates its features up
-    front but augments each row per read (background p=0.75, RIR, gain), so N
-    raw copies are N DIFFERENTLY-augmented rows, not identical feature rows -
-    the reason they must not port is stronger: mww's train/val/test split is
-    per FILE (microwakeword/audio/clips.py:140-156), so N copies of one clip
-    scatter that speaker into all three splits - validation/test leak.
-    Vocal-tract-shifted copies are distinct clips and do not leak, which is
-    what mww's --real-vtlp consumes. See train/mww/corpus.py's NOTE at its
-    copy call.
+    NOTE FOR THE microWakeWord PORT (rewritten 2026-09-24; it used to say raw copies
+    must not port). mww generates its features up front but augments each row per read
+    (background p=0.75, RIR, gain), so N raw copies are N DIFFERENTLY-augmented rows -
+    presence, not repetition. What did forbid the port was the split: mww's
+    train/validation/test partition was per FILE, so N copies of one recording scattered
+    that speaker into all three splits, and mWW selects the weights it ships on
+    validation average_viable_recall - a leak in the selection path, not just in a
+    number. train/mww/features.py now splits by recording identity (group_partition), so
+    copies and their shifted variants always land together, and the port is safe:
+    sweeps/mww-real-copies-probe.yaml measured jen 3/10 -> 8/10 on the holdout at 10x
+    (with the leak still in place - the leak-free re-run is
+    sweeps/mww-real-copies-leakfree.yaml), the same direction the 3->10 change measured
+    here in run 10 (run-on 53% -> 77%).
+
+    What still does NOT port is the PER-SPEAKER raw-copy weight (--real-copies-override):
+    mww's sampling weights are one number per FEATURE SET, and synthetic and real clips
+    share the positives directory, so it cannot aim at one speaker. Per-speaker diversity
+    is what --real-vtlp consumes here (vocal-tract-shifted copies are distinct clips by
+    construction). See the NOTE at the copy call in train/mww/corpus.py.
     """
     real_samples_dir = Path(real_samples_dir)
     if not real_samples_dir.exists():

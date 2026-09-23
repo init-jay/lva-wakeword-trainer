@@ -55,7 +55,10 @@ from train.corpus.piper import (generate_piper_samples,  # noqa: E402
                                 select_piper_voices)
 from train.corpus.positives import (PLAIN_SPEED_GRID, PLAIN_SPEEDS,  # noqa: E402
                                     plain_positive_texts)
-from train.corpus.real import copy_real_samples  # noqa: E402
+from train.corpus.real import (  # noqa: E402
+    balanced_copy_weights, copy_real_samples, parse_balance_spec,
+    speaker_clip_counts,
+)
 from train import ownership, provenance  # noqa: E402
 from train.corpus import manifest as corpus_manifest  # noqa: E402
 from wordlists import exclude_voice_holdout, load_voice_holdout  # noqa: E402
@@ -550,15 +553,31 @@ def create_config(wake_word: str, n_samples: int, training_steps: int,
     # and it is filed verbatim in <tag>.config.json - a --set point is a
     # first-class sweep point, named like the explicit flags.
     if overrides:
+        dropped = []
         for item in overrides:
             key, sep, raw = item.partition("=")
             if not sep or not key:
                 sys.exit(f"--set takes key=value, got {item!r}")
+            previous = config.get(key)
             try:
                 config[key] = json.loads(raw)
             except ValueError:
                 config[key] = raw
+            # A nested override REPLACES the sub-dict - deliberately, because merging
+            # would have to guess which sibling keys the author meant to keep. It cost
+            # a sweep point on 2026-09-24: --set 'batch_n_per_class={"positive": 150}'
+            # dropped ACAV100M_sample and adversarial_negative with it, the model
+            # trained on 150 positives and nothing else, and it read 100% false
+            # accepts on every category. That is the kind of wrong that only looks
+            # like a bad result, so name the keys that went missing.
+            if isinstance(previous, dict) and isinstance(config[key], dict):
+                lost = sorted(set(previous) - set(config[key]))
+                if lost:
+                    dropped.append(f"{key} -> {lost}")
         print(f"Config overrides applied last: {', '.join(overrides)}")
+        for note in dropped:
+            print(f"  WARNING: --set replaced a dict and dropped its other keys: {note}. "
+                  f"Restate every key you want to keep.")
 
     config_path = WORK_DIR / "training_config.yaml"
     with open(config_path, 'w') as f:
@@ -894,6 +913,22 @@ def main():
                              "the models measured him at 1/6 holdout and 36%% on his own "
                              "training clips - the weight is the lever, aimed per speaker. "
                              "Part of the corpus identity: changing it rebuilds the corpus.")
+    parser.add_argument("--balance-real-copies", default="",
+                        help="Derive per-speaker --real-copies so each named speaker "
+                             "contributes the SAME number of positive rows: 'all', or "
+                             "'jay,jen'. The multiplier is computed from the clip counts "
+                             "in data/recordings/samples/ at build time, so recording more "
+                             "of a thin speaker shrinks their lift without touching a flag. "
+                             "Equalise UP only - the richest named speaker keeps the base "
+                             "weight, nobody is cut to make the table tidy. An explicit "
+                             "--real-copies-override for the same speaker wins. The spec is "
+                             "part of the corpus identity; the multipliers are not, because "
+                             "the clip counts that produce them already are (d<audio hash).")
+    parser.add_argument("--balance-max-multiplier", type=float, default=0.0,
+                        help="Cap the derived lift at this multiple of --real-copies "
+                             "(0 = no cap). A speaker with a handful of clips balances to "
+                             "a huge multiplier, and one voice becoming most of the corpus "
+                             "is the dilution failure in the other direction.")
     parser.add_argument("--real-vtlp", default="",
                         help="Per-speaker formant-shifted variants, 'speaker=N[,speaker=N]': "
                              "adds N vocal-tract-shifted copies (1.15-1.30x, the synthetic "
@@ -1246,6 +1281,7 @@ def main():
         "piper_fraction": args.piper_fraction,
         "real_copies": args.real_copies,
         "real_copies_override": _parse_real_copies_override(args.real_copies_override),
+        "balance_real_copies": args.balance_real_copies,
         "real_vtlp": _parse_real_copies_override(args.real_vtlp, flag="--real-vtlp"),
         "piper_speakers": args.piper_speakers,
         "piper_languages": args.piper_languages,
@@ -1476,6 +1512,15 @@ def main():
         real_samples_dir = WORK_DIR / "data" / "recordings" / "samples"
         real_overrides = _parse_real_copies_override(args.real_copies_override)
         real_vtlp = _parse_real_copies_override(args.real_vtlp, flag="--real-vtlp")
+        balance_spec = parse_balance_spec(args.balance_real_copies)
+        if balance_spec is not None:
+            real_overrides, balance_notes = balanced_copy_weights(
+                speaker_clip_counts(real_samples_dir), args.real_copies,
+                None if balance_spec == "all" else balance_spec,
+                explicit=real_overrides,
+                max_multiplier=args.balance_max_multiplier)
+            print("  --balance-real-copies "
+                  f"{args.balance_real_copies!r}: " + "; ".join(balance_notes))
         real_count = copy_real_samples(real_samples_dir, pos_train,
                                        args.real_copies, real_overrides, real_vtlp)
         if real_count > 5:

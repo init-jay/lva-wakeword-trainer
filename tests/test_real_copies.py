@@ -85,6 +85,108 @@ def test_vtlp_copies_add_variants_not_raw_duplicates():
         assert count == 2 + 6 + 1  # ryan raw + ryan shifted + jay raw
 
 
+# ---------------------------------------------------------------------------
+# --balance-real-copies (added 2026-09-24). The rule under test is the one the
+# measurements asked for: jen is 93 clips against jay's 161, so a FLAT weight
+# leaves her the thinnest adult voice in the positive set, and she reads 37/93
+# on her own training clips on microWakeWord (1x) against 80/93 on
+# openWakeWord (10x). Deriving the weight from the counts means recording more
+# jen shrinks her lift instead of requiring a flag edit.
+
+
+def _counts(**kw):
+    return dict(kw)
+
+
+def test_balance_equalises_rows_up_and_never_down():
+    from train.corpus.real import balanced_copy_weights
+    # jay is the richest at 8 clips x 10 = 80 rows, so he is the target.
+    w, notes = balanced_copy_weights(_counts(jay=8, jen=5, ryan=3), 10)
+    assert w["jay"] == 10, "the richest speaker keeps the base weight"
+    assert w["jen"] == 16, f"ceil(80/5)=16, got {w['jen']}"
+    assert w["ryan"] == 27, f"ceil(80/3)=27, got {w['ryan']}"
+    rows = {k: w[k] * v for k, v in (("jay", 8), ("jen", 5), ("ryan", 3))}
+    assert rows["jen"] >= 80 and rows["ryan"] >= 80, "everyone reaches the target"
+    assert rows["jay"] == 80
+    assert any("jay" in n and "rows" in n for n in notes), notes
+    # Never below base: a speaker richer than the target still gets base.
+    w2, _ = balanced_copy_weights(_counts(jay=8, jen=20), 10, speakers=["jay"])
+    assert w2["jay"] == 10 and w2["jen"] == 10, "no speaker is cut to tidy the table"
+
+
+def test_balance_only_touches_the_named_speakers():
+    from train.corpus.real import balanced_copy_weights
+    # The user's ask is adult parity; ryan must keep his own weight, and the
+    # only lever the measurements have pointed at for him is more recordings.
+    w, notes = balanced_copy_weights(_counts(jay=8, jen=5, ryan=3), 10,
+                                     speakers=["jay", "jen"])
+    assert w == {"jay": 10, "jen": 16, "ryan": 10}, w
+    assert any("ryan" in n and "not in the balance set" in n for n in notes), notes
+    try:
+        balanced_copy_weights(_counts(jay=8), 10, speakers=["jey"])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a typo'd speaker name must fail loud, not train at base")
+
+
+def test_balance_explicit_override_wins_over_the_derived_number():
+    from train.corpus.real import balanced_copy_weights
+    # A hand-set weight is a decision, a derived one is arithmetic.
+    w, notes = balanced_copy_weights(_counts(jay=8, jen=5), 10,
+                                     explicit={"jen": 40})
+    assert w["jen"] == 40 and w["jay"] == 10
+    assert any("explicit override" in n for n in notes), notes
+
+
+def test_balance_cap_is_reported_not_silent():
+    from train.corpus.real import balanced_copy_weights
+    # jen at 5 clips needs 16x to reach 80 rows; a 1.5x cap (base 10 -> 15) binds.
+    w, notes = balanced_copy_weights(_counts(jay=8, jen=5), 10, max_multiplier=1.5)
+    assert w["jen"] == 15, w
+    assert any("capped" in n for n in notes), notes
+
+
+def test_balance_spec_parses_off_all_and_a_list():
+    from train.corpus.real import parse_balance_spec
+    assert parse_balance_spec("") is None
+    assert parse_balance_spec("   ") is None
+    assert parse_balance_spec("all") == "all"
+    assert parse_balance_spec("ALL") == "all"
+    assert parse_balance_spec("jay, jen") == ["jay", "jen"]
+    try:
+        parse_balance_spec(",,")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("an empty speaker list must fail loud")
+
+
+def test_speaker_clip_counts_matches_what_the_copier_reads():
+    from train.corpus.real import speaker_clip_counts
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "samples"
+        _make_tree(src, {"jay": 3, "jen": 2})
+        # a loose file at the root is counted, under the same key copy_real_samples uses
+        data = (20000 * np.sin(2 * np.pi * 220 * np.arange(SR // 2) / SR)).astype(np.int16)
+        scipy.io.wavfile.write(str(src / "loose.wav"), SR, data)
+        assert speaker_clip_counts(src) == {"jay": 3, "jen": 2, "(loose files)": 1}
+        assert speaker_clip_counts(Path(tmp) / "nope") == {}
+
+
+def test_balance_flows_through_to_the_written_copies():
+    from train.corpus.real import balanced_copy_weights, speaker_clip_counts
+    with tempfile.TemporaryDirectory() as tmp:
+        src, out = Path(tmp) / "samples", Path(tmp) / "out"
+        _make_tree(src, {"jay": 4, "jen": 2})
+        w, _ = balanced_copy_weights(speaker_clip_counts(src), 5)
+        copy_real_samples(src, out, copies=5, per_speaker_copies=w)
+        names = [p.name for p in out.iterdir()]
+        jay = len([n for n in names if "_jay_" in n])
+        jen = len([n for n in names if "_jen_" in n])
+        assert (jay, jen) == (20, 20), f"rows should be equal: jay={jay} jen={jen}"
+
+
 def main():
     import _runner
     _runner.run(sys.modules[__name__])
