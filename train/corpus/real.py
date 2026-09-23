@@ -15,7 +15,8 @@ import scipy.io.wavfile
 
 
 def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10,
-                      per_speaker_copies: dict = None) -> int:
+                      per_speaker_copies: dict = None,
+                      per_speaker_vtlp: dict = None) -> int:
     """Copy real voice recordings to training directory, `copies` times each.
 
     The copies are NOT redundant. They are written before openwakeword's
@@ -43,6 +44,16 @@ def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10
     never learned his timbre, while jay at 160 clips at 10x measured 80% on his
     own clips. Same lever as 3->10, aimed at one speaker.)
 
+    `per_speaker_vtlp` adds N vocal-tract-length-shifted copies per clip for the
+    named speakers (CHILD_STRETCH["m"] ratios, the same range the synthetic child-
+    lever uses). It exists because raising ryan to 40x raw copies moved his holdout
+    1/6 -> 3/6 but cost jay 33/35 -> 23/35: raw repetition buys presence at the
+    price of diluting the adult voices, while one shifted copy is a NEW acoustic
+    variant of the same recording - diversity is not paid for in row count, which
+    is exactly how CHILD_STRETCH_FRACTION reasons about the synthetic side ("real-
+    clip density drives the result, so buying child coverage by spending adult
+    coverage is not a win").
+
     Recordings may sit loose in the samples directory or be grouped one directory
     per speaker (samples/speaker1/, samples/speaker2/, ...). Both layouts are
     picked up, so speakers can be added, re-recorded, or dropped independently.
@@ -57,6 +68,10 @@ def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10
     if not real_samples_dir.exists():
         print("  No real samples found (record your voice first)")
         return 0
+
+    # lazy: augment imports scipy too; keep real.py importable without it eager
+    from train.corpus.augment import CHILD_STRETCH, vocal_tract_shift
+    vtlp_span = CHILD_STRETCH["m"]
 
     output_dir.mkdir(parents=True, exist_ok=True)
     count = 0
@@ -85,6 +100,20 @@ def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10
                 dest = output_dir / f"real_{i}_{stem}.wav"
                 scipy.io.wavfile.write(str(dest), 16000, data)
                 count += 1
+            # Shifted variants: N NEW acoustic forms of this recording, named
+            # real_v{i}_ so they sort apart from the raw copies (the augmentation
+            # rounds spread a speaker's clips across batches by sort order, and a
+            # shifted copy draws its own noise/room like a raw copy does).
+            for i in range((per_speaker_vtlp or {}).get(speaker, 0)):
+                ratio = float(np.random.uniform(*vtlp_span))
+                # vocal_tract_shift's contract is int16 in, int16 out (it
+                # peak-normalises against 32767). Feeding it float audio returns
+                # near-silence - the dtype bug a holdout probe paid for in 2026-09-23.
+                shifted = vocal_tract_shift(
+                    np.clip(data, -32768, 32767).astype(np.int16), ratio)
+                dest = output_dir / f"real_v{i}_{ratio:.2f}_{stem}.wav"
+                scipy.io.wavfile.write(str(dest), 16000, shifted)
+                count += 1
         except Exception as e:
             print(f"  Error processing {wav_file}: {e}")
 
@@ -94,5 +123,9 @@ def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10
     if per_speaker_copies:
         overrides = ", ".join(f"{s}: {w}x" for s, w in sorted(per_speaker_copies.items()))
         print(f"  Per-speaker copy overrides: {overrides}")
+    if per_speaker_vtlp:
+        v = ", ".join(f"{s}: +{w} VTLP copies [{vtlp_span[0]:.2f}-{vtlp_span[1]:.2f}x]"
+                      for s, w in sorted(per_speaker_vtlp.items()))
+        print(f"  Per-speaker shifted variants: {v}")
     print(f"  Copied {count} real voice samples ({copies}x base weight)")
     return count

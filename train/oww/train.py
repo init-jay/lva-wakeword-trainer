@@ -736,7 +736,7 @@ def _parse_audit_lines(audit):
     return weight, steps, merge_seen
 
 
-def _parse_real_copies_override(spec: str) -> dict:
+def _parse_real_copies_override(spec: str, flag: str = "--real-copies-override") -> dict:
     """Parse 'speaker=N[,speaker=N]' into {speaker: N}, failing loud.
 
     A typo'd speaker name would otherwise be silently inert (the override dict
@@ -755,13 +755,13 @@ def _parse_real_copies_override(spec: str) -> dict:
         if not part:
             continue
         if "=" not in part:
-            sys.exit(f"ERROR: --real-copies-override {part!r}: expected speaker=N")
+            sys.exit(f"ERROR: {flag} {part!r}: expected speaker=N")
         speaker, _, n = part.partition("=")
         speaker, n = speaker.strip(), n.strip()
         if not n.isdigit() or int(n) < 1:
-            sys.exit(f"ERROR: --real-copies-override {part!r}: copies must be a positive int")
+            sys.exit(f"ERROR: {flag} {part!r}: copies must be a positive int")
         if known and speaker not in known:
-            sys.exit(f"ERROR: --real-copies-override names {speaker!r}, but the samples "
+            sys.exit(f"ERROR: {flag} names {speaker!r}, but the samples "
                      f"tree has {sorted(known)} - the override would be inert")
         overrides[speaker] = int(n)
     return overrides
@@ -894,6 +894,13 @@ def main():
                              "the models measured him at 1/6 holdout and 36%% on his own "
                              "training clips - the weight is the lever, aimed per speaker. "
                              "Part of the corpus identity: changing it rebuilds the corpus.")
+    parser.add_argument("--real-vtlp", default="",
+                        help="Per-speaker formant-shifted variants, 'speaker=N[,speaker=N]': "
+                             "adds N vocal-tract-shifted copies (1.15-1.30x, the synthetic "
+                             "child-lever's range) per real clip, at the BASE --real-copies "
+                             "weight. Diversity is bought with variants, not rows: the raw "
+                             "40x point moved ryan 1/6->3/6 but cost jay 33->23 (dilution). "
+                             "Part of the corpus identity.")
     parser.add_argument("--max-negative-weight", type=int, default=2000,
                         help="How hard false positives are penalised by the end of "
                              "training (default: %(default)s). Higher trades "
@@ -1239,6 +1246,7 @@ def main():
         "piper_fraction": args.piper_fraction,
         "real_copies": args.real_copies,
         "real_copies_override": _parse_real_copies_override(args.real_copies_override),
+        "real_vtlp": _parse_real_copies_override(args.real_vtlp, flag="--real-vtlp"),
         "piper_speakers": args.piper_speakers,
         "piper_languages": args.piper_languages,
         "negatives_file": args.negatives_file,
@@ -1467,11 +1475,12 @@ def main():
         # would measure memorisation. eval/src/paths.py enforces the pair.
         real_samples_dir = WORK_DIR / "data" / "recordings" / "samples"
         real_overrides = _parse_real_copies_override(args.real_copies_override)
+        real_vtlp = _parse_real_copies_override(args.real_vtlp, flag="--real-vtlp")
         real_count = copy_real_samples(real_samples_dir, pos_train,
-                                       args.real_copies, real_overrides)
+                                       args.real_copies, real_overrides, real_vtlp)
         if real_count > 5:
             copy_real_samples(real_samples_dir, pos_test,
-                              args.real_copies, real_overrides)
+                              args.real_copies, real_overrides, real_vtlp)
 
         # === NEGATIVE SAMPLES ===
         print("\n" + "=" * 60)
