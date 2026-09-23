@@ -210,6 +210,10 @@ def _mww_manifest(tmp, real_vtlp):
             "child_fraction": CHILD_STRETCH_FRACTION,
             "real_copies": 1,
             "real_vtlp": real_vtlp,
+            # A corpus manifest written before this key existed is refused for
+            # reuse by design (train/corpus/manifest.py is strict, one variable at
+            # a time), so a fixture that wants the reuse path must carry it.
+            "balance_real_copies": "",
             "piper_speakers": 12,
             "piper_languages": "en_US,en_GB",
             "negatives_file": None,

@@ -245,18 +245,23 @@ def test_real_ledger_groups_on_resolved_steps():
     assert "n=4 (6 runs)" in line_50k
     assert "86.3% [78.4-90.2]" in line_50k
     # Cross-corpus: grouped on training-steps alone, the 25k group spans the
-    # historical corpus and the sweep's - exactly one warning, naming the
-    # group and >= 2 distinct corpus ids (the per-corpus view is
-    # compare_arms'; this is the summariser's loud flag, not a statistic)
+    # historical corpus and the sweep's - exactly one warning for THAT group, naming
+    # >= 2 distinct corpus ids (the per-corpus view is compare_arms'; this is the
+    # summariser's loud flag, not a statistic).
+    #
+    # Found by content, not by index: mww joined the swept groups on 2026-09-24
+    # (sweeps/mww-class-weight.yaml), and the render is alphabetical by target, so
+    # warnings[0] is now an mww line. The invariant is per-group, so the test says so.
     with _err() as err25:
         ledger.summarise("hey seeree", grid_keys=["training-steps"])
-    warnings = [l for l in err25.getvalue().splitlines()
-                if "corpus_id(s)" in l]
-    m = re.match(r"  WARNING: group (\S+) (\S+) spans (\d+) corpus_id\(s\)",
-                 warnings[0]) if warnings else None
-    assert m and m.group(2) == "training-steps=25000" and int(m.group(3)) >= 2, \
-        err25.getvalue()
-    assert "silently averaged" in err25.getvalue()
+    text25 = err25.getvalue()
+    warnings = [l for l in text25.splitlines()
+                if "corpus_id(s)" in l and "training-steps=25000" in l
+                and l.split("group ")[1].startswith("oww")]
+    assert len(warnings) == 1, f"expected one oww 25k cross-corpus warning, got {warnings}"
+    m = re.match(r"  WARNING: group (\S+) (\S+) spans (\d+) corpus_id\(s\)", warnings[0])
+    assert m and int(m.group(3)) >= 2, warnings[0]
+    assert "silently averaged" in text25
     # a sweep arm renders by its grid label
     assert any("real-vtlp=ryan=30" in l for l in out.splitlines())
 
@@ -359,8 +364,11 @@ def test_real_ledger_byte_pin_recaptured():
     # (5 rows) + the seed-2042 retry row (1) grew the ledger past the 2026-09-22
     # pin - the append-only rule means growth is the norm and re-capture is an
     # act, not a drift (docstring of the test this replaces). Pinned state:
-    # 14 records, three real-vtlp arms + the steps grid, all vintages rendered.
-    # If a new record is ever appended, re-capture with the same deliberateness:
+    # 33 records - the 2026-09-24 sweeps (mww class weights x4 on 6bb4cca, mww 10x
+    # real copies x6 on 574e978, oww batch class balance x6 on 19a7898, and the one
+    # malformed --set point that trained without negatives and is filed as measured,
+    # not deleted). If a new record is ever appended, re-capture with the same
+    # deliberateness:
     #   python -m train.ledger --wake-word "hey seeree" > stdout.golden 2> stderr.golden
     if not ledger.ledger_path("hey seeree").is_file():
         print("  skip: no ledger at "

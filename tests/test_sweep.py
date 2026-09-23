@@ -392,6 +392,50 @@ def test_eval_cmd_omits_flag_when_not_configured():
     assert "--json" in cmd and "eval.json" in cmd
 
 
+def test_mww_ambient_dirs_follow_the_ambient_flag():
+    # The bug: trainer_cmd spread the auto-discovered ambient dirs straight after
+    # --tag, positional. train/mww/train.py's --ambient is nargs="*", so the bare
+    # directories parsed as "zero ambient sets" and the run died at its own preflight
+    # ("no validation_ambient or testing_ambient data in any feature set", exit 1) -
+    # measured 2026-09-24, where it cost all four points of
+    # sweeps/mww-class-weight.yaml. argparse does NOT reject the positionals, so the
+    # failure looked like a data problem, not a command-construction problem.
+    amb = ["data/external/mww_ambient/dinner_party",
+           "data/external/mww_ambient/dinner_party_eval",
+           "data/external/mww_ambient/speech"]
+    cmd = sweep.trainer_cmd("mww", "python", "hey seeree", base_args=[],
+                            point_args=["--training-steps", "10000"], seed=1,
+                            tag="t", ambient=amb)
+    assert "--ambient" in cmd, f"--ambient missing from {cmd!r}"
+    i = cmd.index("--ambient")
+    assert cmd[i + 1:i + 1 + len(amb)] == amb, f"ambient dirs not bound to the flag: {cmd!r}"
+    # And nothing positional left over after the ambient block.
+    tail = cmd[i + 1 + len(amb):]
+    assert all(a.startswith("--") or j == 0 or tail[j - 1].startswith("--")
+               for j, a in enumerate(tail) if not a.startswith("-")), \
+        f"a value in {tail!r} is not attached to a flag"
+
+
+def test_mww_no_ambient_means_no_empty_ambient_flag():
+    cmd = sweep.trainer_cmd("mww", "python", "hey seeree", base_args=[],
+                            point_args=[], seed=1, tag="t", ambient=[])
+    joined = " ".join(cmd)
+    assert "--ambient" not in joined, \
+        "--ambient with no dirs would claim ambient training the run does not have"
+
+
+def test_tag_naming_no_corpus_is_refused():
+    # The resume/label half of the same accident: --print-tag run BEFORE a corpus
+    # build files the point as <commit>-cabsent-<config>, and the ledger groups by
+    # corpus id - so the baseline point of a build-first sweep lands beside its arm
+    # but is not comparable to it. sweep.py now computes the tag after the corpus
+    # stage and refuses a cabsent tag outright; this pins the refusal.
+    assert sweep.tag_names_no_corpus("f2865bc-cabsent-hcbfb214")
+    assert sweep.tag_names_no_corpus("cabsent-hcbfb214")     # corpus half first, too
+    assert not sweep.tag_names_no_corpus("f2865bc-c6bb4cca-hcbfb214")
+    assert not sweep.tag_names_no_corpus("f2865bc-dirty-c6bb4cca-h1")
+
+
 def main():
     import _runner
     _runner.run(sys.modules[__name__])

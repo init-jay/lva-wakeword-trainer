@@ -128,11 +128,13 @@ TRAINER_PYTHON = {
 # the shaping flags the reuse check compares against, and these are those
 # flags in CLI spelling.
 MWW_CORPUS_KEYS = {"samples-per-voice", "negatives-per-voice", "kokoro-fraction",
-                   "child-fraction", "real-copies", "piper-speakers",
+                   "child-fraction", "real-copies", "real-vtlp",
+                   "balance-real-copies", "balance-max-multiplier",
+                   "piper-speakers",
                    "piper-languages", "negatives-file", "no-trim"}
 OWW_CORPUS_KEYS = {"samples-per-voice", "runon-fraction", "child-fraction",
                    "piper-fraction", "real-copies", "real-copies-override",
-                   "real-vtlp",
+                   "real-vtlp", "balance-real-copies", "balance-max-multiplier",
                    "piper-speakers", "piper-languages", "negatives-file",
                    "exclude-voices", "include-legacy-voices", "no-trim"}
 
@@ -358,13 +360,33 @@ def trainer_cmd(target, python, wake_word, base_args, point_args, seed,
     a named function with a test is not.)"""
     args = [*base_args, *point_args, "--seed", str(seed)]
     if target == "mww":
+        # `--ambient` IS the flag, not a positional: train/mww/train.py declares it
+        # with nargs="*", so a bare list of directories parses as "zero ambient sets"
+        # and the run dies at its own preflight ("no validation_ambient or
+        # testing_ambient data in any feature set") with exit 1, not exit 2. Measured
+        # 2026-09-24: every point of the first mww sweep failed this way. The run
+        # script gets it right (scripts/run-mww-training-applesilicon.sh:466), which is
+        # how a divergence between the two survived - and tests/test_sweep.py now
+        # asserts this shape.
+        ambient_args = ["--ambient", *[str(a) for a in ambient]] if ambient else []
         return [str(python), "-m", "train.mww.train",
-                "--wake-word", wake_word, "--tag", tag, *ambient, *args]
+                "--wake-word", wake_word, "--tag", tag, *ambient_args, *args]
     cmd = [str(python), "-m", "train.oww.train",
            "--wake-word", wake_word, *args]
     if corpus_reuse:
         cmd += ["--corpus", "reuse"]
     return cmd
+
+
+def tag_names_no_corpus(tag):
+    """True when a run tag's corpus half is provenance's 'absent' placeholder.
+
+    train/provenance.py:167 renders the corpus digest as the literal "absent" when the
+    corpus dir holds no manifest, so such a tag names no audio. Named here (rather than
+    an inline `in` test) so tests/test_sweep.py can pin the refusal without running a
+    sweep.
+    """
+    return "-cabsent" in f"-{tag}-"
 
 
 def corpus_dirs(wake_word, target):
@@ -626,12 +648,6 @@ def main():
               f"{spec['repeats']}, seed {seed})\n{'#' * 72}")
 
         if target == "mww":
-            # The grid must be in the tag too: the tag names the config the
-            # run will use (B1 - it used to name one that would not be run).
-            tag = mww_tag(python, wake_word, base_args + point_args, seed)
-            if tag in this_target:
-                print(f"  SKIP: {tag} is already in the ledger - the run was filed before")
-                continue
             # first_job passed on the real path too: the dry-run label and
             # the real stage must agree on what counts as the build (C5's
             # label/command-disagreement class). The mww --skip path itself
@@ -640,10 +656,14 @@ def main():
             corpus_action(wake_word, target, corpus, features, first_point,
                           False, python, corpus_args, stage_times,
                           first_job=first_job)
-            # Same order as the run script: tag first, then corpus, then
-            # train. The tag here was computed before the corpus stage, not
-            # after, because --print-tag writes nothing - the tag still names
-            # the corpus the stage is about to verify or build.
+            # The tag is computed AFTER the corpus stage, deliberately (2026-09-24):
+            # on a sweep that BUILDS its corpus, --print-tag run before the build sees
+            # no manifest and files the point's corpus half as "absent" - so the
+            # baseline point of sweeps/mww-class-weight.yaml came out as
+            # f2865bc-cabsent-..., which the ledger reads as a different corpus from
+            # its own arm's c6bb4cca and refuses to compare. --print-tag writes
+            # nothing, so running it after the stage costs a second subprocess and
+            # changes no state; the corpus the tag names is the one the run trains on.
             if not (corpus / "corpus.json").is_file():
                 # The build path writes it and fails loudly if it did not;
                 # the verify path dies in --skip. Reaching this means neither
@@ -651,6 +671,21 @@ def main():
                 # it, so nothing may be trained on it.
                 die(f"no corpus.json manifest at {corpus} - a sweep cannot "
                     f"train on a corpus it cannot name.")
+            # The grid must be in the tag too: the tag names the config the
+            # run will use (B1 - it used to name one that would not be run).
+            tag = mww_tag(python, wake_word, base_args + point_args, seed)
+            if tag_names_no_corpus(tag):
+                # Belt and braces with the manifest check above: the corpus half of
+                # the tag is the digest of the audio under the corpus dir, and
+                # provenance renders it "absent" when there is none. A point filed
+                # under such a tag names no corpus at all, so the ledger's
+                # comparability rule (two runs share a corpus id or are not
+                # comparable) would separate it from its own arm.
+                die(f"the point's run tag {tag!r} names no corpus (cabsent) - the "
+                    f"corpus stage did not leave a manifest at {corpus / 'corpus.json'}")
+            if tag in this_target:
+                print(f"  SKIP: {tag} is already in the ledger - the run was filed before")
+                continue
             cmd = trainer_cmd("mww", python, wake_word, base_args, point_args,
                               seed, tag=tag, ambient=ambient)
             if (out_dir / tag).exists():
