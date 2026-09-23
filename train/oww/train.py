@@ -736,6 +736,37 @@ def _parse_audit_lines(audit):
     return weight, steps, merge_seen
 
 
+def _parse_real_copies_override(spec: str) -> dict:
+    """Parse 'speaker=N[,speaker=N]' into {speaker: N}, failing loud.
+
+    A typo'd speaker name would otherwise be silently inert (the override dict
+    just never matches) and the run would train at the base weight while being
+    filed under a config that claims otherwise - the label/config drift class
+    this repo has paid for twice (bug.md B1, C1). The speaker name must name a
+    directory that actually exists under the samples tree.
+    """
+    if not spec:
+        return {}
+    overrides = {}
+    samples = WORK_DIR / "data" / "recordings" / "samples"
+    known = {p.name for p in samples.iterdir() if p.is_dir()} if samples.is_dir() else set()
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "=" not in part:
+            sys.exit(f"ERROR: --real-copies-override {part!r}: expected speaker=N")
+        speaker, _, n = part.partition("=")
+        speaker, n = speaker.strip(), n.strip()
+        if not n.isdigit() or int(n) < 1:
+            sys.exit(f"ERROR: --real-copies-override {part!r}: copies must be a positive int")
+        if known and speaker not in known:
+            sys.exit(f"ERROR: --real-copies-override names {speaker!r}, but the samples "
+                     f"tree has {sorted(known)} - the override would be inert")
+        overrides[speaker] = int(n)
+    return overrides
+
+
 def main():
     parser = argparse.ArgumentParser(description="Train a custom OpenWakeWord model")
     parser.add_argument("--wake-word", default="hey seeree", help="Wake word/phrase to train")
@@ -856,6 +887,13 @@ def main():
                              "the positive set (default: %(default)s). Weighting, "
                              "not augmentation - watch the held-out set for "
                              "overfitting to the specific clips.")
+    parser.add_argument("--real-copies-override", default="",
+                        help="Per-speaker override of --real-copies, 'speaker=N[,speaker=N]' "
+                             "(speaker = the directory name under data/recordings/samples/). "
+                             "2026-09-23: ryan at 10x was 3.5%% of the oww positive set and "
+                             "the models measured him at 1/6 holdout and 36%% on his own "
+                             "training clips - the weight is the lever, aimed per speaker. "
+                             "Part of the corpus identity: changing it rebuilds the corpus.")
     parser.add_argument("--max-negative-weight", type=int, default=2000,
                         help="How hard false positives are penalised by the end of "
                              "training (default: %(default)s). Higher trades "
@@ -1200,6 +1238,7 @@ def main():
         "child_fraction": args.child_fraction,
         "piper_fraction": args.piper_fraction,
         "real_copies": args.real_copies,
+        "real_copies_override": _parse_real_copies_override(args.real_copies_override),
         "piper_speakers": args.piper_speakers,
         "piper_languages": args.piper_languages,
         "negatives_file": args.negatives_file,
@@ -1427,9 +1466,12 @@ def main():
         # a holdout nested inside it would be trained on and every eval number after
         # would measure memorisation. eval/src/paths.py enforces the pair.
         real_samples_dir = WORK_DIR / "data" / "recordings" / "samples"
-        real_count = copy_real_samples(real_samples_dir, pos_train, args.real_copies)
+        real_overrides = _parse_real_copies_override(args.real_copies_override)
+        real_count = copy_real_samples(real_samples_dir, pos_train,
+                                       args.real_copies, real_overrides)
         if real_count > 5:
-            copy_real_samples(real_samples_dir, pos_test, args.real_copies)
+            copy_real_samples(real_samples_dir, pos_test,
+                              args.real_copies, real_overrides)
 
         # === NEGATIVE SAMPLES ===
         print("\n" + "=" * 60)

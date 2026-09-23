@@ -14,7 +14,8 @@ import numpy as np
 import scipy.io.wavfile
 
 
-def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10) -> int:
+def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10,
+                      per_speaker_copies: dict = None) -> int:
     """Copy real voice recordings to training directory, `copies` times each.
 
     The copies are NOT redundant. They are written before openwakeword's
@@ -34,6 +35,13 @@ def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10
 
     Batch class balance is unaffected (batch_n_per_class fixes that), so this only
     changes how often a real clip is drawn WITHIN the positive class.
+
+    `per_speaker_copies` overrides the weight for individual speakers (the 2026-09-23
+    clean-detection work: the seed-55/56 oww models measured ryan at 1/6 holdout
+    and 36% on his OWN training clips - 39/78 still undetected at threshold 0.1,
+    i.e. his 78 clips at 10x are 3.5% of the positive set and the model simply
+    never learned his timbre, while jay at 160 clips at 10x measured 80% on his
+    own clips. Same lever as 3->10, aimed at one speaker.)
 
     Recordings may sit loose in the samples directory or be grouped one directory
     per speaker (samples/speaker1/, samples/speaker2/, ...). Both layouts are
@@ -70,9 +78,10 @@ def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10
             stem = "_".join(rel.with_suffix("").parts)
             speaker = rel.parts[0] if len(rel.parts) > 1 else "(loose files)"
             per_speaker[speaker] = per_speaker.get(speaker, 0) + 1
+            weight = (per_speaker_copies or {}).get(speaker, copies)
 
             # Create multiple copies to weight real samples higher
-            for i in range(copies):
+            for i in range(weight):
                 dest = output_dir / f"real_{i}_{stem}.wav"
                 scipy.io.wavfile.write(str(dest), 16000, data)
                 count += 1
@@ -82,5 +91,8 @@ def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10
     if per_speaker:
         detail = ", ".join(f"{s}: {n}" for s, n in sorted(per_speaker.items()))
         print(f"  Found {sum(per_speaker.values())} real samples ({detail})")
-    print(f"  Copied {count} real voice samples ({copies}x weight)")
+    if per_speaker_copies:
+        overrides = ", ".join(f"{s}: {w}x" for s, w in sorted(per_speaker_copies.items()))
+        print(f"  Per-speaker copy overrides: {overrides}")
+    print(f"  Copied {count} real voice samples ({copies}x base weight)")
     return count
