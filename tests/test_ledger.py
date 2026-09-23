@@ -360,15 +360,18 @@ def test_real_ledger_swept_and_presweep_vintages_render():
 
 
 def test_real_ledger_byte_pin_recaptured():
-    # Byte-pin, re-captured DELIBERATELY 2026-09-23 after the real-vtlp sweep
-    # (5 rows) + the seed-2042 retry row (1) grew the ledger past the 2026-09-22
-    # pin - the append-only rule means growth is the norm and re-capture is an
-    # act, not a drift (docstring of the test this replaces). Pinned state:
-    # 33 records - the 2026-09-24 sweeps (mww class weights x4 on 6bb4cca, mww 10x
-    # real copies x6 on 574e978, oww batch class balance x6 on 19a7898, and the one
-    # malformed --set point that trained without negatives and is filed as measured,
-    # not deleted). If a new record is ever appended, re-capture with the same
-    # deliberateness:
+    # Byte-pin, re-captured DELIBERATELY 2026-09-24 after the adult-balance sweeps
+    # (oww flat x2 + balanced x2, mww flat x4 + balanced x4) grew the ledger from the
+    # 2026-09-23 pin's 33 records to 45 - the append-only rule means growth is the norm
+    # and re-capture is an act, not a drift (docstring of the test this replaces).
+    # Pinned state: 45 records. The earlier ones are the real-vtlp sweep, the seed-2042
+    # retry, mww class weights x4 on 6bb4cca, mww 10x real copies on 574e978, oww batch
+    # class balance x6 on 19a7898, and the one malformed --set point that trained
+    # without negatives and is filed as measured, not deleted.
+    # This capture is also the first with corpus_id inside the duplicate-run key, so a
+    # flat and a balanced corpus at one (config, seed) count as two samples instead of
+    # collapsing into one and shouting DETERMINISM REGRESSION (train/ledger.py, C2).
+    # If a new record is ever appended, re-capture with the same deliberateness:
     #   python -m train.ledger --wake-word "hey seeree" > stdout.golden 2> stderr.golden
     if not ledger.ledger_path("hey seeree").is_file():
         print("  skip: no ledger at "
