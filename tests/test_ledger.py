@@ -1,11 +1,11 @@
-"""Guards for train/ledger.py's summarise, in the spirit of bug.md round 2
-(2026-09-22): the runs were sound, the tool that summarised them was not.
+"""Guards for train/ledger.py's summarise: the runs were sound, the tool
+that summarised them was not.
 
-C1: group on the RESOLVED config, not the grid label. The 094e414 sweep ran
-before the grid was threaded into the command, so four rows carried 25k
+C1: group on the RESOLVED config, not the grid label. An early sweep ran
+before the grid was threaded into the command, so some rows carried 25k
 labels around runs that were actually filed at 50k (config.steps), and
-grouping on the label printed an 80.9% "25k" mean that was really a
-25k/50k mix - contradicting the hand-built 73.5% verdict in improvement.md.
+grouping on the label printed a misleading "25k" mean that was really a
+25k/50k mix - contradicting the hand-built verdict.
 
 C2: n counts (config-hash, seed) PAIRS, not records. Two records sharing the
 tag's h-half (the config hash, train/provenance.py) and the seed are the
@@ -24,15 +24,18 @@ point pick on each group's own step-function curve, never an
 interpolation. B is the median across swept groups of each group's own
 median recorded-threshold FA. Pre-sweep records (every existing one) keep
 the @-threshold reading, and with no sweep on file at all the output is
-byte-identical to the pre-sweep table - pinned against the real ledger's
-golden output, since the append-only ledger holds both vintages.
+byte-identical to the pre-sweep table - pinned in this file as a byte-exact
+constant over a synthetic ledger: the real one is append-only and grows,
+so a pin that followed it would need re-capturing on every appended run.
 
 No pytest (tests/_runner.py): this file was written with fixtures and
 capsys and the `make test` target - plain python, one file at a time, no
 pytest in any venv in this repo - died on its import and silently skipped
-the six files after it in the suite. Converted 2026-09-22 to the house
-convention: tempfile for the scratch ledger, redirect_stderr for the
-warning capture, an early return for the fresh-checkout skip.
+the files after it in the suite. Converted to the house convention:
+tempfile for the scratch ledger, redirect_stderr for the
+warning capture, and a byte-exact constant for the render pin. Every test
+runs against a synthetic ledger - the real one is history, not a fixture,
+and a test that skipped on a fresh checkout would teach nothing there.
 """
 
 import contextlib
@@ -84,7 +87,7 @@ def rec(tag, steps_label, config_steps, seed, det, fa, threshold=0.5):
     return {
         "target": "oww",
         "tag": tag,
-        "corpus_id": "f9c065b",
+        "corpus_id": "base",
         "seed": seed,
         "grid": {"training-steps": steps_label},
         "config": {"steps": config_steps},
@@ -119,15 +122,15 @@ def test_same_label_different_config_splits_and_warns():
     # not must land in SEPARATE groups, with a stderr warning that names the
     # offending tag, the label and the resolved value.
     with tmp_ledger([
-        rec("aaa1111-cf9c065b-haaaaaa", 25000, 25000, 42, 0.70, 0.02),
-        rec("bbb2222-cf9c065b-hbbbbbb", 25000, 50000, 43, 0.90, 0.04),
+        rec("aaa1111-base-haaaaaa", 25000, 25000, 42, 0.70, 0.02),
+        rec("bbb2222-base-hbbbbbb", 25000, 50000, 43, 0.90, 0.04),
     ]), _err() as err:
-        out = ledger.summarise("hey seeree")
+        out = ledger.summarise("test word")
     err = err.getvalue()
     assert "training-steps=25000" in out
     assert "training-steps=50000" in out
     assert out.count("n=1 ") == 2, "one record per group: %r" % out
-    assert "bbb2222-cf9c065b-hbbbbbb" in err
+    assert "bbb2222-base-hbbbbbb" in err
     assert "25000" in err and "50000" in err
     # the agreeing record does not warn
     assert "aaa1111" not in err
@@ -137,30 +140,29 @@ def test_record_without_config_falls_back_to_label():
     # No resolved config on file (predates the config half): the label is
     # the only evidence, grouping keeps it, and there is nothing to warn
     # against.
-    r = rec("aaa1111-cf9c065b-haaaaaa", 25000, 25000, 42, 0.70, 0.02)
+    r = rec("aaa1111-base-haaaaaa", 25000, 25000, 42, 0.70, 0.02)
     r["config"] = None
     with tmp_ledger([r]), _err() as err:
-        out = ledger.summarise("hey seeree")
+        out = ledger.summarise("test word")
     assert "training-steps=25000" in out
     assert err.getvalue() == ""
 
 
 def test_exact_duplicates_collapse_to_distinct_pairs():
-    # C2: four records, two (config-hash, seed) pairs - the real 50k group
-    # shape (h94736bd/1042 and h642a48d/1043, each at two commits, agreeing
-    # to the last digit). n is 2, with the run count alongside, and the
-    # statistics come from the two distinct pairs.
+    # C2: four records, two (config-hash, seed) pairs, each at two commits,
+    # agreeing to the last digit. n is 2, with the run count alongside, and
+    # the statistics come from the two distinct pairs.
     with tmp_ledger([
-        rec("aaa1111-dirty-cf9c065b-h94736bd", 50000, 50000, 1042,
+        rec("aaa1111-dirty-base-hconfa", 50000, 50000, 1042,
             0.9019607843137255, 0.03691275167785235),
-        rec("ccc3333-dirty-cf9c065b-h94736bd", 50000, 50000, 1042,
+        rec("ccc3333-dirty-base-hconfa", 50000, 50000, 1042,
             0.9019607843137255, 0.03691275167785235),
-        rec("ddd4444-cf9c065b-h642a48d", 50000, 50000, 1043,
+        rec("ddd4444-base-hconfb", 50000, 50000, 1043,
             0.7843137254901961, 0.03691275167785235),
-        rec("ccc3333-dirty-cf9c065b-h642a48d", 50000, 50000, 1043,
+        rec("ccc3333-dirty-base-hconfb", 50000, 50000, 1043,
             0.7843137254901961, 0.03691275167785235),
     ]), _err() as err:
-        out = ledger.summarise("hey seeree")
+        out = ledger.summarise("test word")
     assert "n=2 (4 runs)" in out
     assert "84.3% [78.4-90.2]" in out
     assert "adv FA@0.5" in out and "detection@0.5" in out
@@ -172,14 +174,14 @@ def test_divergent_duplicates_are_loud():
     # numbers is a determinism regression - name both tags and the
     # differing fields; do not collapse the disagreement into one number.
     with tmp_ledger([
-        rec("aaa1111-cf9c065b-h94736bd", 50000, 50000, 1042, 0.9, 0.03),
-        rec("ccc3333-cf9c065b-h94736bd", 50000, 50000, 1042, 0.67, 0.03),
+        rec("aaa1111-base-hconfa", 50000, 50000, 1042, 0.9, 0.03),
+        rec("ccc3333-base-hconfa", 50000, 50000, 1042, 0.67, 0.03),
     ]), _err() as err:
-        out = ledger.summarise("hey seeree")
+        out = ledger.summarise("test word")
     err = err.getvalue()
     assert "DETERMINISM REGRESSION" in err
-    assert "aaa1111-cf9c065b-h94736bd" in err
-    assert "ccc3333-cf9c065b-h94736bd" in err
+    assert "aaa1111-base-hconfa" in err
+    assert "ccc3333-base-hconfa" in err
     assert "positives.rate" in err
     # both values stay in the table: the pair did NOT collapse, so both
     # show in the spread (the exact-duplicate path would have shown one)
@@ -193,12 +195,12 @@ def test_mixed_thresholds_say_mixed():
     # records were eval'd at different thresholds cannot pretend to be one
     # threshold and says so instead.
     with tmp_ledger([
-        rec("aaa1111-cf9c065b-haaaaaa", 25000, 25000, 42, 0.7, 0.02,
+        rec("aaa1111-base-haaaaaa", 25000, 25000, 42, 0.7, 0.02,
             threshold=0.5),
-        rec("bbb2222-cf9c065b-hbbbbbb", 25000, 25000, 43, 0.8, 0.01,
+        rec("bbb2222-base-hbbbbbb", 25000, 25000, 43, 0.8, 0.01,
             threshold=0.4),
     ]):
-        out = ledger.summarise("hey seeree")
+        out = ledger.summarise("test word")
     assert "adv FA@mixed" in out
     assert "detection@mixed" in out
 
@@ -207,63 +209,75 @@ def test_summary_carries_the_matched_fa_caveat():
     # C3 step 1: the standing caveat under the table - the numbers cannot
     # be read as a matched-FA comparison (CLAUDE.md).
     with tmp_ledger([
-        rec("aaa1111-cf9c065b-haaaaaa", 25000, 25000, 42, 0.7, 0.02),
-        rec("bbb2222-cf9c065b-hbbbbbb", 50000, 50000, 43, 0.8, 0.01),
+        rec("aaa1111-base-haaaaaa", 25000, 25000, 42, 0.7, 0.02),
+        rec("bbb2222-base-hbbbbbb", 50000, 50000, 43, 0.8, 0.01),
     ]):
-        out = ledger.summarise("hey seeree")
+        out = ledger.summarise("test word")
     assert "one-threshold readings, not a matched-FA comparison" in out
     assert "Never compare models" in out
 
 
-def test_real_ledger_groups_on_resolved_steps():
-    # Invariants, not snapshot numbers: the ledger is APPEND-only and growth
-    # is the norm, so a pin that breaks on the next appended row teaches the
-    # wrong lesson (the old version pinned n=2 / 73.5% on the 25k group, and
-    # any row appended - the 2026-09-23 corpus_axes sweep was the first -
-    # broke it). What must hold forever: C1's self-correction names the two
-    # mislabeled 094e414 rows (25k label, 50k config); both resolved step
-    # groups exist; the 50k group's numbers stay EXACTLY pinnable because
-    # no sweep row has config.steps=50000 (checked 2026-09-23 against the
-    # then-current file); a 25k group spanning more than one corpus_id warns
-    # (the sweep filed config-equal rows across four corpora); the sweep
-    # arms render by grid label.
-    if not ledger.ledger_path("hey seeree").is_file():
-        print("  skip: no ledger at "
-              f"{ledger.ledger_path('hey seeree')} (fresh checkout)")
-        return
-    with _err() as err:
-        out = ledger.summarise("hey seeree")
+def test_label_config_drift_groups_on_resolved_steps():
+    # C1's self-correction, forced by construction instead of by history:
+    # one row's grid label disagrees with its resolved config.steps and must
+    # group under the config value, with a stderr warning that names the
+    # offending tag (the 25k/50k mix that made the table contradict the
+    # hand-built verdict); both resolved step groups render; a group whose
+    # rows were trained on different frozen corpora warns exactly once,
+    # naming its corpus ids; and a sweep arm that varies a second grid key
+    # gets its own row labelled by its grid values.
+    mislabeled = rec("aaa1111-base-h1111111", 25000, 50000, 11, 0.90, 0.04)
+    other_corpus = rec("ccc3333-base-h3333333", 25000, 25000, 13, 0.75, 0.02)
+    other_corpus["corpus_id"] = "a1b2c3d"
+    sweep_arm = rec("eee5555-base-h5555555", 25000, 25000, 15, 0.80, 0.02)
+    sweep_arm["grid"]["copies"] = 3
+    with tmp_ledger([
+        mislabeled,
+        rec("bbb2222-base-h2222222", 25000, 25000, 12, 0.70, 0.02),
+        other_corpus,
+        rec("ddd4444-base-h4444444", 50000, 50000, 14, 0.85, 0.03),
+        sweep_arm,
+    ]), _err() as err:
+        out = ledger.summarise("test word")
+        # same synthetic ledger, grouped on the single key the cross-corpus
+        # warning names: the warning must survive the narrower grouping
+        with _err() as err25:
+            ledger.summarise("test word", grid_keys=["training-steps"])
     err = err.getvalue()
-    # C1's self-correction, ledger-growth-proof: both mislabeled rows named
-    assert "094e414-cf9c065b-h4279b3d" in err
-    assert "094e414-dirty-cf9c065b-h9c5902b" in err
-    # Both resolved step groups exist
-    assert any("training-steps=25000" in l for l in out.splitlines())
-    line_50k = next(l for l in out.splitlines() if "training-steps=50000" in l)
-    # the 50k group cannot gain a member from any corpus_axes row (they are
-    # all config.steps=25000), so its numbers stay exact-pinnable
-    assert "n=4 (6 runs)" in line_50k
-    assert "86.3% [78.4-90.2]" in line_50k
-    # Cross-corpus: grouped on training-steps alone, the 25k group spans the
-    # historical corpus and the sweep's - exactly one warning for THAT group, naming
-    # >= 2 distinct corpus ids (the per-corpus view is compare_arms'; this is the
-    # summariser's loud flag, not a statistic).
-    #
-    # Found by content, not by index: mww joined the swept groups on 2026-09-24
-    # (sweeps/mww-class-weight.yaml), and the render is alphabetical by target, so
-    # warnings[0] is now an mww line. The invariant is per-group, so the test says so.
-    with _err() as err25:
-        ledger.summarise("hey seeree", grid_keys=["training-steps"])
     text25 = err25.getvalue()
-    warnings = [l for l in text25.splitlines()
-                if "corpus_id(s)" in l and "training-steps=25000" in l
-                and l.split("group ")[1].startswith("oww")]
-    assert len(warnings) == 1, f"expected one oww 25k cross-corpus warning, got {warnings}"
-    m = re.match(r"  WARNING: group (\S+) (\S+) spans (\d+) corpus_id\(s\)", warnings[0])
-    assert m and int(m.group(3)) >= 2, warnings[0]
+    # (a) the disagreeing row groups under its config value, named on stderr
+    assert "aaa1111-base-h1111111" in err
+    assert "but the run's resolved config" in err
+    assert "training-steps=25000" in err and "training-steps=50000" in err
+    # (b) both resolved step groups render, and the mislabeled row landed in
+    # the 50k group (each group reads n=2: had it stayed under its label, the
+    # groups would read n=3 against n=1)
+    line_50k = next(l for l in out.splitlines() if "training-steps=50000" in l)
+    line_25k = next(l for l in out.splitlines()
+                    if "copies=-" in l and "training-steps=25000" in l)
+    assert "n=2" in line_50k
+    assert "n=2" in line_25k
+    # (d) the sweep arm is a row of its own, labelled by its grid values
+    assert any("copies=3" in l and "training-steps=25000" in l
+               for l in out.splitlines())
+    # (c) exactly one cross-corpus warning, for the group that spans corpora
+    # (here the plain 25k group); the arm group and the 50k group each sit
+    # on one corpus and stay quiet. (The per-corpus view is compare_arms';
+    # this is the summariser's loud flag, not a statistic.)
+    warnings = [l for l in err.splitlines() if "corpus_id(s)" in l]
+    assert len(warnings) == 1, f"expected one cross-corpus warning, got {warnings}"
+    # Under the single-key grouping the same group must still warn exactly
+    # once with >= 2 distinct corpus ids - pinned by the exact warning shape
+    # so a rewording is a change, not a drift.
+    warnings25 = [l for l in text25.splitlines()
+                  if "corpus_id(s)" in l and "training-steps=25000" in l
+                  and l.split("group ")[1].startswith("oww")]
+    assert len(warnings25) == 1, f"expected one oww 25k cross-corpus warning, got {warnings25}"
+    m = re.match(r"  WARNING: group (\S+) (\S+) spans (\d+) corpus_id\(s\)",
+                 warnings25[0])
+    assert m and m.group(2) == "training-steps=25000"
+    assert int(m.group(3)) >= 2, warnings25[0]
     assert "silently averaged" in text25
-    # a sweep arm renders by its grid label
-    assert any("real-vtlp=ryan=30" in l for l in out.splitlines())
 
 
 # ---------------------------------------------------------------------------
@@ -279,10 +293,10 @@ def test_matched_fa_at_most_budget_picks_the_right_point():
     c25 = _sweep([0.3, 0.5, 0.7], [0.05, 0.02, 0.0], [0.90, 0.85, 0.60])
     c50 = _sweep([0.3, 0.5, 0.7], [0.06, 0.03, 0.01], [0.88, 0.80, 0.72])
     with tmp_ledger([
-        rec_sweep("aaa1111-cf9c065b-haaaaaa", 25000, 42, 0.85, 0.02, c25),
-        rec_sweep("bbb2222-cf9c065b-hbbbbbb", 50000, 43, 0.80, 0.03, c50),
+        rec_sweep("aaa1111-base-haaaaaa", 25000, 42, 0.85, 0.02, c25),
+        rec_sweep("bbb2222-base-hbbbbbb", 50000, 43, 0.80, 0.03, c50),
     ]):
-        out = ledger.summarise("hey seeree")
+        out = ledger.summarise("test word")
     assert "matched-FA budget: adv FA <= 2.5%" in out
     line25 = next(l for l in out.splitlines() if "25000" in l)
     line50 = next(l for l in out.splitlines() if "50000" in l)
@@ -302,10 +316,10 @@ def test_budget_below_best_fa_prints_marked_fallback():
     ca = _sweep([0.3, 0.5, 0.7], [0.05, 0.02, 0.0], [0.90, 0.85, 0.60])
     cb = _sweep([0.3, 0.5, 0.7], [0.09, 0.07, 0.05], [0.90, 0.80, 0.70])
     with tmp_ledger([
-        rec_sweep("aaa1111-cf9c065b-haaaaaa", 25000, 42, 0.85, 0.02, ca),
-        rec_sweep("bbb2222-cf9c065b-hbbbbbb", 50000, 43, 0.80, 0.05, cb),
+        rec_sweep("aaa1111-base-haaaaaa", 25000, 42, 0.85, 0.02, ca),
+        rec_sweep("bbb2222-base-hbbbbbb", 50000, 43, 0.80, 0.05, cb),
     ]):
-        out = ledger.summarise("hey seeree")
+        out = ledger.summarise("test word")
     assert "matched-FA budget: adv FA <= 3.5%" in out
     line50 = next(l for l in out.splitlines() if "50000" in l)
     assert "det@FA<=3.5%  70.0% *" in line50
@@ -320,10 +334,10 @@ def test_mixed_ledger_renders_both_readings_labelled():
     # be read as one comparison.
     ca = _sweep([0.3, 0.5, 0.7], [0.05, 0.02, 0.0], [0.90, 0.85, 0.60])
     with tmp_ledger([
-        rec_sweep("aaa1111-cf9c065b-haaaaaa", 25000, 42, 0.85, 0.02, ca),
-        rec("bbb2222-cf9c065b-hbbbbbb", 50000, 50000, 43, 0.80, 0.03),
+        rec_sweep("aaa1111-base-haaaaaa", 25000, 42, 0.85, 0.02, ca),
+        rec("bbb2222-base-hbbbbbb", 50000, 50000, 43, 0.80, 0.03),
     ]):
-        out = ledger.summarise("hey seeree")
+        out = ledger.summarise("test word")
     # with a single swept group, B is that group's own recorded-threshold FA
     line50 = next(l for l in out.splitlines() if "50000" in l)
     assert "adv FA@0.5" in line50 and "detection@0.5" in line50
@@ -333,55 +347,106 @@ def test_mixed_ledger_renders_both_readings_labelled():
     assert "predate the sweep" in out
 
 
-def test_real_ledger_swept_and_presweep_vintages_render():
-    # The 2026-09-23 corpus_axes sweep made the real ledger hold BOTH
-    # vintages - swept and pre-sweep rows side by side - so the old test's
-    # "no sweep on file, byte-identical to the pre-sweep table" world is
-    # gone. This test pins the STRUCTURAL facts instead: the matched-FA
-    # budget header appears (swept groups exist), and the pre-sweep c6542f5
-    # rows still render their @-threshold columns beside an explicit '-' cell
-    # - a number no run produced must not be printed as one.
-    # The byte-pin against golden files returns with re-captured goldens
-    # (main agent, once the final retry row lands); this test deliberately
-    # does not read tests/golden/*.
-    if not ledger.ledger_path("hey seeree").is_file():
-        print("  skip: no ledger at "
-              f"{ledger.ledger_path('hey seeree')} (fresh checkout)")
-        return
-    with _err():
-        out = ledger.summarise("hey seeree")
+def test_swept_and_presweep_vintages_render_side_by_side():
+    # A ledger holding BOTH vintages at once - rows with a threshold_sweep
+    # and rows without - must stay readable as two readings: the common
+    # matched-FA budget header appears (swept groups exist) and each swept
+    # group reads its own curve AT that budget; the pre-sweep group keeps
+    # its @-threshold columns and gets an explicit '-' cell - a number no
+    # run produced must not be printed as one.
+    c25 = _sweep([0.3, 0.5, 0.7], [0.05, 0.02, 0.0], [0.90, 0.85, 0.60])
+    c50 = _sweep([0.3, 0.5, 0.7], [0.06, 0.03, 0.01], [0.88, 0.80, 0.72])
+    with tmp_ledger([
+        rec_sweep("aaa1111-base-h1111111", 25000, 42, 0.85, 0.02, c25),
+        rec_sweep("bbb2222-base-h2222222", 50000, 43, 0.80, 0.03, c50),
+        rec("ccc3333-base-h3333333", 75000, 75000, 44, 0.78, 0.03),
+    ]):
+        out = ledger.summarise("test word")
     # swept groups exist: the common budget header with its derivation
     assert "matched-FA budget: adv FA <=" in out
-    # pre-sweep rows: their @-threshold columns are intact, and their
-    # no-sweep group gets the explicit '-' cell, not a borrowed number
-    assert "adv FA@0.5" in out
-    assert "detection@0.5" in out
-    assert "-  (no sweep on file" in out
+    # and each swept group reads its own curve at that budget (B is the
+    # median of the two groups' recorded-threshold FAs = 2.5%)
+    line25 = next(l for l in out.splitlines() if "training-steps=25000" in l)
+    line50 = next(l for l in out.splitlines() if "training-steps=50000" in l)
+    assert "det@FA<=2.5%  85.0%" in line25
+    assert "det@FA<=2.5%  72.0%" in line50
+    # pre-sweep group: its @-threshold columns are intact, and its
+    # no-sweep cell is explicit, not a borrowed number
+    line75 = next(l for l in out.splitlines() if "training-steps=75000" in l)
+    assert "adv FA@0.5" in line75 and "detection@0.5" in line75
+    assert "-  (no sweep on file" in line75
 
 
-def test_real_ledger_byte_pin_recaptured():
-    # Byte-pin, re-captured DELIBERATELY 2026-09-24 after the adult-balance sweeps
-    # (oww flat x2 + balanced x2, mww flat x4 + balanced x4) grew the ledger from the
-    # 2026-09-23 pin's 33 records to 45 - the append-only rule means growth is the norm
-    # and re-capture is an act, not a drift (docstring of the test this replaces).
-    # Pinned state: 45 records. The earlier ones are the real-vtlp sweep, the seed-2042
-    # retry, mww class weights x4 on 6bb4cca, mww 10x real copies on 574e978, oww batch
-    # class balance x6 on 19a7898, and the one malformed --set point that trained
-    # without negatives and is filed as measured, not deleted.
-    # This capture is also the first with corpus_id inside the duplicate-run key, so a
-    # flat and a balanced corpus at one (config, seed) count as two samples instead of
-    # collapsing into one and shouting DETERMINISM REGRESSION (train/ledger.py, C2).
-    # If a new record is ever appended, re-capture with the same deliberateness:
-    #   python -m train.ledger --wake-word "hey seeree" > stdout.golden 2> stderr.golden
-    if not ledger.ledger_path("hey seeree").is_file():
-        print("  skip: no ledger at "
-              f"{ledger.ledger_path('hey seeree')} (fresh checkout)")
-        return
-    golden = Path(__file__).parent / "golden"
-    with _err() as err:
-        out = ledger.summarise("hey seeree")
-    assert out + "\n" == (golden / "ledger_hey_seeree_stdout.txt").read_text()
-    assert err.getvalue() == (golden / "ledger_hey_seeree_stderr.txt").read_text()
+def _byte_pin_fixture():
+    """The byte pin's ledger: one swept group beside one pre-sweep group
+    whose two rows sit on different corpora - so one render exercises the
+    budget header, both vintages' row shapes, every footnote block, and the
+    cross-corpus warning on stderr."""
+    c = _sweep([0.3, 0.5, 0.7], [0.05, 0.02, 0.0], [0.90, 0.85, 0.60])
+    rows = [
+        rec_sweep("aaa1111-base-h1111111", 25000, 42, 0.85, 0.02, c),
+        rec("bbb2222-base-h2222222", 50000, 50000, 43, 0.80, 0.03),
+    ]
+    other_corpus = rec("ccc3333-base-h3333333", 50000, 50000, 44, 0.78, 0.03)
+    other_corpus["corpus_id"] = "a1b2c3d"
+    rows.append(other_corpus)
+    with tmp_ledger(rows) as path, _err() as err:
+        out = ledger.summarise("test word")
+    return path, out, err.getvalue()
+
+
+# Byte-pins for test_renderer_output_is_byte_pinned: the exact text
+# summarise prints for _byte_pin_fixture(). The provenance citations and
+# dates inside them are the renderer's own words (train/ledger.py), copied
+# verbatim because that is what a byte pin pins. Re-capture DELIBERATELY -
+# this fixture is fixed, it does not grow like the real ledger: run
+# _byte_pin_fixture(), paste its stdout (minus the path-bearing first line)
+# and stderr into the two constants here, and say in the commit that you did.
+# A pin that silently drifts to keep the suite green has stopped being a pin.
+_PINNED_STDOUT_BODY = """
+  matched-FA budget: adv FA <= 2.0% - the median, across the
+  1 swept group(s), of each group's own median adv FA at its recorded
+  threshold. Every swept group is read AT that budget: the best detection on its
+  own curve with FA <= B - a step-function point pick, never interpolated
+  (CLAUDE.md: never compare models at a fixed threshold; bug.md C3, 2026-09-22).
+
+  oww   training-steps=25000                   n=1  adv FA@0.5  2.0%  detection@0.5  85.0%  det@FA<=2.0%  85.0%
+  oww   training-steps=50000                   n=2  adv FA@0.5  3.0% [3.0-3.0]  detection@0.5  79.0% [78.0-80.0]  det@FA<=2.0%  -  (no sweep on file; @-threshold reading only)
+
+  [min-max] is the repeat-to-repeat spread. The noise floor in
+  this repo is 10 points, measured at an identical config (77% and
+  67% on the same holdout) - a difference inside that band is not
+  a result, no matter which side of it the mean lands on.
+
+  The @ value is the threshold the column was READ at. These are
+  one-threshold readings, not a matched-FA comparison: a detection
+  difference between rows is not a verdict - 'Never compare models
+  at a fixed threshold' (CLAUDE.md); 77% vs 67% at 0.5 was the
+  SAME config (bug.md C3, 2026-09-22).
+
+  det@FA<=B: the matched-FA reading (bug.md C3 step 2, 2026-09-22 - the
+  40-eval manual 0.25-0.85 job this exists to stop). One budget for every
+  swept group; each reads its OWN curve, never another group's.  '-': the
+  records predate the sweep - @-threshold columns only, not comparable at B.
+  '*': the group's curve never reaches FA <= B; the marked value is its best
+  reachable point, at its own FA - a floor, not a reading at the budget."""
+
+_PINNED_STDERR = """  WARNING: group oww training-steps=50000 spans 2 corpus_id(s) a1b2c3d, base (2 record(s)) - cross-corpus rows must never be silently averaged: part of the [min-max] spread is TTS redraw, not seed noise (tools/compare_arms.py is the per-corpus view)
+"""
+
+
+def test_renderer_output_is_byte_pinned():
+    # The renderer's whole output over the synthetic fixture, byte for byte.
+    # The only nondeterministic characters are the scratch file path the
+    # header line names - pinned structurally (the rest of that line is
+    # exact, including the record count); everything after the first newline,
+    # and all of stderr, must match the constants above to the character.
+    path, out, err = _byte_pin_fixture()
+    head, sep, body = out.partition("\n")
+    assert sep, out
+    assert head == f"ledger: {path}  (3 record(s))"
+    assert body == _PINNED_STDOUT_BODY
+    assert err == _PINNED_STDERR
 
 
 def main():

@@ -407,8 +407,8 @@ def summarise(wake_word, grid_keys=None):
     # than one corpus_id) averages DATA, not seeds: part of its [min-max]
     # spread is TTS redraw, not repeat-to-repeat noise, and a reader treats
     # the pooled spread as seed noise unless told otherwise. Grouping on the
-    # resolved config (C1) stays - the 2026-09-23 corpus_axes sweep exposed
-    # the hole: it filed config-equal 25k rows across four corpus ids, and
+    # resolved config (C1) stays - a sweep across corpus axes exposed the
+    # hole: it filed config-equal rows across several corpus ids, and
     # tools/compare_arms.py (the per-corpus view this warning points to) was
     # already saying it per arm; the summariser - the table a reader sees
     # first - had to say it too.
@@ -422,8 +422,8 @@ def summarise(wake_word, grid_keys=None):
                   f"{len(corpora)} corpus_id(s) {', '.join(corpora)} "
                   f"({len(recs)} record(s)) - cross-corpus rows must never be "
                   "silently averaged: part of the [min-max] spread is TTS "
-                  "redraw, not seed noise (2026-09-23 corpus_axes sweep; "
-                  "tools/compare_arms.py is the per-corpus view)",
+                  "redraw, not seed noise (tools/compare_arms.py is the "
+                  "per-corpus view)",
                   file=sys.stderr)
 
     lines = [f"ledger: {path}  ({len(records)} record(s))", ""]
@@ -478,8 +478,8 @@ def summarise(wake_word, grid_keys=None):
         # The corpus belongs in the key: the h-half is the config only, so a flat and
         # a balanced corpus at one config+seed used to collapse into one "duplicated
         # run" and shout a determinism regression at a difference that was the
-        # variable being tested (2026-09-24: c574e978-hd5948fa vs c5a47eeb-hd5948fa,
-        # the flat and balanced arms at seed 953, 41/51 vs 37/51 pooled). Agreements
+        # variable being tested (a corpus-axes sweep pooled the flat and the
+        # balanced arm at one config+seed into one "duplicated run"). Agreements
         # collapse to one statistic; disagreements do not.
         pairs = {}
         for r in recs:
