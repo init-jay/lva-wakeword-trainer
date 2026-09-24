@@ -1,2 +1,0 @@
-  WARNING: oww 094e414-cf9c065b-h4279b3d: grid label training-steps=25000 but the run's resolved config has training-steps=50000 - grouped under the config value (bug.md C1, 2026-09-22: the 094e414 sweep ran before the grid was threaded into the command)
-  WARNING: oww 094e414-dirty-cf9c065b-h9c5902b: grid label training-steps=25000 but the run's resolved config has training-steps=50000 - grouped under the config value (bug.md C1, 2026-09-22: the 094e414 sweep ran before the grid was threaded into the command)

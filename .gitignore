@@ -63,5 +63,13 @@ __pycache__/
 logs/
 *.log
 
-# deployment staging dir
-deploy/
+# deployment staging dir: the RECORD is tracked, the blobs are not.
+# `deploy/` ignored the whole directory, which meant the file that says what is
+# staged, at which measured threshold, and what it beat - deploy/README.md - lived
+# outside version control, so its own "corrections are errata in git history" rule
+# was unsatisfiable and tests/conftest.py's existence check could never fail.
+# No model binary is tracked anywhere in this repo (git ls-files | grep -cE
+# '\.(tflite|onnx)$' == 0, checked 2026-09-24), so ignore the weights and keep the
+# markdown and the ESPHome manifests, which are text and are diffable.
+deploy/**/*.tflite
+deploy/**/*.onnx

@@ -403,6 +403,29 @@ def summarise(wake_word, grid_keys=None):
         combo = tuple(_fmt(v) for v in values)
         groups.setdefault((rec.get("target"), combo), []).append(rec)
 
+    # A group whose records were trained on DIFFERENT frozen corpora (more
+    # than one corpus_id) averages DATA, not seeds: part of its [min-max]
+    # spread is TTS redraw, not repeat-to-repeat noise, and a reader treats
+    # the pooled spread as seed noise unless told otherwise. Grouping on the
+    # resolved config (C1) stays - the 2026-09-23 corpus_axes sweep exposed
+    # the hole: it filed config-equal 25k rows across four corpus ids, and
+    # tools/compare_arms.py (the per-corpus view this warning points to) was
+    # already saying it per arm; the summariser - the table a reader sees
+    # first - had to say it too.
+    for (target, combo), recs in sorted(groups.items(),
+                                        key=lambda kv: (kv[0][0] or "", kv[0][1])):
+        corpora = sorted({str(r.get("corpus_id")) for r in recs
+                          if r.get("corpus_id") is not None})
+        if len(corpora) > 1:
+            label = "  ".join(f"{k}={v}" for k, v in zip(grid_keys, combo)) or "-"
+            print(f"  WARNING: group {target or '?'} {label} spans "
+                  f"{len(corpora)} corpus_id(s) {', '.join(corpora)} "
+                  f"({len(recs)} record(s)) - cross-corpus rows must never be "
+                  "silently averaged: part of the [min-max] spread is TTS "
+                  "redraw, not seed noise (2026-09-23 corpus_axes sweep; "
+                  "tools/compare_arms.py is the per-corpus view)",
+                  file=sys.stderr)
+
     lines = [f"ledger: {path}  ({len(records)} record(s))", ""]
 
     # C3 step 2: per-group sweep curves from the records that carry one, with
@@ -450,17 +473,22 @@ def summarise(wake_word, grid_keys=None):
     for (target, combo), recs in sorted(groups.items(),
                                         key=lambda kv: (kv[0][0] or "", kv[0][1])):
         label = "  ".join(f"{k}={v}" for k, v in zip(grid_keys, combo)) or "-"
-        # C2: distinct (config-hash, seed) pairs are the samples; records
-        # that share both are the same run re-computed at another commit.
-        # Agreements collapse to one statistic; disagreements do not.
+        # C2: distinct (config-hash, seed, corpus) triples are the samples; records
+        # that share all three are the same run re-computed at another commit.
+        # The corpus belongs in the key: the h-half is the config only, so a flat and
+        # a balanced corpus at one config+seed used to collapse into one "duplicated
+        # run" and shout a determinism regression at a difference that was the
+        # variable being tested (2026-09-24: c574e978-hd5948fa vs c5a47eeb-hd5948fa,
+        # the flat and balanced arms at seed 953, 41/51 vs 37/51 pooled). Agreements
+        # collapse to one statistic; disagreements do not.
         pairs = {}
         for r in recs:
-            pairs.setdefault((_config_hash(r), r.get("seed")), []).append(r)
+            pairs.setdefault((_config_hash(r), r.get("seed"), r.get("corpus_id")), []).append(r)
         n = len(pairs)
         n_runs = len(recs)
         adv, det = [], []
         pair_curves = {}
-        for (chash, seed), dups in pairs.items():
+        for (chash, seed, corpus), dups in pairs.items():
             sigs = [_eval_signature(r) for r in dups]
             collapsed = len(sigs) <= 1 or len(set(sigs)) == 1
             if not collapsed:
@@ -470,7 +498,7 @@ def summarise(wake_word, grid_keys=None):
                              if len({s[i] for s in sigs}) > 1]
                 for a, b in itertools.combinations(dups, 2):
                     print(f"  DETERMINISM REGRESSION: {a.get('tag')} and "
-                          f"{b.get('tag')} are the same (config, seed) run but their "
+                          f"{b.get('tag')} are the same (config, seed, corpus) run but their "
                           f"evals differ - {', '.join(differing)}. P0.1's byte-identity "
                           f"bar is not holding; the pair does not collapse, so both "
                           f"values stay in the row (bug.md C2, 2026-09-22)",
@@ -482,7 +510,7 @@ def summarise(wake_word, grid_keys=None):
                     det.append(r["eval_block"]["positives"]["rate"] * 100)
                 curve = _sweep_curve(r)
                 if curve is not None:
-                    pair_curves.setdefault((chash, seed), []).append(curve)
+                    pair_curves.setdefault((chash, seed, corpus), []).append(curve)
         # C3 step 1: name the threshold the rates were read at, or say mixed
         # when the group's records do not agree on one.
         thresholds = {_fmt((r.get("eval_block") or {}).get("threshold")) for r in recs}

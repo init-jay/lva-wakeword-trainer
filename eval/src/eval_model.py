@@ -12,8 +12,8 @@ two scripts are not interchangeable.
 Gates:
 
     extend + hey_other false accepts at 0.5    < 2/32
-    clean positive detection at 0.5            >= 55/56
-    the same, for the WEAKEST speaker          >= 55/56
+    clean positive detection at 0.5            >= 97%
+    the same, for the WEAKEST speaker          >= 97%
     detection with a command immediately after >= 27/30
     median latency from end of speech          < 120 ms
 
@@ -103,7 +103,14 @@ SPEECH_END_FRAC = 0.02      # "end of speech" = last sample above 2% of peak
 
 # Gates, as rates so they survive a different corpus size.
 GATE_FALSE_ACCEPT = 2 / 32
-GATE_POSITIVE = 55 / 56
+# 97%, not 98% (changed 2026-09-23). At this holdout's set sizes the old bar
+# was arithmetically a zero-misses gate: 34/35 = 97.1% and 9/10 = 90% both fail
+# 98%, so the closest adult reading on record (jay 33/35, 94.3%) could never
+# pass any gate at or above 97.2%, and "does jay pass" degraded to "did jay
+# miss literally nothing today". 97% admits exactly one miss for n >= 34 while
+# staying effectively zero-miss for the small speaker sets (n=10, n=6) - the
+# asymmetry is honest: those sets need more recordings, not a softer bar.
+GATE_POSITIVE = 0.97
 GATE_COMMAND = 27 / 30
 GATE_LATENCY_MS = 120
 

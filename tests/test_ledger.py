@@ -38,6 +38,7 @@ warning capture, an early return for the fresh-checkout skip.
 import contextlib
 import io
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -215,10 +216,17 @@ def test_summary_carries_the_matched_fa_caveat():
 
 
 def test_real_ledger_groups_on_resolved_steps():
-    # The cf9c065b-class silent-drift history, pinned: the two 094e414 rows
-    # (25k label, 50k config) group with the true 50k rows, the 25k group
-    # prints its real 73.5% mean, and the 50k group's n counts pairs, not
-    # records. Skips if the repo's ledger is absent (fresh checkout).
+    # Invariants, not snapshot numbers: the ledger is APPEND-only and growth
+    # is the norm, so a pin that breaks on the next appended row teaches the
+    # wrong lesson (the old version pinned n=2 / 73.5% on the 25k group, and
+    # any row appended - the 2026-09-23 corpus_axes sweep was the first -
+    # broke it). What must hold forever: C1's self-correction names the two
+    # mislabeled 094e414 rows (25k label, 50k config); both resolved step
+    # groups exist; the 50k group's numbers stay EXACTLY pinnable because
+    # no sweep row has config.steps=50000 (checked 2026-09-23 against the
+    # then-current file); a 25k group spanning more than one corpus_id warns
+    # (the sweep filed config-equal rows across four corpora); the sweep
+    # arms render by grid label.
     if not ledger.ledger_path("hey seeree").is_file():
         print("  skip: no ledger at "
               f"{ledger.ledger_path('hey seeree')} (fresh checkout)")
@@ -226,14 +234,36 @@ def test_real_ledger_groups_on_resolved_steps():
     with _err() as err:
         out = ledger.summarise("hey seeree")
     err = err.getvalue()
-    line_25k = next(l for l in out.splitlines() if "training-steps=25000" in l)
-    line_50k = next(l for l in out.splitlines() if "training-steps=50000" in l)
-    assert "n=2 " in line_25k
-    assert "73.5% [70.6-76.5]" in line_25k
-    assert "n=4 (6 runs)" in line_50k
-    assert "86.3% [78.4-90.2]" in line_50k
+    # C1's self-correction, ledger-growth-proof: both mislabeled rows named
     assert "094e414-cf9c065b-h4279b3d" in err
     assert "094e414-dirty-cf9c065b-h9c5902b" in err
+    # Both resolved step groups exist
+    assert any("training-steps=25000" in l for l in out.splitlines())
+    line_50k = next(l for l in out.splitlines() if "training-steps=50000" in l)
+    # the 50k group cannot gain a member from any corpus_axes row (they are
+    # all config.steps=25000), so its numbers stay exact-pinnable
+    assert "n=4 (6 runs)" in line_50k
+    assert "86.3% [78.4-90.2]" in line_50k
+    # Cross-corpus: grouped on training-steps alone, the 25k group spans the
+    # historical corpus and the sweep's - exactly one warning for THAT group, naming
+    # >= 2 distinct corpus ids (the per-corpus view is compare_arms'; this is the
+    # summariser's loud flag, not a statistic).
+    #
+    # Found by content, not by index: mww joined the swept groups on 2026-09-24
+    # (sweeps/mww-class-weight.yaml), and the render is alphabetical by target, so
+    # warnings[0] is now an mww line. The invariant is per-group, so the test says so.
+    with _err() as err25:
+        ledger.summarise("hey seeree", grid_keys=["training-steps"])
+    text25 = err25.getvalue()
+    warnings = [l for l in text25.splitlines()
+                if "corpus_id(s)" in l and "training-steps=25000" in l
+                and l.split("group ")[1].startswith("oww")]
+    assert len(warnings) == 1, f"expected one oww 25k cross-corpus warning, got {warnings}"
+    m = re.match(r"  WARNING: group (\S+) (\S+) spans (\d+) corpus_id\(s\)", warnings[0])
+    assert m and int(m.group(3)) >= 2, warnings[0]
+    assert "silently averaged" in text25
+    # a sweep arm renders by its grid label
+    assert any("real-vtlp=ryan=30" in l for l in out.splitlines())
 
 
 # ---------------------------------------------------------------------------
@@ -303,15 +333,46 @@ def test_mixed_ledger_renders_both_readings_labelled():
     assert "predate the sweep" in out
 
 
-def test_real_ledger_no_sweep_output_is_byte_identical():
-    # Pin (regression guard for the fallback path): the real ledger has no
-    # sweep on file, so summarise must be byte-identical to the pre-sweep
-    # table - the append-only ledger will hold both vintages side by side,
-    # and the old reading cannot move a character. The goldens were
-    # captured 2026-09-22, before the sweep existed. If a new record is
-    # ever appended to the real ledger, re-capture the goldens DELIBERATELY
-    # (it is history, not a fixture): the pin is there to make that an
-    # act, not a drift. Skips if the ledger is absent (fresh checkout).
+def test_real_ledger_swept_and_presweep_vintages_render():
+    # The 2026-09-23 corpus_axes sweep made the real ledger hold BOTH
+    # vintages - swept and pre-sweep rows side by side - so the old test's
+    # "no sweep on file, byte-identical to the pre-sweep table" world is
+    # gone. This test pins the STRUCTURAL facts instead: the matched-FA
+    # budget header appears (swept groups exist), and the pre-sweep c6542f5
+    # rows still render their @-threshold columns beside an explicit '-' cell
+    # - a number no run produced must not be printed as one.
+    # The byte-pin against golden files returns with re-captured goldens
+    # (main agent, once the final retry row lands); this test deliberately
+    # does not read tests/golden/*.
+    if not ledger.ledger_path("hey seeree").is_file():
+        print("  skip: no ledger at "
+              f"{ledger.ledger_path('hey seeree')} (fresh checkout)")
+        return
+    with _err():
+        out = ledger.summarise("hey seeree")
+    # swept groups exist: the common budget header with its derivation
+    assert "matched-FA budget: adv FA <=" in out
+    # pre-sweep rows: their @-threshold columns are intact, and their
+    # no-sweep group gets the explicit '-' cell, not a borrowed number
+    assert "adv FA@0.5" in out
+    assert "detection@0.5" in out
+    assert "-  (no sweep on file" in out
+
+
+def test_real_ledger_byte_pin_recaptured():
+    # Byte-pin, re-captured DELIBERATELY 2026-09-24 after the adult-balance sweeps
+    # (oww flat x2 + balanced x2, mww flat x4 + balanced x4) grew the ledger from the
+    # 2026-09-23 pin's 33 records to 45 - the append-only rule means growth is the norm
+    # and re-capture is an act, not a drift (docstring of the test this replaces).
+    # Pinned state: 45 records. The earlier ones are the real-vtlp sweep, the seed-2042
+    # retry, mww class weights x4 on 6bb4cca, mww 10x real copies on 574e978, oww batch
+    # class balance x6 on 19a7898, and the one malformed --set point that trained
+    # without negatives and is filed as measured, not deleted.
+    # This capture is also the first with corpus_id inside the duplicate-run key, so a
+    # flat and a balanced corpus at one (config, seed) count as two samples instead of
+    # collapsing into one and shouting DETERMINISM REGRESSION (train/ledger.py, C2).
+    # If a new record is ever appended, re-capture with the same deliberateness:
+    #   python -m train.ledger --wake-word "hey seeree" > stdout.golden 2> stderr.golden
     if not ledger.ledger_path("hey seeree").is_file():
         print("  skip: no ledger at "
               f"{ledger.ledger_path('hey seeree')} (fresh checkout)")
