@@ -38,6 +38,14 @@ def _repo_root():
     for parent in Path(__file__).resolve().parents:
         if (parent / "data" / "recordings").is_dir() and (parent / "wordlists").is_dir():
             return parent
+    # A fresh clone has no data/ at all: it is gitignored and produced by the record
+    # and corpus steps. The root is still unambiguous from TRACKED markers, and
+    # refusing to resolve it here would make this module - and so every tool and test
+    # that imports it - unrunnable until somebody has been to a microphone. Same walk,
+    # weaker anchor, and the strict one above still wins wherever both exist.
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "wordlists").is_dir() and (parent / "Makefile").is_file():
+            return parent
     raise RuntimeError(f"no repo root (data/recordings/ and wordlists/) above {__file__}")
 
 REPO_ROOT = _repo_root()

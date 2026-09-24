@@ -103,13 +103,12 @@ SPEECH_END_FRAC = 0.02      # "end of speech" = last sample above 2% of peak
 
 # Gates, as rates so they survive a different corpus size.
 GATE_FALSE_ACCEPT = 2 / 32
-# 97%, not 98% (changed 2026-09-23). At this holdout's set sizes the old bar
-# was arithmetically a zero-misses gate: 34/35 = 97.1% and 9/10 = 90% both fail
-# 98%, so the closest adult reading on record (jay 33/35, 94.3%) could never
-# pass any gate at or above 97.2%, and "does jay pass" degraded to "did jay
-# miss literally nothing today". 97% admits exactly one miss for n >= 34 while
-# staying effectively zero-miss for the small speaker sets (n=10, n=6) - the
-# asymmetry is honest: those sets need more recordings, not a softer bar.
+# 97%, not 98%. A gate is a rate rather than a count so that it survives a different
+# corpus size - but a zero-misses bar does not survive a small holdout: with tens of
+# clips per speaker it is arithmetically out of reach, and "does this speaker pass"
+# degrades into "did they miss literally nothing today". 97% admits exactly one miss
+# for the larger speaker sets while staying effectively zero-miss for the small ones -
+# the asymmetry is honest: those sets need more recordings, not a softer bar.
 GATE_POSITIVE = 0.97
 GATE_COMMAND = 27 / 30
 GATE_LATENCY_MS = 120
