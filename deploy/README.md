@@ -55,12 +55,24 @@ is not this model's operating point and nothing about it is calibrated there. Th
 ESP32 manifest's `probability_cutoff: 0.09` is unchanged and remains *its* measured
 point (8/298 = 2.7% FA — above the 2% budget, see below).
 
+Independently re-scored after staging (same md5 `5cadbc53`) with the same result, and the
+curve is **flat from 0.35 to 0.60** — pooled 73%, jay 26/35, jen 9/10 at every grid point in
+that band — so tightening from the 1.7% budget to 0.67% costs no detection at all. The
+endpoints are what pay: 0.65 → 35/51, 0.70 → 34/51 at FA 1, 0.75 → 32/51. The threshold was
+chosen at the flat region's tight edge for that reason, not because 0.58 is special.
+
 ## FA budget
 
 The operating constraint is **FA < 2% of the 298-clip adversarial set = at most 5
 fires**. Every number below is read at that budget or tighter, on the real 51-clip
 holdout (jay 35, jen 10, ryan 6), in **one scoring pass over one set of clips**
-(`tools/score_margins.py`, peaks per clip; curves in `logs/scorecurves/*.csv`).
+(`tools/score_margins.py`, peaks per clip; curves in `logs/scorecurves/*.csv` — that directory
+is gitignored, so a reviewer cannot open them: regenerate any row with
+`eval/.venv/bin/python tools/score_margins.py --model <path> --adv-fa-budget 5 --csv
+logs/scorecurves/<name>.csv`, adding `--sliding-window-size 5` for a bare `.tflite`, since a
+cutoff means nothing without the window that produced it). All 13 saved curves were checked
+to sit on the same 298 adversarial clips (extend 148 + hey_other 150) and the same 51
+positives, so a fixed fire count is comparable across those files.
 Cross-day totals are not comparable and none of these rows are pooled across speakers.
 
 ### Raspberry Pi / openWakeWord
