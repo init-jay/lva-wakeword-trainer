@@ -24,6 +24,20 @@ rpi-oww/hey_seeree_55e182a-dirty-c9897b91-hf37e3df.manifest.json   LVA discovery
 
 `*.manifest.json` is the LVA discovery manifest (model ID = its filename stem, `probability_cutoff` 0.60),
 not the trainer's resolved config (`*.config.json`); stage both the `.tflite` and the `.manifest.json`.
+
+**Open item, naming.** `wake_word.py:40` sets the model ID to `Path.stem`, which strips one
+suffix: the staged file's ID is `hey_seeree_55e182a-dirty-c9897b91-hf37e3df.manifest`, where
+every model LVA bundles is `<id>.json` beside `<id>.tflite` (`hey_jarvis.json`, `alexa.json`) and
+`WAKE_MODEL` is matched against the stem. Renaming the manifest to drop `.manifest` would also
+clean the ID and the HA label, but the satellite is already deployed against the current name and
+`WAKE_MODEL` would have to move in the same step, so it is left alone and recorded here. Verified
+against OHF-Voice/linux-voice-assistant@HEAD 2026-09-24: `:34` globs `*.json` only — a `.json`
+left in the model dir by anything else becomes a selectable model; `:52-53` for openWakeWord the
+`.tflite` is resolved relative to the manifest's own directory, so the pair must stay together;
+`:70` reads `model_config["openWakeWord"]["probability_cutoff"]` and defaults to **0.7** when the
+block is absent — looser than any budget in this document, which is why the manifest ships with
+the weights instead of leaving the cutoff to a config default; `models.py:38` fixes the type
+string as `"openWakeWord"`.
 On the Pi they land in the dir `WAKE_WORD_DIR` points at — on the current install that is the
 `lva_wakeword_custom` volume (`/app/wakewords/custom`), host path
 `/var/lib/docker/volumes/lva_wakeword_custom/_data/` — and `WAKE_MODEL` is set in the compose `.env`
