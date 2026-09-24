@@ -9,14 +9,14 @@ options_to_args -> trainer_cmd`; a dry run that printed the resolved
 command would have made it visible before the first real run, and these
 tests pin what the rendered command must contain.
 
-The corpus_axes coverage (2026-09-23, real-vtlp) pins the same seam one level
+The corpus_axes coverage (e.g. the real-vtlp axis) pins the same seam one level
 up: load_spec's gate on the new key, the per-point exemption in
 job_corpus_reuse, and the dry-run transcript itself - where the printed
 corpus label and the resolved --corpus flag of the command must not
 disagree, because that disagreement is exactly the C5 failure class (B1's
 lesson: labels lie, commands do not).
 
-The voice-holdout-set coverage (2026-09-24) pins the eval seam: load_spec
+The voice-holdout-set coverage pins the eval seam: load_spec
 must accept the new key and die on a path that does not exist (a typo'd
 holdout path that only showed up as a silently-missing ledger block is the
 same "the run believes it passed a knob it never passed" class as B1), and
@@ -28,6 +28,7 @@ import contextlib
 import importlib.util
 import io
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -170,7 +171,7 @@ def test_mww_dry_run_build_label_only_for_first_job():
             assert action == "reuse (manifest verified per point)"
 
 
-# -- corpus_axes (2026-09-23) ------------------------------------------
+# -- corpus_axes --------------------------------------------------------
 
 # A minimal oww spec; main() needs `python:` to be an existing file, so it
 # points at the interpreter running the test (the dry run launches nothing).
@@ -245,7 +246,7 @@ def _jobs_from_dry(out):
 
 
 def test_job_corpus_reuse_c5_rule():
-    # C5 (bug.md, 2026-09-22), as the function main() calls: with no corpus
+    # C5, as the function main() calls: with no corpus
     # axes, only the first job (point 0, repeat 0) runs --corpus auto; every
     # later job - point 0's own repeats included - runs --corpus reuse, which
     # refuses a mismatch instead of silently rebuilding the frozen corpus.
@@ -350,14 +351,23 @@ def test_oww_non_axes_dry_run_still_frozen_per_sweep():
             f"point {key}: label {label!r} and cmd {cmd!r} disagree (C5 class)")
 
 
-# -- voice-holdout-set (2026-09-24) ---------------------------------------
+# -- voice-holdout-set --------------------------------------------------
 
 def test_load_spec_eval_accepts_voice_holdout_set():
-    # The 45-clip set rendered by make render-voice-holdout exists on disk,
-    # so load_spec must take the key through verbatim.
-    spec = _load(eval={"enabled": True, "python": sys.executable,
-                       "voice-holdout-set": "data/corpus/eval/voice_holdout_tts"})
-    assert spec["eval"]["voice-holdout-set"] == "data/corpus/eval/voice_holdout_tts"
+    # The behaviour pinned: load_spec accepts the key and passes it through
+    # VERBATIM (eval_cmd takes whatever the spec said, unchanged). The
+    # existence check it runs before accepting resolves the spec's value
+    # against the repo root, so the path here has to exist without relying
+    # on a corpus the repo's data tree would hold: an absolute temp dir is
+    # what the check accepts as an absolute path, and the assertion is on
+    # exactly that string, unmodified.
+    holdout = tempfile.mkdtemp(prefix="sweep-voice-holdout-")
+    try:
+        spec = _load(eval={"enabled": True, "python": sys.executable,
+                           "voice-holdout-set": holdout})
+    finally:
+        shutil.rmtree(holdout)
+    assert spec["eval"]["voice-holdout-set"] == holdout
 
 
 def test_load_spec_eval_dies_on_missing_voice_holdout_set():
@@ -397,9 +407,9 @@ def test_mww_ambient_dirs_follow_the_ambient_flag():
     # --tag, positional. train/mww/train.py's --ambient is nargs="*", so the bare
     # directories parsed as "zero ambient sets" and the run died at its own preflight
     # ("no validation_ambient or testing_ambient data in any feature set", exit 1) -
-    # measured 2026-09-24, where it cost all four points of
-    # sweeps/mww-class-weight.yaml. argparse does NOT reject the positionals, so the
-    # failure looked like a data problem, not a command-construction problem.
+    # and every point of an early sweep failed this way. argparse does NOT reject
+    # the positionals, so the failure looked like a data problem, not a
+    # command-construction problem.
     amb = ["data/external/mww_ambient/dinner_party",
            "data/external/mww_ambient/dinner_party_eval",
            "data/external/mww_ambient/speech"]
@@ -434,6 +444,68 @@ def test_tag_naming_no_corpus_is_refused():
     assert sweep.tag_names_no_corpus("cabsent-hcbfb214")     # corpus half first, too
     assert not sweep.tag_names_no_corpus("f2865bc-c6bb4cca-hcbfb214")
     assert not sweep.tag_names_no_corpus("f2865bc-dirty-c6bb4cca-h1")
+
+
+# -- corpus verification is a whole-sweep gate --------------------------
+
+def _fake_python(dir_path, exit_line):
+    """A stand-in interpreter: a sh script that ignores its arguments and
+    exits as directed, in the test's temp tree, executable. corpus_action
+    launches it as a plain file, so no real module has to resolve."""
+    fake = dir_path / "python"
+    fake.write_text(f"#!/bin/sh\n{exit_line}\n")
+    fake.chmod(0o755)
+    return str(fake)
+
+
+def test_a_corpus_that_fails_verification_is_fatal_not_advisory():
+    # The claim this branch makes, pinned: on a later point (first_point
+    # False) the mww reuse path runs the corpus stage with --skip purely to
+    # VERIFY the on-disk manifest against this invocation, and a non-zero
+    # exit must die the WHOLE sweep through die() (SystemExit) - never a
+    # per-point skip. The downstream training stages survive a failed point
+    # on purpose, because a re-run retries it; that is the wrong rule here,
+    # because carrying on would train every arm against a corpus the sweep
+    # never asked for and file them as if the arm had run - the frozen
+    # corpus this sweep's measurements depend on, silently swapped. The
+    # call is minimal on purpose: a manifest stub (the verify branch only
+    # needs corpus.json to exist; the fake interpreter decides the outcome),
+    # first_point False so the build and features branches stay out, and no
+    # corpus_args - so nothing under data/ or output/ has to be present.
+    tmp = Path(tempfile.mkdtemp(prefix="sweep-verify-"))
+    corpus = tmp / "corpus"
+    corpus.mkdir()
+    (corpus / "corpus.json").write_text("{}")
+    features = tmp / "features"
+    stage_times = {}
+    try:
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(err):
+            try:
+                sweep.corpus_action("dry word", "mww", corpus, features,
+                                    False, False, _fake_python(tmp, "exit 1"),
+                                    [], stage_times, first_job=True)
+            except SystemExit:
+                pass
+            else:
+                raise AssertionError(
+                    "corpus verification failed but the sweep kept going")
+        # The SWEEP FAILED line (die's channel: stderr) carries the refusal.
+        assert "not the corpus this sweep asked for" in err.getvalue(), \
+            err.getvalue()
+
+        # The converse: the same call with a verify that agrees returns the
+        # reuse label instead of dying (and the features stage does not run:
+        # that only happens on the first point).
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            action = sweep.corpus_action("dry word", "mww", corpus, features,
+                                         False, False, _fake_python(tmp, "exit 0"),
+                                         [], stage_times, first_job=True)
+        assert action == "reuse (manifest verified, --skip)", f"{action!r}"
+    finally:
+        shutil.rmtree(tmp)
 
 
 def main():

@@ -179,7 +179,7 @@ def job_corpus_reuse(first_job, repeat, corpus_axes):
 
     Default is C5's rule: only the first job is auto, every later job
     reuses-and-refuses. The exception is a sweep whose GRID varies a corpus
-    axis, declared explicitly in `corpus_axes:` (2026-09-23, real-vtlp): then
+    axis, declared explicitly in `corpus_axes:` (e.g. real-vtlp): then
     the corpus is frozen per POINT, not per sweep - each point's repeat 0
     runs auto (verify, or rebuild because the grid itself changed the
     shaping), and repeats inside a point still refuse a mismatch. The
@@ -363,10 +363,10 @@ def trainer_cmd(target, python, wake_word, base_args, point_args, seed,
         # `--ambient` IS the flag, not a positional: train/mww/train.py declares it
         # with nargs="*", so a bare list of directories parses as "zero ambient sets"
         # and the run dies at its own preflight ("no validation_ambient or
-        # testing_ambient data in any feature set") with exit 1, not exit 2. Measured
-        # 2026-09-24: every point of the first mww sweep failed this way. The run
-        # script gets it right (scripts/run-mww-training-applesilicon.sh:466), which is
-        # how a divergence between the two survived - and tests/test_sweep.py now
+        # testing_ambient data in any feature set") with exit 1, not exit 2.
+        # Every point of an early sweep failed this way. The run script gets it
+        # right (scripts/run-mww-training-applesilicon.sh:466), which is how a
+        # divergence between the two survived - and tests/test_sweep.py now
         # asserts this shape.
         ambient_args = ["--ambient", *[str(a) for a in ambient]] if ambient else []
         return [str(python), "-m", "train.mww.train",
@@ -507,12 +507,13 @@ def corpus_action(wake_word, target, corpus, features, first_point, dry_run,
     # the training stages below deliberately carry on when one fails (a failed point is
     # skipped and a re-run retries it); that is the WRONG rule here. --skip exits 1 when
     # the manifest disagrees with this invocation's shaping, and the return code was
-    # dropped: on 2026-09-24 a sweep whose grid asked for --balance-real-copies jay,jen
-    # printed "refusing to reuse a corpus shaped differently" for every point and then
-    # trained four runs against c574e978, last night's flat-10x corpus, so the balance
-    # arm measured no balance at all. Corpus verification is the frozen-independent-variable
-    # rule (module docstring), so disagreement means the operator must rebuild - not that
-    # the sweep should proceed on the old audio.
+    # dropped: a sweep whose grid asked for a different balancing printed
+    # "refusing to reuse a corpus shaped differently" for every point and then
+    # trained every arm against the previous run's corpus, so the balancing
+    # arm measured no balancing at all. Corpus verification is the
+    # frozen-independent-variable rule (module docstring), so disagreement means
+    # the operator must rebuild - not that the sweep should proceed on the old
+    # audio.
     if result.returncode != 0:
         die(f"the corpus on disk is not the corpus this sweep asked for "
             f"(verify --skip exited {result.returncode}, above). The mww corpus is "
@@ -683,14 +684,14 @@ def main():
             corpus_action(wake_word, target, corpus, features, first_point,
                           False, python, corpus_args, stage_times,
                           first_job=first_job)
-            # The tag is computed AFTER the corpus stage, deliberately (2026-09-24):
-            # on a sweep that BUILDS its corpus, --print-tag run before the build sees
-            # no manifest and files the point's corpus half as "absent" - so the
-            # baseline point of sweeps/mww-class-weight.yaml came out as
-            # f2865bc-cabsent-..., which the ledger reads as a different corpus from
-            # its own arm's c6bb4cca and refuses to compare. --print-tag writes
-            # nothing, so running it after the stage costs a second subprocess and
-            # changes no state; the corpus the tag names is the one the run trains on.
+            # The tag is computed AFTER the corpus stage, deliberately: on a sweep
+            # that BUILDS its corpus, --print-tag run before the build sees no
+            # manifest and files the point's corpus half as "absent" - so the
+            # baseline point of a build-first sweep names no corpus, which the
+            # ledger reads as different from its own arm's and refuses to
+            # compare. --print-tag writes nothing, so running it after the stage
+            # costs a second subprocess and changes no state; the corpus the tag
+            # names is the one the run trains on.
             if not (corpus / "corpus.json").is_file():
                 # The build path writes it and fails loudly if it did not;
                 # the verify path dies in --skip. Reaching this means neither
@@ -729,7 +730,7 @@ def main():
                           first_job=first_job)
             # C5: NOT (not first_point) - that left every repeat of point 0
             # in auto mode, where a manifest mismatch rebuilds the frozen
-            # corpus silently (bug.md, 2026-09-22). The one exemption is a
+            # corpus silently. The one exemption is a
             # declared corpus_axes grid, where the point-0 job of each arm
             # rebuilds on purpose (job_corpus_reuse).
             cmd = trainer_cmd("oww", python, wake_word, base_args, point_args,
