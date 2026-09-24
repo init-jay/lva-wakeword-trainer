@@ -200,8 +200,8 @@ to the average. A model can read PASS pooled and FAIL for one voice:
   speaker2              10        9/10         0.956          -210ms
   speaker3               6         3/6         0.520           140ms
 
-  [FAIL]  clean positive detection        40/51 (78%)     >= 97%
-  [FAIL]  weakest speaker (speaker3)      3/6 (50%)       >= 97%
+  [FAIL]  clean positive detection        40/51 (78%)     >= 98%
+  [FAIL]  weakest speaker (speaker3)      3/6 (50%)       >= 98%
 ```
 
 **A large spread across speakers is not fixed by retuning the threshold, and it is not
@@ -219,8 +219,8 @@ one reads as a spread rather than as slightly-worse-overall.
 
 ```
 extend + hey_other false accepts at 0.5    < 2/32   (6%)
-clean positive detection at 0.5            >= 97%
-the same, for the weakest speaker          >= 97%
+clean positive detection at 0.5            >= 55/56 (98%)
+the same, for the weakest speaker          >= 55/56 (98%)
 detection with a command immediately after >= 27/30 (90%)
 median latency from end of speech          < 120 ms
 ```
