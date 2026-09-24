@@ -38,9 +38,11 @@ guess a wake word from the repo's existing `hey_seeree` files.
 
 - **Record or preflight.** Both need a human speaking into a microphone.
 - **Pick `probability_cutoff` from a default.** It comes from the measured ROC.
-- **Treat `deploy/` as staging ground.** It stages ONE candidate with its measured
+- **Treat `deploy/` as staging ground.** It stages ONE candidate per satellite -
+  `esp32-mww/` runs microWakeWord, `rpi-oww/` runs openWakeWord - each with its measured
   status written down (`deploy/README.md`), out of `output/` because trainers rmtree
-  that tree every run. Replacing the candidate requires a measured win at matched
+  that tree every run. The two are not substitutes and are not compared to each other.
+  Replacing a target's candidate requires a measured win at matched
   false accepts, per speaker. The adversarial negatives were widened 2026-09-21
   (extend 20→148, hey_other 12→150; 366-clip set): a scorecard measured on the old
   230-clip set is not comparable, so the staged candidate must be re-baselined
