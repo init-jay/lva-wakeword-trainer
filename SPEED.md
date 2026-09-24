@@ -137,6 +137,42 @@ Two fresh points, both on post-reservation corpora, latest code (42f8982):
   ryan outright - not a per-speaker win, so per the deploy rule it does not
   replace the staged candidate.
 
+Both engines miss the same two speakers - mww reads jen 4/10 and ryan 0/6, oww
+reads ryan 1/6 with jen at 9/10 - and the fix for both is the same lever no
+hyperparameter has moved: more real recordings of them.
+
+## Real-clip VTLP: the dose-response is real, the trade is not worth it (swept 2026-09-23)
+
+The first `corpus_axes` sweep (`sweeps/oww-real-vtlp.yaml`): VTLP variants
+(1.15-1.30x formant shift) of ryan's 78 REAL clips at {0, 30, 60} variants
+per clip, base 10x copies, 2 seeds per arm, each arm on its own TTS redraw
+(corpus ids dc089d9 / 34e7640 / a90706a). Matched FA at the common budget
+(adv FA <= 2.3%, extend+hey_other, each arm read on its own curve):
+
+| arm | ryan (n=12) | jay | jen | det@FA<=2.3% | voice-holdout |
+|---|---|---|---|---|---|
+| none | 3/12 (25%) | 88.6% | 85.0% | **83.3%** | 80% |
+| ryan=30 | 4/12 (33%) | **61.4%** | 80.0% | 67.6% | 73% |
+| ryan=60 | **6/12 (50%)** | **62.9%** | 85.0% | 68.6% | 77% |
+
+Ryan's gain is monotone in the dose and survives both repeats - this is the
+first measured lever that moved him at all. But it is bought from the
+adults: jay drops ~26 points in BOTH VTLP arms (43/70, 44/70 - not seed
+noise) and overall detection at matched FA loses ~15 points against
+baseline. The mechanism is visible in the row counts: 60 variants/clip makes
+ryan ~36% of positive-class rows vs jay's 1600, and the positive class
+re-balances toward him by dilution of attention, not by acquisition. Verdict:
+**as configured, real-clip VTLP is a measured net negative for the clean-
+detection gate** - it moves the right speaker and breaks the wrong ones.
+A single point before the sweep (seed 58: ryan 3/6, jay 30/35 held) read as
+the lever working; under 2x2 discipline on a different TTS redraw it did not
+reproduce - which is precisely why the loop got its grid.
+
+The retry for seed 2042 (arm ryan=60) died once in the known onnxruntime
+recursive_mutex SIGABRT flake during feature computation (same abort the
+B1-re sweep recorded 2026-09-22) and filed cleanly on re-run; arms now sit
+2/2/2 repeats in the ledger.
+
 ## openWakeWord on the Mac: host vs. container
 
 **On Apple Silicon, leaving the container is worth ~7x on the training stage.** 250
