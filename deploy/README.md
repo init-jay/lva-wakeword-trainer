@@ -39,6 +39,11 @@ for r in map(json.loads, open('deploy/scorecards.jsonl')):
 This file keeps the rules for changing what is staged and the traps that produce wrong
 rows. Numbers belong in the JSONL and in the curve CSVs under `logs/scorecurves/`.
 
+The narrative that does not fit in a row — what is on a given satellite, what was retracted,
+what no measurement here has cleared — lives per wake word in `deploy/<word>.md`, beside the
+rows it explains. It is record, so unlike this file it names the word and quotes the row ids
+that carry its numbers.
+
 ## FA budget
 
 The operating constraint is a **false-accept rate on the adversarial negatives**, not a
@@ -149,5 +154,15 @@ relying on them, they are not ours to keep stable.
   checkable, and an unchecked row gets cited as fact.
 - **The threshold in each row is measured**, from the curve in `logs/scorecurves/`, not
   defaulted — and it is the threshold the satellite runs at, not a nearby one.
+- **`status` belongs to the artifact, and exactly one row per target is `staged`.** That row's
+  `threshold` is the cutoff the staged manifest or ESPHome JSON actually ships. Every other row
+  for the same artifact is a curve reading: give it `reference` and say in `note` why it exists.
+  A reader filtering `status == "staged"` must get one row per target, or "one candidate per
+  target" is not something the file can answer. The same holds for `deployed`, which means
+  running on a satellite *now*.
+- **If the shipped cutoff has no measured row, that is an open item, not a resolved state.**
+  The nearest row carries `shipped_cutoff` and says so in `note`; the gap is listed in the
+  per-word record beside the rows. Do not close it by editing a deployed manifest to match a
+  measurement — measure at the shipped point, or move the shipped point deliberately.
 - **Corrections are new rows or errata in the git history**, never an edit to a row already
   written.
