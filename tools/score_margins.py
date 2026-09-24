@@ -55,6 +55,16 @@ def artifact_of(model):
     just belong to neither model. That is how one arm of the 2026-09-24 balance
     sweep was scored against the wrong tag, and why a mismatched pair is worth
     failing on rather than printing. Returns (path, md5_8).
+
+    A bare path into ``data/corpus/`` is refused for the same reason with a different
+    mechanism: the corpus tree keeps ONE ``tflite_stream_state_internal_quant.tflite``
+    per corpus, and every run built against that corpus writes its weights there, so
+    the file is the last run's, not the one being asked about. On 2026-09-25 every
+    ESP32 row in ``deploy/README.md`` had come from there: four "different" flat-seed
+    models scored as 19/33/32/41 adults were two files, one of them the balanced
+    arm's, and the flip made the balance lever look like a loss when re-paired bytes
+    made it a win (19,27 flat vs 35,41,21 balanced, jen 0/10 -> 6/10). The run dir is
+    the only per-run copy, so it is the only place a scored model may come from.
     """
     path = Path(model)
     if path.suffix == ".json":
@@ -64,6 +74,16 @@ def artifact_of(model):
         path = path.parent / named
     if not path.exists():
         raise SystemExit(f"model artifact named by {model} does not exist: {path}")
+    corpus = (REPO_ROOT / "data" / "corpus").resolve()
+    resolved = path.resolve()
+    if resolved == corpus or corpus in resolved.parents:
+        raise SystemExit(
+            f"refusing to score {resolved}: it is inside the corpus tree, which holds "
+            f"one shared copy of the weights per corpus (last run wins), so its bytes "
+            f"belong to whichever run was converted last, not to the model being asked "
+            f"about. Score the run-dir copy under output/<word>/<target>/<tag>/. "
+            f"(2026-09-25: this is how every ESP32 row in deploy/README.md got "
+            f"attributed to the wrong arm - see the Corrections section.)")
     return path, hashlib.md5(path.read_bytes()).hexdigest()[:8]
 
 

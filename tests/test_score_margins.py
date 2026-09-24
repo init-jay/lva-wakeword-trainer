@@ -122,6 +122,45 @@ def test_an_unreachable_budget_reports_none_instead_of_a_lying_number():
     assert sm.operating_threshold(adv, 1, grid=[0.1, 0.5, 0.9]) is None
 
 
+def test_a_corpus_tree_model_is_refused():
+    # data/corpus/<word>/mww/<corpus-id>/tflite_stream_state_internal_quant/ holds ONE
+    # copy of the weights per corpus: every run built against that corpus writes its
+    # weights there, so the bytes belong to whichever run converted last, not to the
+    # model being asked about. On 2026-09-25 every ESP32 row in deploy/README.md came
+    # from there - four "different" flat-seed models were really two files, one of them
+    # the balanced arm's - and the reversal that followed (balance read as a loss where
+    # re-paired bytes make it a win: 19,27 flat vs 35,41,21 adults; jen 0/10 -> 6/10) is
+    # why this path is refused rather than warned about.
+    with tempfile.TemporaryDirectory() as d:
+        root, saved = Path(d), sm.REPO_ROOT
+        try:
+            sm.REPO_ROOT = root
+            shared = (root / "data" / "corpus" / "hey_seeree" / "mww" / "c574e978" /
+                      "tflite_stream_state_internal_quant" /
+                      "stream_state_internal_quant.tflite")
+            shared.parent.mkdir(parents=True)
+            shared.write_bytes(b"last-run-wins")
+            try:
+                sm.artifact_of(shared)
+            except SystemExit as exc:
+                msg = str(exc)
+                assert "corpus tree" in msg, f"must say why it refused: {msg}"
+                assert "output/" in msg, f"must point at the run dir: {msg}"
+            else:
+                raise AssertionError("a model inside data/corpus/ must not be scored")
+
+            # The guard must not catch the thing it exists to force: the per-run copy.
+            run = (root / "output" / "hey_seeree" / "mww" / "c574e978-h5835241" /
+                   "stream_state_internal_quant.tflite")
+            run.parent.mkdir(parents=True)
+            run.write_bytes(b"per-run")
+            path, digest = sm.artifact_of(run)
+            assert path == run, f"the run-dir copy must still resolve: {path}"
+            assert digest == hashlib.md5(b"per-run").hexdigest()[:8], digest
+        finally:
+            sm.REPO_ROOT = saved
+
+
 def main():
     import _runner
     _runner.run(sys.modules[__name__])
