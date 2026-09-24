@@ -115,6 +115,32 @@ figure in the older notes; squeezed to the budget (0.148, 4 fires) jen is 1/10 a
 4/6. Recomputed from `logs/scorecurves/mww-incumbent-da01854d.csv` rather than from
 memory, so both rows are reproducible from the same curve file.
 
+### Which bytes an ESP32 row belongs to
+
+Every ESP32 row here is the *content* of `models: {<tag>: …}`, and the tag cannot vouch for it.
+The `h-` half of a tag is a sha over the resolved hyperparameters plus the seed
+(`train/provenance.py:37`) and `probability_cutoff` is not among them — it cannot be, because the
+cutoff is read off the ROC *after* training (`train/mww/train.py:510` prints it and says "Pick
+`probability_cutoff` from THIS, not from a default"). `window_stride` is not in `config.json`
+either. So two runs that differ only in shipped cutoff share one tag; the attribution lives in the
+manifest that ships beside the weights, and the tag identifies only the corpus directory.
+
+A second ambiguity sits underneath it: each run dir keeps its own copy of the weights, but its
+manifest names the *corpus* copy by absolute path — four manifests, one file. `score_margins.py`
+resolves a manifest, so an ESP32 row scored that way is ambiguous unless the two copies agree.
+Force the bytes, and the printed md5 becomes the row's identifier:
+
+```bash
+cp output/hey_seeree/mww/<tag>/tflite_stream_state_internal_quant/stream_state_internal_quant.tflite /tmp/<tag>.tflite
+eval/.venv/bin/python tools/score_margins.py --model /tmp/<tag>.tflite --sliding-window-size 5 --adv-fa-budget 5
+```
+
+Spot-checked this way on 2026-09-25 against the two rows above: balanced seed 951 (md5 `e74e471c`)
+reproduces threshold 0.85, jay 35/35, jen 6/10; flat seed 950 (md5 `54570f4e`) reproduces 0.60,
+jay 19/35, jen 0/10. Both match, so the table is attributable — through this procedure, not from
+the tag alone. openWakeWord rows do not have the problem: its output is a single tagged
+`<tag>.onnx`/`<tag>.tflite` per run.
+
 Adults per speaker at FA ≤ 5, all four seeds of each arm:
 
 - flat: 19, 33, 32, 41 → mean 31.3
