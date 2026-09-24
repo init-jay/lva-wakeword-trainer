@@ -2,10 +2,11 @@
 """Read matched-false-accept per-speaker tables out of score_margins CSV dumps.
 
 The companion to tools/score_margins.py: that tool runs a model once and writes every
-clip's peak; this reads those CSVs back and answers the question a scorecard actually
-gets asked - at the threshold that admits N adversarial fires, what does EACH speaker
-score? One row per model, no pooled number anywhere, because pooling is what hides the
-voice that fails (CLAUDE.md).
+clip's peak; this reads those CSVs back and answers the question a comparison
+actually gets asked - at the threshold that admits N adversarial fires, what does
+EACH speaker score? One row per model, each read on its OWN curve; the pooled
+column (shown last) is not a verdict - pooling across speakers is how a voice
+that fails gets averaged away.
 
     python3 tools/matched_fa_table.py /tmp/margins/*.csv [--budgets 6,12]
 """

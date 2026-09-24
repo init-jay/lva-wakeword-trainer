@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 """Is each real speaker's pitch range covered by each corpus's TTS voices?
 
-WHY THIS EXISTS. The two engines disagree about which adult is the hard one, on the
-SAME recordings: mWW measures jen 4/10 on the holdout and 37/93 on her own TRAINING
-clips (median sliding-window peak 0.327 against a 0.60 cutoff) while jay reads 34/35;
-oWW measures jen 8-10/10. A voice that the model does not fire on even in its own
-training clips is a coverage failure, not a threshold failure - and the biggest
-difference between the two corpora is the TTS mix (oWW all-Kokoro, mWW Piper-majority).
-So the question to answer BEFORE spending a training run is whether the mWW corpus
-ever renders a voice in jen's pitch range.
+WHY THIS EXISTS. A voice that the model does not fire on even in its own training
+clips is a coverage failure, not a threshold failure: no cutoff choice rescues a
+pitch range the corpus never renders, and the TTS mix is exactly where the
+corpora differ. So the question to answer BEFORE spending a training run is
+whether each corpus ever renders a voice in each real speaker's pitch range.
 
 WHAT IT MEASURES. Median F0 per clip by autocorrelation (the same estimator
 measure_voice_f0.py uses), then, per speaker, where that speaker sits inside the
@@ -16,8 +13,8 @@ corpus' TTS F0 distribution and what fraction of the corpus lies within +/-2 sem
 of the speaker's median. F0 is a proxy for timbre, not timbre itself: a covered pitch
 range does not prove the voice is learnable, it only removes the cheapest explanation.
 
-    python3 tools/f0_coverage.py                       # both corpora, all speakers
-    python3 tools/f0_coverage.py --clips 200 --pattern 'real_*'
+    python3 tools/f0_coverage.py                     # every corpus, all speakers
+    python3 tools/f0_coverage.py --clips 200
 
 Names: piper/kokoro clips carry the voice in the filename (piper_pf_en_GB-aru-medium_03_<uuid>.wav,
 vtlp1.20_piper_...), and the real clips carry the speaker (real_N_<speaker>_<file>.wav on
@@ -37,6 +34,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 from measure_voice_f0 import estimate_f0  # noqa: E402
 
+# The targets the pipeline produces - the same pair train/provenance.py:TARGETS names,
+# spelled out here so this tool stays importable without the repo root on sys.path.
+# Ad-hoc copies a session leaves beside them (a probe corpus, a pre-fix backup) are not
+# corpora to profile by default; --corpus still reaches any of them explicitly.
+_TARGETS = ("oww", "mww")
+
 
 def clip_f0(path):
     """Median F0 over voiced frames, or None."""
@@ -55,7 +58,7 @@ def clip_f0(path):
 
 
 def real_speaker(name, known):
-    """real_7_jen_hey_seeree_0012.wav -> jen; real_v3_1.22_jen_... -> jen too.
+    """real_7_spk_word_0012.wav -> spk; real_v3_1.22_spk_... -> spk too.
 
     The copy index sits between 'real' and the flattened relative path, and a VTLP
     variant inserts 'v<i>' and the ratio before it - so the speaker is whichever token
@@ -80,8 +83,25 @@ def describe(label, values, ref=None):
     if ref is not None:
         within = ((v >= ref / 2 ** (2 / 12)) & (v <= ref * 2 ** (2 / 12))).mean()
         pct = (v < ref).mean()
-        extra = f"   | within 2 st of ref: {within:>5.1%}   percentile of ref: {pct:>5.0%}"
+        extra = (f"   | within 2 st of ref: {within:>5.1%}   "
+                 f"percentile of ref: {pct:>5.0%}")
     print(f"  {label:<40} n={v.size:<6} p10 {q[0]:5.0f} median {q[1]:5.0f} p90 {q[2]:5.0f} Hz{extra}")
+
+
+def discover_corpora():
+    """Every corpus dir under data/corpus/: one subdirectory per wake word, each
+    holding the per-target corpora. Plain files and the shared 'eval' subtree
+    are skipped; a subdirectory without a positives dir is dropped by the caller."""
+    root = REPO_ROOT / "data" / "corpus"
+    if not root.is_dir():
+        return []
+    out = []
+    for word in sorted(root.iterdir()):
+        if not word.is_dir() or word.name == "eval":
+            continue
+        out.extend(p for p in sorted(word.iterdir())
+                   if p.is_dir() and p.name in _TARGETS)
+    return out
 
 
 def main():
@@ -89,7 +109,7 @@ def main():
     ap.add_argument("--clips", type=int, default=300, help="clips sampled per corpus")
     ap.add_argument("--speaker-clips", type=int, default=40, help="clips per real speaker")
     ap.add_argument("--corpus", action="append", default=[],
-                    help="corpus dir to profile (default: both under data/corpus/hey_seeree)")
+                    help="corpus dir to profile (default: every word under data/corpus/)")
     args = ap.parse_args()
     rng = random.Random(0)
 
@@ -104,8 +124,10 @@ def main():
         describe(sp.name, vals)
     print()
 
-    corpora = [Path(REPO_ROOT / c) for c in args.corpus] or \
-        sorted((REPO_ROOT / "data" / "corpus" / "hey_seeree").iterdir())
+    corpora = [Path(REPO_ROOT / c) for c in args.corpus] or discover_corpora()
+    if not corpora:
+        sys.exit("no corpus dirs found under data/corpus/ - build a corpus first, "
+                 "or pass --corpus explicitly")
     for corpus in corpora:
         pos = next((corpus / d for d in ("positive_train", "positives")
                     if (corpus / d).is_dir()), None)

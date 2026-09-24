@@ -4,7 +4,7 @@
     train-applesilicon/.venv/bin/python tools/compare_arms.py \
         --wake-word "hey seeree" --grid-key real-vtlp [--ledger PATH]
 
-Built for the corpus_axes sweeps (sweeps/oww-real-vtlp.yaml): the sweep varies
+Built for the corpus_axes sweeps: the sweep varies
 the CORPUS, not the trainer, so its rows are not comparable by ledger's plain
 summarise() - which groups on trainer config and would silently fold arms
 whose configs are identical into one row. This tool keeps only the records
@@ -28,10 +28,9 @@ then prints, per arm:
     'ranking signal, not a gate'.
 
 The ledger's honesty rules are imported, not re-derived: _config_hash /
-_eval_signature (bug.md C2 - n counts distinct (config-hash, seed) pairs;
-exact duplicates collapse and print n=K (M runs); divergent duplicates print
-a DETERMINISM WARNING naming both tags), _sweep_curve and _at_most_budget
-(bug.md C3 step 2 - point picks only). Records with no threshold_sweep
+_eval_signature (n counts distinct (config-hash, seed) pairs; exact duplicates
+collapse and print n=K (M runs); divergent duplicates print a DETERMINISM
+WARNING naming both tags), _sweep_curve and _at_most_budget (point picks only). Records with no threshold_sweep
 (every pre-sweep row) keep the labelled @-threshold reading and get
 '- (no sweep on file)' in the matched cell - the mixed-vintage fallback
 train/ledger.py carries, because the append-only ledger holds both vintages.
@@ -91,7 +90,7 @@ def _arm_label(value):
 
 
 def _arm_samples(recs):
-    """(n_pairs, n_runs, samples, pair_tags) - bug.md C2 semantics, per arm.
+    """(n_pairs, n_runs, samples, pair_tags) - the ledger's pair semantics, per arm.
 
     Two records sharing the tag's h-half (config hash) AND the seed are the
     same run computed at two commits: not two draws. Exact duplicates
@@ -117,8 +116,8 @@ def _arm_samples(recs):
                 print(f"  DETERMINISM WARNING: {a.get('tag')} and {b.get('tag')} "
                       f"are the same (config-hash, seed) run but their evals "
                       f"differ - {', '.join(differing)}. The pair does not "
-                      "collapse; both values stay in the row (bug.md C2, "
-                      "2026-09-22: the byte-identity bar is not holding)",
+                      "collapse; both values stay in the row - the "
+                      "byte-identity bar is not holding",
                       file=sys.stderr)
         samples.extend(dups[:1] if collapsed else dups)
     return len(pairs), len(recs), samples, pair_tags
@@ -129,8 +128,8 @@ def _per_speaker(samples):
 
     Sums within ONE speaker across the arm's repeats - the within-arm
     aggregation the footer says separates the lever from the redraw.
-    Speakers stay separate: pooling across speakers is what hid ryan (24%
-    against 97%, CLAUDE.md)."""
+    Speakers stay separate: pooling across them is how a voice that fails
+    gets averaged away."""
     out = {}
     for r in samples:
         for name, v in ((r.get("eval_block") or {}).get("per_speaker") or {}).items():
@@ -208,7 +207,7 @@ def render(records, grid_key, ledger_file):
             lines += [
                 f"  matched-FA budget: adv FA <= {budget:.1f}% - the median, across the",
                 f"  {n_swept} swept arm(s), of each arm's own median adv FA at its recorded",
-                "  threshold. The rule train/ledger.py summarise prints (bug.md C3, 2026-09-22).",
+                "  threshold. The rule train/ledger.py summarise prints.",
                 "  Each arm is read AT that budget on its OWN curve - a step-function point",
                 "  pick, never interpolated (CLAUDE.md: never compare models at a fixed threshold).",
                 "",
@@ -258,8 +257,9 @@ def render(records, grid_key, ledger_file):
             lines.append(f"    FA {name:<10} {fired}/{n}  "
                          f"{(fired / n * 100 if n else float('nan')):.1f}%  (context)")
 
-        # Per speaker, with a Wilson CI - the interval exists because ryan is
-        # n=6 (one clip = 16.7 points; wilson_interval's docstring).
+        # Per speaker, with a Wilson CI - the interval exists because the
+        # least-recorded speaker has few clips (one clip is a large share of
+        # the rate; wilson_interval's docstring).
         lines.append("    per speaker (never pooled across speakers):")
         for name, (det_s, n_s) in sorted(_per_speaker(info["samples"]).items()):
             ci = wilson_interval(det_s, n_s)
@@ -267,7 +267,7 @@ def render(records, grid_key, ledger_file):
             rate_s = f"{det_s / n_s * 100:.1f}%" if n_s else "-"
             lines.append(f"      {name:<8} {det_s}/{n_s}  {rate_s}  {ci_s}")
 
-        # voice_holdout_set: the 45-clip synthetic ranking set, when the eval
+        # voice_holdout_set: the synthetic TTS ranking set, when the eval
         # ran with the flag. A ranking signal for the sweep points - it never
         # stands in for the gates, which stay on the real held-out recordings.
         vhs = [v["rate"] * 100 for r in info["samples"]
@@ -313,11 +313,12 @@ def render(records, grid_key, ledger_file):
     # Footer: always printed - the sweep's whole honest-reading contract.
     lines += [
         "  ARMS DIFFER IN CORPUS IDENTITY: the sweep's corpus_axes rebuilds the TTS",
-        "  corpus between arms (sweeps/oww-real-vtlp.yaml), so a cross-arm gap carries",
+        "  corpus between arms, so a cross-arm gap carries",
         "  redraw noise on top of the lever. The within-arm repeats are what separate",
         "  the lever from the redraw; one repeat is not a result.",
-        "  The 10-point run-to-run noise floor (77% vs 67% at an identical config)",
-        "  applies to any per-speaker reading at n<=35.",
+        "  Run-to-run noise at these holdout sizes is wide enough that a small",
+        "  per-speaker difference is not a result: two runs of an identical",
+        "  config disagree at the same threshold, and that is the evidence.",
     ]
     return "\n".join(lines)
 

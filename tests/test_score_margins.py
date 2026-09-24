@@ -1,17 +1,15 @@
-"""Guards for tools/score_margins.py's artifact resolution and threshold choice.
+"""Guards for tools/score_margins.py's artifact resolution, threshold and budget choice.
 
-WHY THESE EXIST. On 2026-09-24 an arm of the balance sweep was scored against the
-wrong model and the verdict came out backwards twice: first "the flat arm produced
-models that fire on all 298 clips", then "balancing is a big win on microWakeWord".
-Both readings came from paths that resolved to a different run's weights, silently,
-because of how mww runs lay out on disk: every manifest is named `hey_seeree.json`
-and every model inside the run dir is named `stream_state_internal_quant.tflite`, so
-one wrong path component still opens *a* model and prints numbers that belong to
-neither the model you meant nor the arm you are judging.
+WHY THESE EXIST. An mww run dir lays out so that one wrong path component still opens
+*a* model and prints numbers: every manifest is named `<word>.json` and every model
+inside the run dir is named `stream_state_internal_quant.tflite`. Score a manifest from
+one run against another run's weights and the report is silently about neither - and a
+verdict built on it can come out backwards rather than merely noisy.
 
-The fix is two things, and both are asserted here: the resolved artifact and its md5
-are echoed next to every reading, and a manifest naming a `.tflite` that is not there
-is a hard error instead of a shrug.
+The fix is three things, and all are asserted here: the resolved artifact and its md5
+are echoed next to every reading; a manifest naming a `.tflite` that is not there is a
+hard error instead of a shrug; and a model inside the shared corpus tree is refused
+outright, because those bytes belong to whichever run converted last.
 """
 
 import hashlib
@@ -98,9 +96,9 @@ def test_a_bare_model_path_resolves_to_itself():
 
 
 def test_operating_threshold_takes_the_lowest_one_within_budget():
-    # The budget is a count of adversarial fires, not a rate: 5/298 is what FA<2%
-    # means at this clip count. Ascending grid, so the first pass is the loosest
-    # threshold that still buys detection - never a fixed 0.5 (CLAUDE.md).
+    # The budget is a COUNT of adversarial fires, not a rate; default_budget() turns the
+    # rate into one. Ascending grid, so the first pass is the loosest threshold that still
+    # buys detection - never a fixed threshold (CLAUDE.md).
     grid = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
     adv = [0.95, 0.85, 0.65, 0.55, 0.50, 0.35, 0.20]
     # fires(t) = count(p >= t): 7 at 0.2, 5 at 0.4, 3 at 0.6, 2 at 0.7, 1 at 0.9, 0 at 1.0
@@ -122,15 +120,48 @@ def test_an_unreachable_budget_reports_none_instead_of_a_lying_number():
     assert sm.operating_threshold(adv, 1, grid=[0.1, 0.5, 0.9]) is None
 
 
+def test_default_budget_stays_strictly_inside_the_constraint():
+    # Derived, not hardcoded: a count that is right for one adversarial set's size is
+    # wrong for the next one, and a budget that lands exactly ON the constraint reads as
+    # inside it when it is not. ceil(n * c) - 1 is the largest count strictly inside c.
+    assert sm.default_budget(298) == 5, sm.default_budget(298)
+    # 6/300 is exactly 2%, which is not strictly inside 2% - so 5, not 6.
+    assert sm.default_budget(300) == 5, sm.default_budget(300)
+    assert sm.default_budget(1000) == 19, sm.default_budget(1000)
+    # A set so small that even one fire breaches the constraint gets a zero budget
+    # rather than a negative one: nothing may fire.
+    assert sm.default_budget(50) == 0, sm.default_budget(50)
+    assert sm.default_budget(0) == 0
+    for n in (10, 137, 298, 366, 1000, 4096):
+        b = sm.default_budget(n)
+        assert b >= 0 and b / n < sm.ADV_FA_CONSTRAINT, (n, b)
+
+
+def test_the_curve_table_has_a_column_for_every_holdout_speaker():
+    # The table exists to show what the FA budget costs the speaker with the fewest
+    # clips, so its columns come from the holdout, not from a pair of names in the
+    # source. A third speaker the author's holdout did not have must still get a column
+    # - dropping it is how the pooled reading survives as the only one.
+    peaks = {"adult_a": [("a0", 0.9), ("a1", 0.1)],
+             "adult_b": [("b0", 0.7)],
+             "child": [("c0", 0.05), ("c1", 0.02), ("c2", 0.4)]}
+    speakers = list(peaks)
+    head = sm.curve_header(speakers)
+    for s in speakers:
+        assert s in head, f"{s} has no column in: {head}"
+    cells = sm.curve_cells(peaks, speakers, 0.3)
+    assert cells.count("/") == len(speakers), cells
+    # k/n per speaker, in order, at that threshold (adult_a's 0.1 peak is below it)
+    assert cells.split() == ["1/2", "1/1", "1/3"], cells
+
+
 def test_a_corpus_tree_model_is_refused():
     # data/corpus/<word>/mww/<corpus-id>/tflite_stream_state_internal_quant/ holds ONE
     # copy of the weights per corpus: every run built against that corpus writes its
     # weights there, so the bytes belong to whichever run converted last, not to the
-    # model being asked about. On 2026-09-25 every ESP32 measurement in deploy/scorecards.jsonl came
-    # from there - four "different" flat-seed models were really two files, one of them
-    # the balanced arm's - and the reversal that followed (balance read as a loss where
-    # re-paired bytes make it a win: 19,27 flat vs 35,41,21 adults; jen 0/10 -> 6/10) is
-    # why this path is refused rather than warned about.
+    # model being asked about. Several "different" runs then score as one file, and an
+    # arm judged against another arm's weights reads backwards - which is why this path
+    # is refused rather than warned about.
     with tempfile.TemporaryDirectory() as d:
         root, saved = Path(d), sm.REPO_ROOT
         try:

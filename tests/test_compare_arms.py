@@ -12,9 +12,12 @@ the repo - the synthetic ledger is written to a tempfile and handed to the
 real CLI through its --ledger flag, so the whole main() -> render() path is
 exercised and captured stdout/stderr is what gets asserted on.
 
-Fixture rows are shaped EXACTLY like output/hey_seeree/runs.jsonl lines
-(field names copied from a real row and from tests/test_ledger.py's
-helpers); one test pins that against the real ledger when it is on file.
+Fixture rows are shaped EXACTLY like the ledger lines the pipeline writes
+(field names copied from the writers in the repo: train/ledger.py's
+record(), the eval block eval_model.py --json writes, and the sweep's
+grid extra key). One test pins the fixture's key sets against those writers,
+hermetically: it reads the writers' SOURCE, which a clean clone has -
+not the recorded rows in gitignored output/, which it does not.
 """
 
 import contextlib
@@ -31,8 +34,6 @@ if str(REPO_ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 import compare_arms  # noqa: E402
-
-REAL_LEDGER = REPO_ROOT / "output" / "hey_seeree" / "runs.jsonl"
 
 
 # --- fixtures: exact shapes from a real runs.jsonl line ---------------------
@@ -159,23 +160,60 @@ def _run(records, grid_key="real-vtlp"):
 
 # --- tests ------------------------------------------------------------------
 
-def test_fixture_shape_matches_real_ledger():
-    """The fixture's field names are the real file's field names, not
-    inventions: every fixture key must exist on a real recorded row."""
-    if not REAL_LEDGER.is_file():
-        return  # fresh checkout: nothing real to pin against
-    real = [json.loads(l) for l in REAL_LEDGER.read_text().splitlines()
-            if l.strip()]
-    assert real
-    fx = rec("aaa1111-cf9c065b-h1234567", 42, "ryan=30", 0.90, 0.037,
+def _quoted_in(key, src):
+    """Drift guard: `key` appears as a quoted literal ("key" or 'key')
+    in source text `src`."""
+    return f'"{key}"' in src or f"'{key}'" in src
+
+
+def test_fixture_shape_matches_the_writers():
+    """The fixture's field names are the writers' field names, not
+    inventions: every fixture key set is pinned against the explicit set
+    that mirrors where the pipeline writes it, and each key name must
+    appear as a quoted literal in that writer's source. The source is
+    what a clean clone has (repo code) in place of the recorded rows
+    (gitignored output/), and it is the tripwire for the explicit sets:
+    a key renamed in a writer drops out of the source and fails here.
+    (Honest caveat: the guard is text matching, not AST - a key whose
+    literal moved into an f-string or **kwargs would slip past it. No
+    key below is built that way; the one exception, "grid", is handled
+    below by pinning against the module that supplies it.)"""
+    fx = rec("aaa1111-corp0000-h1234567", 42, "ryan=30", 0.90, 0.037,
              curve=_curve([0.5], [0.03], [0.9]), vhs=0.87)["eval_block"]
-    row = rec("aaa1111-cf9c065b-h1234567", 42, "ryan=30", 0.90, 0.037)
-    missing = set(row) - set(real[0])
-    assert not missing, f"fixture top-level keys not in the real ledger: {missing}"
-    # threshold_sweep and voice_holdout_set are the NEW-format eval keys:
-    # every row on file predates them, so pin their NAMES against what
-    # eval_model.py itself writes, and the rest of the eval block against
-    # the real rows.
+    row = rec("aaa1111-corp0000-h1234567", 42, "ryan=30", 0.90, 0.037)
+
+    # TOP LEVEL: train/ledger.py record() assembles the row - its fixed
+    # keys plus "recorded_utc", which it sets right after rec.update(extra).
+    top = {"wake_word", "target", "tag", "corpus_id", "seed", "config",
+           "wall_time", "eval_block", "recorded_utc"}
+    assert set(row) == top | {"grid"}, f"fixture top-level keys drifted: {set(row)}"
+    ledger_src = (REPO_ROOT / "train" / "ledger.py").read_text()
+    for key in top:
+        assert _quoted_in(key, ledger_src), \
+            f"top-level key {key!r} no longer a quoted literal in train/ledger.py"
+    # "grid" cannot be pinned in record(): it lands via **extra
+    # (rec.update(extra)), never as a literal in the writer. The supplier
+    # is scripts/sweep.py, where spec.get("grid") builds the dict and
+    # ledger.record(..., grid=gp) passes it, so pin against that source.
+    sweep_src = (REPO_ROOT / "scripts" / "sweep.py").read_text()
+    assert _quoted_in("grid", sweep_src), \
+        "'grid' no longer a quoted literal in scripts/sweep.py"
+
+    # EVAL BLOCK: the dict eval_model.py writes under --json, built inline
+    # around its main() tail (per_speaker[speaker] = {...},
+    # "false_accepts_by_category": {...}, "latency_median_ms", "missed").
+    eval_src = (REPO_ROOT / "eval" / "src" / "eval_model.py").read_text()
+    eval_block_keys = {"model", "threshold", "backend", "timestamp",
+                       "false_accepts_by_category", "adversarial",
+                       "positives", "per_speaker", "command_following",
+                       "gates", "threshold_sweep", "voice_holdout_set"}
+    assert set(fx) == eval_block_keys, f"eval_block keys drifted: {set(fx)}"
+    for key in eval_block_keys:
+        assert _quoted_in(key, eval_src), \
+            f"eval key {key!r} no longer a quoted literal in eval_model.py"
+
+    # threshold_sweep: pinned against the function itself, not just the
+    # source text - the return of the real call is the field set.
     if "eval" not in sys.modules:
         import types as _types
         _pkg = _types.ModuleType("eval")
@@ -185,22 +223,35 @@ def test_fixture_shape_matches_real_ledger():
     sweep_keys = set(threshold_sweep([0.5, 0.3], [0.4], grid=[0.5]).keys())
     assert set(fx["threshold_sweep"]) == sweep_keys, \
         f"threshold_sweep keys drifted from eval_model.py: {sweep_keys}"
-    assert set(fx["voice_holdout_set"]) == {"directory", "n", "detected",
-                                            "rate", "latency_median_ms",
-                                            "missed"}
-    eval_missing = (set(fx) - {"threshold_sweep", "voice_holdout_set"}
-                    - set(real[0]["eval_block"]))
-    assert not eval_missing, \
-        f"fixture eval_block keys not in the real ledger: {eval_missing}"
-    for speaker in ("jay", "ryan"):
-        sp_missing = (set(row["eval_block"]["per_speaker"][speaker])
-                      - set(real[0]["eval_block"]["per_speaker"][speaker]))
-        assert not sp_missing, f"per_speaker[{speaker}] keys invented: {sp_missing}"
+
+    # voice_holdout_set: the dict eval_model.py builds when the flag is on
+    # ({"directory": str(vdir), "n": ..., "missed": [...]}).
+    vhs_keys = {"directory", "n", "detected", "rate", "latency_median_ms",
+                "missed"}
+    assert set(fx["voice_holdout_set"]) == vhs_keys
+    for key in vhs_keys:
+        assert _quoted_in(key, eval_src), \
+            f"voice_holdout_set key {key!r} drifted from eval_model.py"
+
+    # per_speaker dict: per_speaker[speaker] = {...} in eval_model.py.
+    sp_keys = {"n", "detected", "rate", "ci95", "median_latency_ms"}
+    for speaker in ("jay", "ryan", "jen"):
+        assert set(fx["per_speaker"][speaker]) == sp_keys, \
+            f"per_speaker[{speaker}] keys drifted: " \
+            f"{set(fx['per_speaker'][speaker])}"
+    for key in sp_keys:
+        assert _quoted_in(key, eval_src), \
+            f"per_speaker key {key!r} no longer a quoted literal in eval_model.py"
+
+    # per-category dict: the "false_accepts_by_category" comprehension.
+    cat_keys = {"n", "fired", "rate", "median_peak", "worst_peak"}
     for cat in ("extend", "hey_other", "command"):
-        cat_missing = (set(row["eval_block"]["false_accepts_by_category"][cat])
-                       - set(real[0]["eval_block"]["false_accepts_by_category"][cat]))
-        assert not cat_missing, \
-            f"false_accepts_by_category[{cat}] keys invented: {cat_missing}"
+        assert set(fx["false_accepts_by_category"][cat]) == cat_keys, \
+            f"false_accepts_by_category[{cat}] keys drifted: " \
+            f"{set(fx['false_accepts_by_category'][cat])}"
+    for key in cat_keys:
+        assert _quoted_in(key, eval_src), \
+            f"category key {key!r} no longer a quoted literal in eval_model.py"
 
 
 def test_arm_grouping_and_duplicate_collapse():
@@ -210,13 +261,13 @@ def test_arm_grouping_and_duplicate_collapse():
     out, err = _run([
         # arm '' - two records of the SAME (config-hash, seed) pair, identical
         # evals (the C2 duplicate: same run at two commits).
-        rec("aaa1111-cf9c065b-h1111111", 42, "", 0.90, 0.03),
-        rec("bbb2222-cf9c065b-h1111111", 42, "", 0.90, 0.03),
+        rec("aaa1111-corp0000-h1111111", 42, "", 0.90, 0.03),
+        rec("bbb2222-corp0000-h1111111", 42, "", 0.90, 0.03),
         # arm ryan=30 - two DISTINCT pairs (two seeds), no collapse.
-        rec("ccc3333-cf9c065b-h2222222", 42, "ryan=30", 0.88, 0.03),
-        rec("ddd4444-cf9c065b-h2222222", 43, "ryan=30", 0.92, 0.04),
+        rec("ccc3333-corp0000-h2222222", 42, "ryan=30", 0.88, 0.03),
+        rec("ddd4444-corp0000-h2222222", 43, "ryan=30", 0.92, 0.04),
         # a row from the old training-steps sweep: no real-vtlp key.
-        {**rec("eee5555-cf9c065b-h3333333", 42, "", 0.5, 0.5),
+        {**rec("eee5555-corp0000-h3333333", 42, "", 0.5, 0.5),
          "grid": {"training-steps": 25000}},
     ])
     assert "grid key 'real-vtlp' in 4" in out
@@ -230,12 +281,12 @@ def test_divergent_duplicate_warns_naming_both_tags():
     """Same (config-hash, seed) pair whose evals DIFFER must not collapse
     silently: a DETERMINISM WARNING on stderr names both tags."""
     out, err = _run([
-        rec("aaa1111-cf9c065b-h1111111", 42, "ryan=30", 0.90, 0.03),
-        rec("bbb2222-cf9c065b-h1111111", 42, "ryan=30", 0.67, 0.05),
+        rec("aaa1111-corp0000-h1111111", 42, "ryan=30", 0.90, 0.03),
+        rec("bbb2222-corp0000-h1111111", 42, "ryan=30", 0.67, 0.05),
     ])
     assert "DETERMINISM WARNING" in err
-    assert "aaa1111-cf9c065b-h1111111" in err
-    assert "bbb2222-cf9c065b-h1111111" in err
+    assert "aaa1111-corp0000-h1111111" in err
+    assert "bbb2222-corp0000-h1111111" in err
     # Both values stay in the row: the pair does not collapse to one sample.
     assert "n=1 (2 runs)" in out
     assert "67.0-90.0" in out  # min-max carries both readings
@@ -266,11 +317,11 @@ def test_matched_fa_budget_and_unreachable_floor():
     out, err = _run([
         # arm ryan=30: curve reaches FA <= 3.5 -> picks the 45.0% point at
         # FA 2.0 (not the 40.0% point at FA 1.0: max detection wins).
-        rec("aaa1111-cf9c065b-h1111111", 42, "ryan=30", 0.90, 0.03,
+        rec("aaa1111-corp0000-h1111111", 42, "ryan=30", 0.90, 0.03,
             curve=_curve([0.5, 0.6, 0.7], [0.05, 0.02, 0.01],
                          [0.50, 0.45, 0.40])),
         # arm ryan=60: curve's best FA is 5.0 > 3.5 -> unreachable, floor.
-        rec("bbb2222-cf9c065b-h2222222", 43, "ryan=60", 0.95, 0.04,
+        rec("bbb2222-corp0000-h2222222", 43, "ryan=60", 0.95, 0.04,
             curve=_curve([0.5, 0.6, 0.7], [0.05, 0.06, 0.07],
                          [0.60, 0.50, 0.40])),
     ])
@@ -296,8 +347,8 @@ def test_sweepless_rows_keep_labelled_fallback():
     matched cell - train/ledger.py's mixed-vintage behavior. When NO arm
     has a sweep at all, there is no budget to derive."""
     out, _ = _run([
-        rec("aaa1111-cf9c065b-h1111111", 42, "", 0.90, 0.037),
-        rec("bbb2222-cf9c065b-h2222222", 43, "ryan=30", 0.88, 0.033),
+        rec("aaa1111-corp0000-h1111111", 42, "", 0.90, 0.037),
+        rec("bbb2222-corp0000-h2222222", 43, "ryan=30", 0.88, 0.033),
     ])
     assert "detection@0.5" in out and "adv FA@0.5" in out
     assert "det@FA<=B        -  (no sweep on file; @-threshold reading only)" in out
@@ -306,9 +357,9 @@ def test_sweepless_rows_keep_labelled_fallback():
     # Mixed-vintage: one swept arm, one not - the swept arm is read at B,
     # the other keeps the labelled fallback.
     out2, _ = _run([
-        rec("aaa1111-cf9c065b-h1111111", 42, "ryan=30", 0.90, 0.03,
+        rec("aaa1111-corp0000-h1111111", 42, "ryan=30", 0.90, 0.03,
             curve=_curve([0.5, 0.6], [0.05, 0.02], [0.50, 0.45])),
-        rec("bbb2222-cf9c065b-h2222222", 43, "ryan=60", 0.88, 0.037),
+        rec("bbb2222-corp0000-h2222222", 43, "ryan=60", 0.88, 0.037),
     ])
     assert "matched-FA budget: adv FA <= 3.0%" in out2  # only ryan=30 swept
     assert "det@FA<=3.0%   45.0%" in out2
@@ -319,10 +370,10 @@ def test_per_speaker_wilson_and_voice_holdout_and_footer():
     """Per speaker (never pooled): n/m with the eval harness's Wilson CI
     (ryan 3/6 -> [18.8-81.2], the value eval_model.py wilson_interval gives);
     voice_holdout_set is labelled a ranking signal, not a gate; the footer
-    (redraw noise, one repeat is not a result, 10-point floor) is ALWAYS
-    printed, even for a single record."""
+    (redraw noise, one repeat is not a result, run-to-run noise at these
+    holdout sizes) is ALWAYS printed, even for a single record."""
     out, _ = _run([
-        rec("aaa1111-cf9c065b-h1111111", 42, "ryan=30", 0.90, 0.03,
+        rec("aaa1111-corp0000-h1111111", 42, "ryan=30", 0.90, 0.03,
             vhs=0.8667),
     ])
     assert "per speaker (never pooled across speakers):" in out
@@ -335,11 +386,13 @@ def test_per_speaker_wilson_and_voice_holdout_and_footer():
     assert "0/12  0.0%  (context)" in out        # command, context only
     assert "(ranking signal, not a gate)" in out
     assert "voice_holdout  86.7%" in out
-    # The footer, always: redraw noise, one repeat, the 10-point floor.
+    # The footer, always: redraw noise, one repeat, run-to-run noise at
+    # these holdout sizes - wide enough that a small per-speaker gap is
+    # not a result, evidenced by identical-config runs disagreeing.
     assert "ARMS DIFFER IN CORPUS IDENTITY" in out
     assert "one repeat is not a result" in out
-    assert "10-point run-to-run noise floor" in out
-    assert "n<=35" in out
+    assert "wide enough that a small" in out
+    assert "config disagree at the same threshold" in out
 
 
 def test_empty_ledger_and_absent_key():
@@ -347,7 +400,7 @@ def test_empty_ledger_and_absent_key():
     labelled nothing, not a traceback - the tool is read-only on history."""
     out, _ = _run([], grid_key="real-vtlp")
     assert "no records carry that grid key" in out
-    out2, _ = _run([{**rec("aaa1111-cf9c065b-h1111111", 42, "", 0.9, 0.03),
+    out2, _ = _run([{**rec("aaa1111-corp0000-h1111111", 42, "", 0.9, 0.03),
                      "grid": {"training-steps": 25000}}],
                    grid_key="training-steps")
     assert "grid key 'training-steps' in 1" in out2
