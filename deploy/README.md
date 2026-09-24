@@ -81,7 +81,7 @@ Cross-day totals are not comparable and none of these rows are pooled across spe
 |---|---|---|---|---|---|---|---|
 | `c9897b91-hf37e3df` **staged** | 0.584 | 2/298 (0.67%) | 26/35 | 9/10 | 2/6 | **35/45 (77.8%)** | **37/51** |
 | `c9897b91-hc34dc7e` (same arm, other seed, onnx) | 0.487 | 4/298 | 25/35 | 9/10 | 1/6 | 34/45 | 35/51 |
-| flat 10x `c306c00f-h509d9ea` | 0.339 | 4/298 | 24/35 | 8/10 | 1/6 | 32/45 | 33/51 |
+| flat 10x `c306c00f-h509d9ea` (tflite, md5 `6c99f78a`) | 0.35 | 4/298 (1.3%) | 23/35 | 8/10 | 1/6 | 31/45 | 32/51 |
 | **what was firing in the house** (untagged Sep-7 `hey_seeree.tflite`, md5 `5014ac67f5b1ede7d518c13fb46a3cc8`, 5k steps) | 0.783 | 5/298 | 26/35 | 8/10 | 2/6 | 34/45 | 36/51 |
 
 At the loose end of the budget the staged candidate is a **one-clip tie** with the
@@ -99,14 +99,24 @@ That is the argument for staging it: under 1% FA it is worth +8 adult points and
 still reads 33/45 adults (jay 24, jen 9, ryan 1); the house model is at 27/45 by two
 fires.
 
-### ESP32 / microWakeWord — incumbent stands, and the balance lever did not help here
+### ESP32 / microWakeWord — the balance lever did help; three of eight models cannot be calibrated
 
-| model | threshold | adv FA | jay | jen | ryan | adults |
-|---|---|---|---|---|---|---|
-| `ecbf160-da01854d` **staged** | 0.148 | 4/298 | 30/35 | 1/10 | 4/6 | 31/45 |
-| `42f8982-h5f6f353` (2026-09-22) | 0.748 | 3/298 | 34/35 | 4/10 | 0/6 | 38/45 |
-| flat 10x, best seed `c574e978-hd5948fa` | 0.970 | 3/298 | 34/35 | 7/10 | 1/6 | **41/45** |
-| balanced `jay,jen`, best seed `c5a47eeb-hbd0e5de` | 0.870 | 5/298 | 35/35 | 6/10 | 0/6 | **41/45** |
+| md5 | model (corpus = arm, seed) | threshold | adv FA | jay | jen | ryan | adults |
+|---|---|---|---|---|---|---|---|
+| `248a15d8` | `ecbf160-da01854d` **staged** | 0.15 | 4/298 (1.3%) | 30/35 | 1/10 | 4/6 | 31/45 |
+| `ee79c1fd` | `42f8982-ce1500f5-h5f6f353` (2026-09-22) | 0.65 | 5/298 (1.7%) | 34/35 | 4/10 | 0/6 | 38/45 |
+| `54570f4e` | flat 10x seed 950 `c574e978-hd6b366e` | 0.60 | 5/298 | 19/35 | **0/10** | 0/6 | 19/45 |
+| `cbf0ec81` | flat 10x seed 951 `c574e978-hbd0e5de` | 0.95 | 4/298 | 27/35 | **0/10** | 0/6 | 27/45 |
+| `a293a2ce` | flat 10x seed 952 `c574e978-h3be78bf` | — | 298/298 at 0.05 | — | — | — | no budget point |
+| `16296dbb` | flat 10x seed 953 `c574e978-hd5948fa` | — | 298/298 at 0.05 | — | — | — | no budget point |
+| `1072e809` | balanced seed 950 `c5a47eeb-hd6b366e` | 0.90 | 5/298 | 29/35 | 6/10 | 0/6 | 35/45 |
+| `e74e471c` | balanced seed 951 `c5a47eeb-hbd0e5de` | 0.85 | 5/298 | **35/35** | 6/10 | 0/6 | **41/45** |
+| `56e7dca0` | balanced seed 952 `c5a47eeb-h3be78bf` | 0.75 | 2/298 (0.7%) | 19/35 | 2/10 | 0/6 | 21/45 |
+| `a7eb5614` | balanced seed 953 `c5a47eeb-hd5948fa` | — | 298/298 at 0.05 | — | — | — | no budget point |
+
+Every row is scored from that run dir's **own** `stream_state_internal_quant.tflite` — the md5 in
+the first column is the row's identity, see *Which bytes an ESP32 row belongs to* below. Re-derived
+2026-09-25; the flat rows that stood here before came from corpus-dir copies and are gone.
 
 The incumbent appears twice with different per-speaker numbers and that is not an
 error: at **its own manifest cutoff 0.09** it sits at FA 8/298 (2.7% — above the 2%
@@ -117,43 +127,63 @@ memory, so both rows are reproducible from the same curve file.
 
 ### Which bytes an ESP32 row belongs to
 
-Every ESP32 row here is the *content* of `models: {<tag>: …}`, and the tag cannot vouch for it.
-The `h-` half of a tag is a sha over the resolved hyperparameters plus the seed
-(`train/provenance.py:37`) and `probability_cutoff` is not among them — it cannot be, because the
-cutoff is read off the ROC *after* training (`train/mww/train.py:510` prints it and says "Pick
-`probability_cutoff` from THIS, not from a default"). `window_stride` is not in `config.json`
-either. So two runs that differ only in shipped cutoff share one tag; the attribution lives in the
-manifest that ships beside the weights, and the tag identifies only the corpus directory.
+Every ESP32 row above is the *content* of a run dir's weights file, and the tag alone cannot vouch
+for it. Two reasons, both learned the hard way this session.
 
-A second ambiguity sits underneath it: each run dir keeps its own copy of the weights, but its
-manifest names the *corpus* copy by absolute path — four manifests, one file. `score_margins.py`
-resolves a manifest, so an ESP32 row scored that way is ambiguous unless the two copies agree.
-Force the bytes, and the printed md5 becomes the row's identifier:
+**The tag does not carry the shipped cutoff.** The `h-` half of a tag is a sha over the resolved
+hyperparameters plus the seed (`train/provenance.py:37`), and `probability_cutoff` is not among
+them — it cannot be, because the cutoff is read off the ROC *after* training
+(`train/mww/train.py:510` prints it and says "Pick `probability_cutoff` from THIS, not from a
+default"). The training-side `stride` and `window_step_ms` *are* in `config.json` and so are hashed;
+what is not hashed is the inference `sliding_window_size` and `probability_cutoff` that ship in the
+manifest's `micro` block. Two runs differing only in shipped cutoff therefore share one tag.
+
+**There are two copies of the weights and only one is per-run.** A manifest's `model` key is a bare
+filename resolving to its **sibling** — audited 2026-09-25: 23/23 run manifests resolve inside their
+own directory and every md5 is distinct. But the corpus directory keeps a copy too
+(`data/corpus/hey_seeree/mww/<corpus-id>/tflite_stream_state_internal_quant/`), and that copy is
+**shared by every run built against that corpus** — last write wins. Scoring from it yields
+per-arm bytes wearing per-seed names. That is the only mechanism that fits the flat rows that stood
+here on 2026-09-24: none of them reproduce from a run dir, seed 953's own bytes fire on 298/298
+adversarial clips at every threshold, and the file behind its "41/45" row (`d9cfb496`) has no
+run-dir owner. The exact provenance of each stale row cannot be reconstructed — `prepare_corpus`
+rmtree's the corpus tree at the start of every run, and the next sweep had already replaced those
+copies by the time this was checked. What survives is the rule: score the run dir.
+
+So: score the run dir, and treat the md5 `score_margins.py` prints as the row's identifier.
 
 ```bash
-cp output/hey_seeree/mww/<tag>/tflite_stream_state_internal_quant/stream_state_internal_quant.tflite /tmp/<tag>.tflite
-eval/.venv/bin/python tools/score_margins.py --model /tmp/<tag>.tflite --sliding-window-size 5 --adv-fa-budget 5
+eval/.venv/bin/python tools/score_margins.py \
+  --model output/hey_seeree/mww/<tag>/tflite_stream_state_internal_quant/stream_state_internal_quant.tflite \
+  --sliding-window-size 5 --adv-fa-budget 5
 ```
 
-Spot-checked this way on 2026-09-25 against the two rows above: balanced seed 951 (md5 `e74e471c`)
-reproduces threshold 0.85, jay 35/35, jen 6/10; flat seed 950 (md5 `54570f4e`) reproduces 0.60,
-jay 19/35, jen 0/10. Both match, so the table is attributable — through this procedure, not from
-the tag alone. openWakeWord rows do not have the problem: its output is a single tagged
-`<tag>.onnx`/`<tag>.tflite` per run.
+openWakeWord does not have this problem: its output is one tagged `<tag>.onnx`/`<tag>.tflite` per
+run. Anything staged into `deploy/esp32-mww/` must be md5-matched against its run-dir bytes before
+a row beside it is trusted.
 
-Adults per speaker at FA ≤ 5, all four seeds of each arm:
+Adults per usable model at FA ≤ 5, all four seeds of each arm:
 
-- flat: 19, 33, 32, 41 → mean 31.3
-- balanced (jen lifted to 18x): 36, 41, 23, **unusable** → mean 25
+- flat: **19, 27**, and two seeds with no budget point → mean 23, best 27
+- balanced (jen lifted to 18x): **35, 41, 21**, one seed with no budget point → mean 32.3, best 41
 
-**No evidence that balancing helps this engine.** The seed-to-seed spread inside each
-arm (22 points) is larger than the difference between the arms, the best single model
-came from the *flat* arm, and the balanced arm produced one model that cannot be
-calibrated at all: `train.mww.manifest` refused to write a manifest for
-`c5a47eeb-hd5948fa` because no cutoff meets `--max-faph 0.2` while detecting anything,
-and its per-clip peaks sit in 0.65–0.996 across positives *and* negatives — no
-separation, not a dead model. The manifest stage is non-fatal by design
-(`run-mww-training-applesilicon.sh`), so the sweep still filed the row.
+**Balancing helped this engine, and the opposite claim written here on 2026-09-24 was an
+attribution error.** Per seed the arms pair up 950: 19→35, 951: 27→41, 952: no-budget-point→21,
+953: no-budget-point→no-budget-point. jen is the stable part: **0/10 in both usable flat seeds**,
+6/10 in the two best balanced seeds, 2/10 in the third — on 10 real clips that is the largest
+per-speaker move any lever made this session. ryan is 0/6 in every 10x-family model, usable or not,
+balanced or flat.
+
+Three of the eight cannot be calibrated at all: `train.mww.manifest` refuses to write a manifest
+(no cutoff meets `--max-faph 0.2` while detecting anything) and the tightest grid threshold still
+fires on all 298 adversarial clips. **Two of those three are flat seeds** — the 2026-09-24 note
+named only the balanced one. The manifest stage is non-fatal by design
+(`run-mww-training-applesilicon.sh`), so the sweep still files the row.
+
+The balanced best (`e74e471c`, 41/45 adults, jay 35/35, jen 6/10) beats the incumbent on both
+adults and jen but loses ryan outright (0/6 vs 4/6). That trade is a judgement call, not a
+measurement, and it is the user's to make. Re-baselining and staging it is a
+`tools/score_margins.py` pass plus a preflight, not a code change.
 
 Neither challenger replaces the incumbent on the stated bar: both beat it on the
 adults (41 vs 31) and lose ryan outright (0–1/6 vs 4/6). That trade is a judgement
@@ -162,11 +192,24 @@ of them is a `tools/score_margins.py` pass plus a preflight, not a code change.
 
 ## Corrections to what is written above
 
+- **2026-09-25 — this one retracts the 2026-09-24 entry below it, in both
+  directions.** Re-scoring every ESP32 model from its own run dir (md5s in the ESP32 table)
+  shows the flat arm's "best seed 41/45" was not a reading of a model that exists: seed 953's own
+  bytes fire on 298/298 adversarial clips at every threshold. So (a) "balancing is not a win on
+  mww" was wrong — it is a win, 19/27 usable adults flat vs 35/41/21 balanced, and jen goes
+  0/10 → 6/10; and (b) "the flat arm produced models that fire on all 298 clips" was right,
+  which the 2026-09-24 entry wrongly retracted. Both statements were mine, made hours apart,
+  and the correction is the table above plus *Which bytes an ESP32 row belongs to*.
+  `tools/score_margins.py` now prints the resolved artifact plus its md5, exits if a
+  manifest names a `.tflite` that is not there, labels an unreachable-budget reading
+  `BEST-AVAILABLE … NOT AT BUDGET` instead of `matched-FA`, and keys its CSV `model`
+  column on the artifact. Every mww row written before that landed is suspect until re-scored
+  from the run dir — several of the ones in this file's history were, including two I
+  "corrected" and got wrong again in the conservative direction.
 - **2026-09-24, this session:** two claims made verbally before this directory was
   updated were wrong and are superseded by the tables here. (a) "balancing is a big
-  win on mww" — it is not; the flat arm's best seed matched the balanced arm's best
-  and the flat arm's mean is higher. (b) "the flat arm produced models that fire on
-  all 298 clips" — that reading came from scoring the wrong artifact. Every mww model
+  win on mww" — superseded by 2026-09-25: it is a win. (b) "the flat arm produced models that
+  fire on all 298 clips" — also superseded: true, for seeds 952 and 953. Every mww model
   inside a run dir is `stream_state_internal_quant.tflite` and every manifest is
   `hey_seeree.json`, so a mistyped path silently scores a different run.
   `tools/score_margins.py` now prints the resolved artifact plus its md5, exits if a
