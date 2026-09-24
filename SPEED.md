@@ -169,8 +169,8 @@ the lever working; under 2x2 discipline on a different TTS redraw it did not
 reproduce - which is precisely why the loop got its grid.
 
 The retry for seed 2042 (arm ryan=60) died once in the known onnxruntime
-recursive_mutex SIGABRT flake during feature computation (same abort the
-B1-re sweep recorded 2026-09-22) and filed cleanly on re-run; arms now sit
+recursive_mutex SIGABRT flake during feature computation (the same abort a
+2026-09-22 re-run hit) and filed cleanly on re-run; arms now sit
 2/2/2 repeats in the ledger.
 
 ## openWakeWord on the Mac: host vs. container

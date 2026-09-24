@@ -98,8 +98,11 @@ comparable across those files.
   incumbent's 2026-09-08 gate claims are quoted with the old denominator; only the
   2026-09-22 and 2026-09-24 re-scores are on the current set.
 - **Cross-day totals are not comparable**, and no row pools across speakers.
-- The curve CSVs a row cites live in `logs/scorecurves/`, which is gitignored, so a reviewer
-  cannot open them. Regenerate any row with:
+- **The curve CSVs a row cites are committed** under `logs/scorecurves/` — 22 of them, the
+  per-clip peak behind every threshold in every row. `logs/` is otherwise ignored (training
+  logs, one per run); `.gitignore` re-includes just this directory, because a row whose curve
+  nobody else can open is a number, not a measurement. To re-derive a row from scratch rather
+  than from its curve:
 
   ```bash
   eval/.venv/bin/python tools/score_margins.py --model <path> --adv-fa-budget 5 \
@@ -108,6 +111,13 @@ comparable across those files.
 
   adding `--sliding-window-size 5` for a bare `.tflite`, since a cutoff means nothing without
   the window that produced it.
+
+  The CSVs are `model,set,clip,peak`; a row's positives are the `pos/<speaker>` clips at or
+  above its threshold and its `fa` the `neg/extend` + `neg/hey_other` clips at or above it.
+  Row `mww-da01854d-009` reproduces exactly that way from
+  `logs/scorecurves/mww-incumbent-da01854d.csv` (jay 31/35, jen 2/10, ryan 4/6, 8/298 fires).
+  Eight of the 22 are earlier passes over the same runs under a `mww-{flat,bal}-s95x` naming
+  scheme; the rows cite the tag-named files.
 
 Reproducing the ESP32 rows means scoring each run dir's own weights, not the shared corpus
 copy — see README's "Which bytes a microWakeWord row belongs to". The eight 10x rows carry
@@ -192,3 +202,22 @@ copy — see README's "Which bytes a microWakeWord row belongs to". The eight 10
    `mww-*` and `oww-*` rows. His row share also fell as a side effect of lifting the adults.
    Per CLAUDE.md, no hyperparameter has ever moved him; more ryan recordings is the only lever
    the measurements have pointed at.
+9. **Two published points were never filed to the run ledger.** SPEED.md's "Current models
+   (trained 2026-09-23)" section and row `mww-42f8982-650` both rest on runs tagged `42f8982`
+   (oww `42f8982-c348af7b-hb9d1d75` seed 56, mww `42f8982-ce1500f5-h5f6f353`), and
+   `output/hey_seeree/runs.jsonl` has **no row for either**: no `42f8982` tag anywhere in its 45
+   rows, no seed 55 or 56, no corpus `c348af7b` or `ce1500f5`. The artifacts are on disk and
+   `logs/scorecurves/mww-42f8982-h5f6f353.csv` is committed, so the mww reading is checkable
+   from its curve; the ledger row that would tie it to a config and a corpus was never appended.
+   Nothing here reconstructs one — writing a row after the fact would fabricate provenance.
+10. **The VTLP table's matched-FA column has no committed curve.** `sweeps/oww-real-vtlp.yaml`'s
+   six runs *are* in the ledger (seeds 42/43, 1042/1043, 2042/2043; corpora dc089d9 / 34e7640 /
+   a90706a), and the per-speaker counts in that table are exactly the sums of the ledger's
+   per-speaker readings at 0.5 (ryan 1+2, 2+2, 4+2; jay 62/70, 43/70, 44/70; jen 17/20, 16/20,
+   17/20), as is the voice-holdout column (72/90, 66/90, 69/90 at 0.5). But the ledger carries
+   only a *total*-adversarial threshold sweep, so `det@FA<=2.3%` on extend+hey_other is not
+   derivable from it, and no curve CSV was saved for those runs. Re-running
+   `tools/score_margins.py --csv` over the three artifacts is the only way to check that column.
+11. **The run ledger itself is untracked.** `output/` is gitignored, so `runs.jsonl` — the
+   provenance every tag and corpus id resolves against — exists only on the machine that
+   trained. The committed curve CSVs are what makes a row checkable without it.
