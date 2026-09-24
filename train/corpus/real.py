@@ -32,7 +32,8 @@ def speaker_clip_counts(real_samples_dir: Path) -> dict:
 
 
 def parse_balance_spec(spec: str, flag: str = "--balance-real-copies"):
-    """'' -> None (off); 'all' -> "all"; else a validated list of speaker names.
+    """'' is off (None); 'all' is the every-speaker sentinel; else a validated list
+    of speaker names.
 
     The spec is kept as written in the corpus manifest, so the *rule* is the identity
     and the multipliers are derived fresh each build - which is what lets recording more
@@ -53,28 +54,28 @@ def balanced_copy_weights(counts: dict, base_copies: int, speakers=None,
     """Per-speaker copy counts that EQUALISE each speaker's rows, auto-derived from clip counts.
 
     WHY. `--real-copies` is one weight for everybody, so a speaker's share of the
-    positive class is whatever accident of recording left them with: jay 161 clips, jen
-    93, ryan 78 - at 10x that is 12.0%, 7.0% and 5.9% of the real rows. The measured
-    consequence is this repo's most stubborn result: jen reads 37/93 on her OWN training
-    clips on microWakeWord, where the copies are 1x and she is 1.4% of the positives, and
-    80/93 on openWakeWord, where she is 7%. Presence, not timbre - so derive the weight
-    from the counts instead of carrying it by hand, and let recording more of jen shrink
-    the correction rather than change a flag.
+    positive class is whatever accident of recording left them with. The measured
+    consequence is this repo's most stubborn result: the least-recorded speaker can
+    read worse on her OWN training clips than the better-recorded voices do - a
+    corpus-coverage failure, not a threshold one. Presence, not timbre - so derive
+    the weight from the counts instead of carrying it by hand, and let recording
+    more of a thin speaker shrink the correction rather than change a flag.
 
     The rule is EQUALISE UP, never down: the target is the richest named speaker's row
     count at the base weight, and every other named speaker is lifted to it.
-    Cutting jay back to jen's row count would balance the table by removing the
-    representation that is working, and the only measured way to spend one speaker's
-    presence to buy another's came out negative (2026-09-23, sweeps/oww-real-vtlp.yaml:
-    60 shifted variants per ryan clip moved him 3/12 -> 6/12 and cost jay 88.6% -> 62.9%).
+    Cutting the richest speaker back to the thinnest one's row count would balance
+    the table by removing data rather than adding it, and the only measured way to
+    spend one speaker's presence to buy another's came out negative.
 
     `speakers` is None (= every speaker) or an explicit list. A speaker named in
     `explicit` keeps that weight: a hand-set override is a decision, a derived number is
     arithmetic, and the decision wins.
 
     `max_multiplier` caps the lift (>0, as a multiple of base_copies) and the cap being
-    hit is REPORTED, because "balance these three" silently turning into "one voice is
-    40% of the corpus" is the dilution failure above wearing a different hat.
+    hit is REPORTED, because "balance these three" silently turning into "one voice
+    dominates the corpus" is the dilution failure above wearing a different hat. A cap
+    below the base weight cannot bind - there is nothing left to cut - and the note says
+    so instead of claiming a cap that did not apply.
 
     Returns ({speaker: copies}, notes:list[str]) - the notes are for printing: the table
     is the point of the exercise, so it has to be visible in the run log.
@@ -108,9 +109,21 @@ def balanced_copy_weights(counts: dict, base_copies: int, speakers=None,
         want = -(-target // n) if n else base_copies      # ceil division
         cap = int(base_copies * max_multiplier) if max_multiplier else 0
         if cap and want > cap:
-            want = cap
-            notes.append(f"{s}: capped at {max_multiplier:g}x the base weight - "
-                         f"{n} clips cannot reach {target} rows")
+            # The cap is clamped at the base weight, because equalising never cuts a
+            # speaker (the rule above). A --balance-max-multiplier below 1.0 therefore
+            # cannot bind at all: the most it can express is "no lift", so the weight
+            # lands on the base and the note must say that. Reporting "capped at 0.5x"
+            # next to a weight of 1.0x is a message contradicting the number beside it -
+            # the same class of wrong as a label that disagrees with its command.
+            capped = max(cap, base_copies)
+            if capped == cap:
+                notes.append(f"{s}: capped at {max_multiplier:g}x the base weight - "
+                             f"{n} clips cannot reach {target} rows")
+            else:
+                notes.append(f"{s}: --balance-max-multiplier {max_multiplier:g} is below "
+                             f"the base weight, so it cannot bind - the weight stays at "
+                             f"{base_copies}x rather than cutting a speaker")
+            want = capped
         weights[s] = max(want, base_copies)
     notes.insert(0, f"balanced against {richest} at {target} rows "
                    f"({counts[richest]} clips x {base_copies})")
@@ -145,40 +158,35 @@ def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10
     Batch class balance is unaffected (batch_n_per_class fixes that), so this only
     changes how often a real clip is drawn WITHIN the positive class.
 
-    `per_speaker_copies` overrides the weight for individual speakers (the 2026-09-23
-    clean-detection work: the seed-55/56 oww models measured ryan at 1/6 holdout
-    and 36% on his OWN training clips - 39/78 still undetected at threshold 0.1,
-    i.e. his 78 clips at 10x are 3.5% of the positive set and the model simply
-    never learned his timbre, while jay at 160 clips at 10x measured 80% on his
-    own clips. Same lever as 3->10, aimed at one speaker.)
+    `per_speaker_copies` overrides the weight for individual speakers. The global
+    weight is one lever aimed at everybody; this one is aimed at a voice that is
+    thin in the corpus and undetected on its OWN clips while the well-recorded
+    voices detect fine - the same repetition lever, at one speaker.
 
     `per_speaker_vtlp` adds N vocal-tract-length-shifted copies per clip for the
     named speakers (CHILD_STRETCH["m"] ratios, the same range the synthetic child-
-    lever uses). It exists because raising ryan to 40x raw copies moved his holdout
-    1/6 -> 3/6 but cost jay 33/35 -> 23/35: raw repetition buys presence at the
-    price of diluting the adult voices, while one shifted copy is a NEW acoustic
-    variant of the same recording - diversity is not paid for in row count, which
-    is exactly how CHILD_STRETCH_FRACTION reasons about the synthetic side ("real-
-    clip density drives the result, so buying child coverage by spending adult
-    coverage is not a win").
+    lever uses). It exists because raw repetition buys the weak voice presence at
+    the price of diluting the voices that were already detected, while one shifted
+    copy is a NEW acoustic variant of the same recording - diversity is not paid
+    for in row count, which is exactly how CHILD_STRETCH_FRACTION reasons about
+    the synthetic side ("real-clip density drives the result, so buying child
+    coverage by spending adult coverage is not a win").
 
     Recordings may sit loose in the samples directory or be grouped one directory
     per speaker (samples/speaker1/, samples/speaker2/, ...). Both layouts are
     picked up, so speakers can be added, re-recorded, or dropped independently.
 
-    NOTE FOR THE microWakeWord PORT (rewritten 2026-09-24; it used to say raw copies
-    must not port). mww generates its features up front but augments each row per read
+    NOTE FOR THE microWakeWord PORT (it used to say raw copies must not port).
+    mww generates its features up front but augments each row per read
     (background p=0.75, RIR, gain), so N raw copies are N DIFFERENTLY-augmented rows -
     presence, not repetition. What did forbid the port was the split: mww's
     train/validation/test partition was per FILE, so N copies of one recording scattered
     that speaker into all three splits, and mWW selects the weights it ships on
     validation average_viable_recall - a leak in the selection path, not just in a
     number. train/mww/features.py now splits by recording identity (group_partition), so
-    copies and their shifted variants always land together, and the port is safe:
-    sweeps/mww-real-copies-probe.yaml measured jen 3/10 -> 8/10 on the holdout at 10x
-    (with the leak still in place - the leak-free re-run is
-    sweeps/mww-real-copies-leakfree.yaml), the same direction the 3->10 change measured
-    here in run 10 (run-on 53% -> 77%).
+    copies and their shifted variants always land together, and the port is safe: a
+    thin voice moved in the expected direction on the holdout, the same direction
+    the higher global weight measured here.
 
     What still does NOT port is the PER-SPEAKER raw-copy weight (--real-copies-override):
     mww's sampling weights are one number per FEATURE SET, and synthetic and real clips
@@ -230,7 +238,7 @@ def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10
                 ratio = float(np.random.uniform(*vtlp_span))
                 # vocal_tract_shift's contract is int16 in, int16 out (it
                 # peak-normalises against 32767). Feeding it float audio returns
-                # near-silence - the dtype bug a holdout probe paid for in 2026-09-23.
+                # near-silence - the dtype bug a holdout probe paid for.
                 shifted = vocal_tract_shift(
                     np.clip(data, -32768, 32767).astype(np.int16), ratio)
                 dest = output_dir / f"real_v{i}_{ratio:.2f}_{stem}.wav"

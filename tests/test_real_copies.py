@@ -1,8 +1,9 @@
 """Guards for train/corpus/real.py's per-speaker copy weight
-(--real-copies-override, added 2026-09-23 for the clean-detection work: the
-seed-55/56 oww models measured ryan at 1/6 holdout and 36% on his own
-training clips while jay measured 80% - the global 10x weight was the lever,
-aimed per speaker).
+(--real-copies-override). The global copy weight is one lever aimed at every
+speaker at once; this flag aims the same lever at one thin voice, so these
+tests pin: the named speaker gets the override, every other speaker keeps the
+base weight, and the shifted (VTLP) variants are real new acoustic forms, not
+duplicates or silence.
 """
 
 import sys
@@ -86,12 +87,12 @@ def test_vtlp_copies_add_variants_not_raw_duplicates():
 
 
 # ---------------------------------------------------------------------------
-# --balance-real-copies (added 2026-09-24). The rule under test is the one the
-# measurements asked for: jen is 93 clips against jay's 161, so a FLAT weight
-# leaves her the thinnest adult voice in the positive set, and she reads 37/93
-# on her own training clips on microWakeWord (1x) against 80/93 on
-# openWakeWord (10x). Deriving the weight from the counts means recording more
-# jen shrinks her lift instead of requiring a flag edit.
+# --balance-real-copies. The rule under test is the one the measurements asked
+# for: a FLAT weight leaves a thin voice the thinnest in the positive set, and
+# the least-recorded speaker can read worse on her own training clips than the
+# better-recorded ones do - a corpus-coverage failure. Deriving the weight
+# from the counts means recording more of a thin speaker shrinks their lift
+# instead of requiring a flag edit.
 
 
 def _counts(**kw):
@@ -100,7 +101,7 @@ def _counts(**kw):
 
 def test_balance_equalises_rows_up_and_never_down():
     from train.corpus.real import balanced_copy_weights
-    # jay is the richest at 8 clips x 10 = 80 rows, so he is the target.
+    # the richest speaker is 8 clips x 10 = 80 rows, so it is the target.
     w, notes = balanced_copy_weights(_counts(jay=8, jen=5, ryan=3), 10)
     assert w["jay"] == 10, "the richest speaker keeps the base weight"
     assert w["jen"] == 16, f"ceil(80/5)=16, got {w['jen']}"
@@ -116,8 +117,8 @@ def test_balance_equalises_rows_up_and_never_down():
 
 def test_balance_only_touches_the_named_speakers():
     from train.corpus.real import balanced_copy_weights
-    # The user's ask is adult parity; ryan must keep his own weight, and the
-    # only lever the measurements have pointed at for him is more recordings.
+    # Only the named speakers are balanced; the child voice must keep its own
+    # weight - more recordings, not more copies, is its lever.
     w, notes = balanced_copy_weights(_counts(jay=8, jen=5, ryan=3), 10,
                                      speakers=["jay", "jen"])
     assert w == {"jay": 10, "jen": 16, "ryan": 10}, w
@@ -141,10 +142,24 @@ def test_balance_explicit_override_wins_over_the_derived_number():
 
 def test_balance_cap_is_reported_not_silent():
     from train.corpus.real import balanced_copy_weights
-    # jen at 5 clips needs 16x to reach 80 rows; a 1.5x cap (base 10 -> 15) binds.
+    # the thin speaker at 5 clips needs 16x to reach 80 rows; a 1.5 cap (base 10, cap 15) binds.
     w, notes = balanced_copy_weights(_counts(jay=8, jen=5), 10, max_multiplier=1.5)
     assert w["jen"] == 15, w
     assert any("capped" in n for n in notes), notes
+
+
+def test_balance_cap_below_the_base_weight_says_it_cannot_bind():
+    from train.corpus.real import balanced_copy_weights
+    # A 0.5 cap on a base of 10 asks for 5 copies - below the base weight, where
+    # equalising never goes. The weight must stay at the base (not drop to the cap),
+    # and the note must say the cap cannot bind: claiming "capped at 0.5x" next to a
+    # weight of 10x is a message that contradicts the number beside it.
+    w, notes = balanced_copy_weights(_counts(jay=8, jen=5), 10, max_multiplier=0.5)
+    assert w["jen"] == 10, w
+    assert w["jay"] == 10, w
+    assert any("cannot bind" in n for n in notes), notes
+    assert not any("capped at" in n for n in notes), \
+        f"a cap that did not bind must not be reported as one: {notes}"
 
 
 def test_balance_spec_parses_off_all_and_a_list():

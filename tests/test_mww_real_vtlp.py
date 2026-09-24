@@ -1,11 +1,12 @@
 """Guards for train/mww/corpus.py's --real-vtlp (the microWakeWord port of the
-2026-09-23 oww clean-detection lever).
+per-speaker copy lever).
 
-The oww side measured the split between dilution and diversity: raising ryan
-(a child speaker, 78 real clips) to 40x RAW copies moved him 1/6 -> 3/6 on
-holdout but cost jay 33/35 -> 23/35, while 30 vocal-tract-shifted copies per
-clip at the base weight kept jay at 30/35. The shifted copies are what port to
-mww, because mww generates its spectrogram feature rows UP FRONT
+The oww side measured the split between dilution and diversity: raw
+repetition buys a weak voice presence at the cost of diluting the voices
+that were already detected, while shifted copies are NEW acoustic variants
+of the same recording - diversity is not paid for in row count. The shifted
+copies are what port to mww, because mww generates its spectrogram feature
+rows UP FRONT
 (train/mww/features.py): a shifted wav is a distinct row, a raw copy is only
 another draw of the same voice (and one more slot in the per-file train/val/
 test split - the NOTE at the copy call in corpus.py is why there is no
@@ -17,10 +18,10 @@ The contract, from the task it came out of:
   and a speaker name with no directory under --real-samples (an inert
   override is the label/config drift class this repo has paid for twice);
 * shifted copies land for the NAMED speaker only, carry their ratio in the
-  filename (1.15-1.30x, the synthetic child-lever's range), and are not
-  digitally silent - the int16-in/int16-out contract of vocal_tract_shift,
-  whose float-input trap produced near-silence in the 2026-09-23 holdout
-  probe (train/corpus/real.py);
+  filename (CHILD_STRETCH["m"], the synthetic child-lever's range), and are
+  not digitally silent - the int16-in/int16-out contract of vocal_tract_shift,
+  whose float-input trap produced near-silence in a holdout probe
+  (train/corpus/real.py);
 * the parsed setting is part of the corpus manifest shaping, so a different
   --real-vtlp refuses the --skip reuse path instead of training on a corpus
   shaped differently than requested.
@@ -58,7 +59,7 @@ def _sine(path, freq=220.0, seconds=1.0):
 
 
 def _make_samples(tmp):
-    """One ryan clip and one jay clip under <tmp>/samples/<speaker>/."""
+    """One clip per fixture speaker, under <tmp>/samples/<speaker>/."""
     samples = Path(tmp) / "samples"
     for speaker in ("ryan", "jay"):
         d = samples / speaker
@@ -161,7 +162,7 @@ def test_vtlp_copies_written_for_named_speaker_only():
 def test_vtlp_copies_non_silence_ratio_and_dtype():
     # The int16-in/int16-out contract of vocal_tract_shift: a float input
     # peak-normalises against 32767 and returns digital silence - the dtype
-    # bug a 2026-09-23 holdout probe paid for (train/corpus/real.py). Every
+    # bug a holdout probe paid for (train/corpus/real.py). Every
     # shifted copy must be a real int16 signal, its ratio in the
     # CHILD_STRETCH["m"] range it drew from, and roughly the source's
     # duration (the shift preserves delivery speed).

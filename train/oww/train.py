@@ -564,12 +564,11 @@ def create_config(wake_word: str, n_samples: int, training_steps: int,
             except ValueError:
                 config[key] = raw
             # A nested override REPLACES the sub-dict - deliberately, because merging
-            # would have to guess which sibling keys the author meant to keep. It cost
-            # a sweep point on 2026-09-24: --set 'batch_n_per_class={"positive": 150}'
-            # dropped ACAV100M_sample and adversarial_negative with it, the model
-            # trained on 150 positives and nothing else, and it read 100% false
-            # accepts on every category. That is the kind of wrong that only looks
-            # like a bad result, so name the keys that went missing.
+            # would have to guess which sibling keys the author meant to keep. The cost
+            # of that design is silent at the flag and loud in the result: pointing
+            # --set at one key of a dict sub-config drops its sibling keys with it,
+            # and the model trains without them. That is the kind of wrong that only
+            # looks like a bad result, so name the keys that went missing.
             if isinstance(previous, dict) and isinstance(config[key], dict):
                 lost = sorted(set(previous) - set(config[key]))
                 if lost:
@@ -761,8 +760,8 @@ def _parse_real_copies_override(spec: str, flag: str = "--real-copies-override")
     A typo'd speaker name would otherwise be silently inert (the override dict
     just never matches) and the run would train at the base weight while being
     filed under a config that claims otherwise - the label/config drift class
-    this repo has paid for twice (bug.md B1, C1). The speaker name must name a
-    directory that actually exists under the samples tree.
+    this repo has paid for twice. The speaker name must name a directory that
+    actually exists under the samples tree.
     """
     if not spec:
         return {}
@@ -909,14 +908,14 @@ def main():
     parser.add_argument("--real-copies-override", default="",
                         help="Per-speaker override of --real-copies, 'speaker=N[,speaker=N]' "
                              "(speaker = the directory name under data/recordings/samples/). "
-                             "2026-09-23: ryan at 10x was 3.5%% of the oww positive set and "
-                             "the models measured him at 1/6 holdout and 36%% on his own "
-                             "training clips - the weight is the lever, aimed per speaker. "
-                             "Part of the corpus identity: changing it rebuilds the corpus.")
+                             "A flat weight can leave the least-recorded speaker a tiny "
+                             "share of the positive set - the weight is the lever, aimed "
+                             "per speaker. Part of the corpus identity: changing it "
+                             "rebuilds the corpus.")
     parser.add_argument("--balance-real-copies", default="",
                         help="Derive per-speaker --real-copies so each named speaker "
                              "contributes the SAME number of positive rows: 'all', or "
-                             "'jay,jen'. The multiplier is computed from the clip counts "
+                             "'speakerA,speakerB'. The multiplier is computed from the clip counts "
                              "in data/recordings/samples/ at build time, so recording more "
                              "of a thin speaker shrinks their lift without touching a flag. "
                              "Equalise UP only - the richest named speaker keeps the base "
@@ -933,9 +932,10 @@ def main():
                         help="Per-speaker formant-shifted variants, 'speaker=N[,speaker=N]': "
                              "adds N vocal-tract-shifted copies (1.15-1.30x, the synthetic "
                              "child-lever's range) per real clip, at the BASE --real-copies "
-                             "weight. Diversity is bought with variants, not rows: the raw "
-                             "40x point moved ryan 1/6->3/6 but cost jay 33->23 (dilution). "
-                             "Part of the corpus identity.")
+                             "weight. Diversity is bought with variants, not rows: raw "
+                             "repetition buys the weak voice presence at the cost of "
+                             "diluting the voices that were already detected. Part of the "
+                             "corpus identity.")
     parser.add_argument("--max-negative-weight", type=int, default=2000,
                         help="How hard false positives are penalised by the end of "
                              "training (default: %(default)s). Higher trades "
