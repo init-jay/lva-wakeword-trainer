@@ -99,7 +99,7 @@ That is the argument for staging it: under 1% FA it is worth +8 adult points and
 still reads 33/45 adults (jay 24, jen 9, ryan 1); the house model is at 27/45 by two
 fires.
 
-### ESP32 / microWakeWord — the balance lever did help; three of eight models cannot be calibrated
+### ESP32 / microWakeWord — the balance lever did help; the manifest gate disagrees with the holdout
 
 | md5 | model (corpus = arm, seed) | threshold | adv FA | jay | jen | ryan | adults |
 |---|---|---|---|---|---|---|---|
@@ -174,21 +174,34 @@ attribution error.** Per seed the arms pair up 950: 19→35, 951: 27→41, 952: 
 per-speaker move any lever made this session. ryan is 0/6 in every 10x-family model, usable or not,
 balanced or flat.
 
-Three of the eight cannot be calibrated at all: `train.mww.manifest` refuses to write a manifest
-(no cutoff meets `--max-faph 0.2` while detecting anything) and the tightest grid threshold still
-fires on all 298 adversarial clips. **Two of those three are flat seeds** — the 2026-09-24 note
-named only the balanced one. The manifest stage is non-fatal by design
-(`run-mww-training-applesilicon.sh`), so the sweep still files the row.
+**The manifest stage and the deployment budget do not measure the same thing, and each passes a
+model the other fails.** `train.mww.manifest` refused for exactly two of the eight runs
+(`c574e978-hbd0e5de` md5 `cbf0ec81`, `c5a47eeb-hd5948fa` md5 `a7eb5614`) — "no cutoff achieves faph
+<= 0.2 while detecting anything; the lowest measured is 0.375 at cutoff 0.98 (frr 0.157)". But the
+three rows with no adversarial budget point are `a293a2ce`, `16296dbb`, `a7eb5614` — and *two of
+those three have manifests*, at cutoffs 0.92 and 0.97. So a model can clear the manifest's
+validation-set faph gate and still fire on 298/298 adversarial clips at every threshold, and the
+reverse: `cbf0ec81` has no manifest yet reads 27/45 adults at FA 4/298 on the holdout. The manifest
+faph is computed on the validation split, not on the adversarial negatives, so it is not a proxy for
+this budget in either direction — do not treat "manifest written" as "usable at FA<2%", and do not
+treat "manifest refused" as "no measured operating point". The manifest stage is non-fatal by design
+(`run-mww-training-applesilicon.sh`), so the sweep files the row either way.
+
+**How arm A came to exist, and why it is still a valid A/B.** The four flat rows were produced by
+the *first* launch of the balance sweep, which printed `REFUSE: corpus on disk is not the corpus
+this sweep asked for` and trained on the frozen flat corpus anyway (`scripts/sweep.py` treated a
+verify failure as non-fatal until `f5a3beb`). They are a legitimate flat arm because the trainer
+config hash excludes the corpus: `hd6b366e`, `hbd0e5de`, `h3be78bf`, `hd5948fa` appear under both
+`c574e978` (flat, jen 8x) and `c5a47eeb` (balanced, jen 18x) with the same seed on each side, so the
+arms differ by corpus and nothing else. Note also that the ledger's `config` dict records neither
+`real_copies` nor `balance` (both are corpus-manifest keys, not trainer config) — the corpus half of
+the tag, checked against that corpus's `corpus.json`, is the only arm record that exists.
 
 The balanced best (`e74e471c`, 41/45 adults, jay 35/35, jen 6/10) beats the incumbent on both
-adults and jen but loses ryan outright (0/6 vs 4/6). That trade is a judgement call, not a
-measurement, and it is the user's to make. Re-baselining and staging it is a
-`tools/score_margins.py` pass plus a preflight, not a code change.
-
-Neither challenger replaces the incumbent on the stated bar: both beat it on the
-adults (41 vs 31) and lose ryan outright (0–1/6 vs 4/6). That trade is a judgement
-call, not a measurement, and it is the user's to make. Re-baselining and staging one
-of them is a `tools/score_margins.py` pass plus a preflight, not a code change.
+adults and jen but loses ryan outright (0/6 vs 4/6). Neither challenger replaces the incumbent on
+the stated bar: each beats it on the adults (41 vs 31) and loses ryan outright (0-1/6 vs 4/6). That
+trade is a judgement call, not a measurement, and it is the user's to make. Re-baselining and
+staging one of them is a `tools/score_margins.py` pass plus a preflight, not a code change.
 
 ## Corrections to what is written above
 
