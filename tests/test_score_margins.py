@@ -126,7 +126,7 @@ def test_a_corpus_tree_model_is_refused():
     # data/corpus/<word>/mww/<corpus-id>/tflite_stream_state_internal_quant/ holds ONE
     # copy of the weights per corpus: every run built against that corpus writes its
     # weights there, so the bytes belong to whichever run converted last, not to the
-    # model being asked about. On 2026-09-25 every ESP32 row in deploy/README.md came
+    # model being asked about. On 2026-09-25 every ESP32 measurement in deploy/scorecards.jsonl came
     # from there - four "different" flat-seed models were really two files, one of them
     # the balanced arm's - and the reversal that followed (balance read as a loss where
     # re-paired bytes make it a win: 19,27 flat vs 35,41,21 adults; jen 0/10 -> 6/10) is
