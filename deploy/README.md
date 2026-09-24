@@ -95,6 +95,13 @@ fires.
 | flat 10x, best seed `c574e978-hd5948fa` | 0.970 | 3/298 | 34/35 | 7/10 | 1/6 | **41/45** |
 | balanced `jay,jen`, best seed `c5a47eeb-hbd0e5de` | 0.870 | 5/298 | 35/35 | 6/10 | 0/6 | **41/45** |
 
+The incumbent appears twice with different per-speaker numbers and that is not an
+error: at **its own manifest cutoff 0.09** it sits at FA 8/298 (2.7% — above the 2%
+budget) reading jay 31, jen 2, ryan 5, which is the "weakest speaker jen 2/10 = 20%"
+figure in the older notes; squeezed to the budget (0.148, 4 fires) jen is 1/10 and ryan
+4/6. Recomputed from `logs/scorecurves/mww-incumbent-da01854d.csv` rather than from
+memory, so both rows are reproducible from the same curve file.
+
 Adults per speaker at FA ≤ 5, all four seeds of each arm:
 
 - flat: 19, 33, 32, 41 → mean 31.3
@@ -111,8 +118,8 @@ separation, not a dead model. The manifest stage is non-fatal by design
 
 Neither challenger replaces the incumbent on the stated bar: both beat it on the
 adults (41 vs 31) and lose ryan outright (0–1/6 vs 4/6). That trade is a judgement
-call, not a measurement, and it is the user's to make — say the word and I will
-re-baseline and stage one of them.
+call, not a measurement, and it is the user's to make. Re-baselining and staging one
+of them is a `tools/score_margins.py` pass plus a preflight, not a code change.
 
 ## Corrections to what is written above
 
@@ -140,17 +147,19 @@ re-baseline and stage one of them.
    substitute and neither staged file has ever heard a real room.
    `cd preflight && uv run test_model.py --model ../deploy/esp32-mww/hey_seeree_ecbf160-dirty-da01854d.json`
    (the Pi model needs its `.tflite` plus the 0.58–0.60 threshold).
-2. **Detection is far below the gate.** 77.8% adults / 73% pooled vs the 98% the eval
-   gates want. Nothing here is ship-eligible for a product; it is the best measured
+2. **Detection is far below the gate.** 77.8% adults / 73% pooled vs the 97% `f2865bc`
+   set both gates to (it moved them 98% -> 97%). Nothing here is ship-eligible for a
+   product; it is the best measured
    candidate per target.
-3. **`-dirty` in the tag, and what it does and does not mean.** `55e182a-dirty` was built
-   from HEAD `55e182a` — which already contains the balance lever and both trainer
-   wirings — with a dirty tree of `tools/score_margins.py`, `train/ledger.py`,
-   `scripts/sweep.py`, their tests and a 5-line sentinel guard in `train/corpus/real.py`.
-   None of those touch the training path, so `--seed 8001` at this HEAD should still
-   reproduce corpus `c9897b91` and a byte-identical `.onnx` (CLAUDE.md's determinism
-   bar). Nobody has re-run it to confirm that; the dirty files should be committed so
-   the next tag is clean.
+3. **`-dirty` in the tag — resolved, and what it never meant.** `55e182a-dirty` was built
+   from HEAD `55e182a`, which already contained the balance lever and both trainer
+   wirings; the dirty files were `tools/score_margins.py`, `train/ledger.py`,
+   `scripts/sweep.py`, their tests and the sentinel guard in `train/corpus/real.py`.
+   None touch the training path, so `-dirty` never made the model unreproducible — it
+   made the tag unresolvable without `git stash list`. Those files are now committed
+   (`927c21b`, `e72845a`, `f5a3beb`, `320f93e`), so the next run's tag is clean. The
+   reproducibility claim itself is still unverified: nobody has re-run `--seed 8001` at
+   this HEAD to confirm it reproduces corpus `c9897b91` and a byte-identical `.onnx`.
 4. **n=2 seeds per oww arm.** Both seeds of the balanced arm moved the same direction
    and the staged file is the better of the two, but two draws do not rank arms —
    the mww table above is what a four-draw comparison of a similar-sized effect looks
