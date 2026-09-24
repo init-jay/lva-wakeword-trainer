@@ -17,7 +17,7 @@ grid threshold whose adversarial FA is within budget, read on the model's OWN cu
 ('Never compare models at a fixed threshold').
 
     python3 tools/score_margins.py --model output/hey_seeree/oww/<tag>.onnx \
-        [--model output/hey_seeree/mww/<tag>.json] [--adv-fa-budget 6] [--csv out.csv]
+        [--model output/hey_seeree/mww/<tag>.json] [--adv-fa-budget 5] [--csv out.csv]
 
 Runs on the eval env (host: eval/.venv; container: the eval image, module form).
 """
@@ -190,9 +190,14 @@ def main():
     ap.add_argument("--positives", nargs="+", default=None,
                     help="default: the held-out speaker dirs (same as eval_model.py)")
     ap.add_argument("--negatives", default=str(paths.NEGATIVES_DIR))
-    ap.add_argument("--adv-fa-budget", type=int, default=6,
-                    help="fires of extend+hey_other allowed (default 6 = 2.0%% of 298, "
-                         "the budget the current oww sweep verdicts were read at)")
+    ap.add_argument("--adv-fa-budget", type=int, default=5,
+                    help="fires of extend+hey_other allowed (default 5 = 1.7%% of 298: the "
+                         "standing constraint is FA < 2%% and 6 fires is 2.01%%, i.e. outside "
+                         "it. This default was 6, which made the tool's own out-of-the-box "
+                         "number fail the constraint it exists to enforce - 2026-09-24/25, "
+                         "when a 4-vs-5-vs-6 read on the same models changed two verdicts: "
+                         "the Pi's two best seeds tied at 4 and 5 and split at 6, and the "
+                         "ESP32 incumbent looked inside budget at 8 fires)")
     ap.add_argument("--top", type=int, default=10)
     ap.add_argument("--sliding-window-size", type=int, default=None,
                     help="microWakeWord only, and only needed for a bare .tflite: "
