@@ -1,0 +1,47 @@
+# mww, real voice presence at 10x WITH the adults auto-balanced, n=4 (2026-09-24).
+#
+# WHY 10x AT ALL. jen reads 37/93 on her OWN training clips here against 80/93 on
+# openWakeWord, and the difference is rows: microWakeWord's corpus defaults to
+# --real-copies 1 (raw duplicates used to leak across the per-file split), which makes
+# jen 1.4% of the positive rows. The 10x probe moved her from 2-3 to 5-8 of 10 holdout
+# clips at matched false accepts with jay holding 33-34/35 - two repeats, so directional.
+#
+# WHY BALANCED. At a flat 10x the three speakers are 48/28/24% of the real rows, so the
+# 10x lift is smaller for the thinner voices than the numbers suggest: jen is still 28%.
+# --balance-real-copies jay,jen derives her multiplier from the clip counts (93 against
+# jay's 160 -> 18x) and re-derives it every build, so more jen recordings shrink the
+# correction without anyone editing a flag. ryan stays at the base weight (the ask was
+# the adults); watch his share, 24% -> 19%.
+#
+# WHY n=4 AND NOT n=2. The measured spread across eight runs of one 10x configuration on
+# 2026-09-24 is 31 pooled points (59%, 71%, 90%, and one model that fires on everything
+# at ROC AUC 0.17) - that scatter is what the ROW-BUDGET split did to the checkpoint
+# choice, and train/mww/split.py now spends the holdout on RECORDINGS (one row each, rest
+# dropped). Two repeats cannot rank anything at this variance, and the sweep refuses
+# repeats<2 anyway. The comparison against the un-balanced 10x arm is a second sweep on a
+# second corpus (the mww corpus stage is frozen per sweep), so it is not in this file.
+#
+# The corpus section lists ONLY what differs from the defaults: the reuse check compares
+# the whole request structure, so restating a default is a diff against a corpus that never
+# asked for it (learned on launch: an explicit child-fraction 1.0 - the default - made the
+# request differ from c19a7898's, which is correct but noisy).
+# ~9 min corpus + ~8 min features (once) + 4 x (train ~4 + eval ~1) = ~45 min here.
+wake_word: "hey seeree"
+target: mww
+corpus:
+  samples-per-voice: 60
+  negatives-per-voice: 12
+  kokoro-fraction: 0.3
+  piper-speakers: 12
+  real-copies: 10
+  balance-real-copies: jay,jen
+base:
+  training-steps: 10000
+  negative-class-weight: 20
+grid: {}
+repeats: 4
+base_seed: 950
+eval:
+  enabled: true
+  python: eval/.venv/bin/python
+  voice-holdout-set: data/corpus/eval/voice_holdout_tts

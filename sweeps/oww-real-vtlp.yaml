@@ -1,0 +1,25 @@
+# The voice-diversity lever, formalized: formant-shifted copies of ryan's
+# real clips, at the BASE --real-copies weight (diversity, not dilution).
+#
+# Why a corpus_axes sweep (2026-09-23): the earlier single points showed
+# ryan 1/6 -> 3/6 both when his raw copies went to 40x (jay collapsed
+# 33/35 -> 23/35) and when 30 VTLP variants were added at 10x base (jay
+# held 30/35). The variants arm is the candidate recipe; this grid
+# measures the arm (none/30/60) with two seeds each, on a corpus frozen
+# PER POINT - a grid that varies the corpus shaping rebuilds TTS between
+# arms, so cross-arm numbers carry TTS redraw noise; the within-arm
+# repeats are what separate the lever from the redraw.
+wake_word: "hey seeree"
+target: oww
+base:
+  training-steps: 25000
+grid:
+  real-vtlp: ["", "ryan=30", "ryan=60"]
+corpus_axes: [real-vtlp]
+repeats: 2
+eval:
+  enabled: true
+  python: eval/.venv/bin/python
+  # The 45-clip synthetic set: the low-variance arm-ranking number lands in
+  # each filed eval block (voice_holdout_set), complementing the real holdout.
+  voice-holdout-set: data/corpus/eval/voice_holdout_tts
