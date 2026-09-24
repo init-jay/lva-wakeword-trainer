@@ -22,8 +22,9 @@ rpi-oww/hey_seeree_55e182a-dirty-c9897b91-hf37e3df.config.json
 rpi-oww/hey_seeree_55e182a-dirty-c9897b91-hf37e3df.manifest.json   LVA discovery manifest (added 2026-09-25)
 ```
 
-`*.manifest.json` is the LVA discovery manifest (model ID = its filename stem, `probability_cutoff` 0.60),
-not the trainer's resolved config (`*.config.json`); stage both the `.tflite` and the `.manifest.json`.
+`*.manifest.json` is the LVA discovery manifest (model ID = its filename stem,
+`probability_cutoff` 0.60), not the trainer's resolved config (`*.config.json`);
+stage both the `.tflite` and the `.manifest.json`.
 
 **Open item, naming.** `wake_word.py:40` sets the model ID to `Path.stem`, which strips one
 suffix: the staged file's ID is `hey_seeree_55e182a-dirty-c9897b91-hf37e3df.manifest`, where
