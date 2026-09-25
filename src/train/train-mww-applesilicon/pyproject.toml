@@ -19,9 +19,9 @@ requires-python = ">=3.12,<3.13"
 #
 # WHAT RUNS WHERE ON A MAC:
 #   corpus   the in-process Piper engine uv project
-#            (tts-service/engines/piper, port 8898) - piper-tts 1.7.0 loaded
+#            (src/tts-service/engines/piper, port 8898) - piper-tts 1.7.0 loaded
 #            directly, no Wyoming process at all - and, when KOKORO_FRACTION > 0,
-#            the in-process kokoro-mlx engine (tts-service/engines/kokoro_mlx,
+#            the in-process kokoro-mlx engine (src/tts-service/engines/kokoro_mlx,
 #            port 8900). Both speak the TTS protocol, which is all this venv
 #            carries (tts-protocol below); neither engine package nor model
 #            weight lands here. The host Piper measures 2.4x faster than the
@@ -30,8 +30,8 @@ requires-python = ">=3.12,<3.13"
 #   features, train, manifest   HERE
 #   eval   Docker, unchanged
 #
-#     ./scripts/setup-mww-applesilicon-trainer.sh
-#     ./scripts/run-mww-training-applesilicon.sh "hey seeree"
+#     ./src/scripts/setup-mww-applesilicon-trainer.sh
+#     ./src/scripts/run-mww-training-applesilicon.sh "hey seeree"
 
 dependencies = [
     # Pinned to the SAME version Dockerfile.mww.cpu installs from PyPI. This

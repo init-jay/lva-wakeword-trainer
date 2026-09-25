@@ -22,7 +22,7 @@ Nothing in this module opens the file for writing except one append per
 record, and existing lines are never touched.
 
 THE EVAL BLOCK IS VERBATIM, NOT RECOMPUTED. It is the JSON that
-eval/src/eval_model.py --json wrote for exactly this model (same numbers,
+src/eval/src/eval_model.py --json wrote for exactly this model (same numbers,
 same run of the scoring code). Recomputing any of it here - "for convenience"
 - would make the ledger a second scorer that can drift from the first, and a
 drifted scorer is how a 10-point difference (measured twice, at an IDENTICAL
@@ -418,7 +418,7 @@ def summarise(wake_word, grid_keys=None):
     # the pooled spread as seed noise unless told otherwise. Grouping on the
     # resolved config (C1) stays - a sweep across corpus axes exposed the
     # hole: it filed config-equal rows across several corpus ids, and
-    # tools/compare_arms.py (the per-corpus view this warning points to) was
+    # src/scripts/compare_arms.py (the per-corpus view this warning points to) was
     # already saying it per arm; the summariser - the table a reader sees
     # first - had to say it too.
     for (target, combo), recs in sorted(groups.items(),

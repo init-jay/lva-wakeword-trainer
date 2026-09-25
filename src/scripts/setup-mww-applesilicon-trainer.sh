@@ -35,11 +35,11 @@ command -v uv >/dev/null || { echo "ERROR: uv not found - https://docs.astral.sh
 
 # --- the microWakeWord clone ------------------------------------------------------
 #
-# AT THE REPO ROOT, NOT INSIDE train-mww-applesilicon/. Not for path resolution (the
-# stages import microwakeword from the venv, and nothing here reaches into the clone
-# by path) but for the same reason as the openwakeword clone: .gitignore and
-# .dockerignore both exclude it, so it never gets committed and never enters a build
-# context, where a root-level directory named microwakeword could shadow what the
+# UNDER src/train/, NOT INSIDE src/train/train-mww-applesilicon/. Not for path
+# resolution (the stages import microwakeword from the venv, and nothing here reaches
+# into the clone by path) but for the same reason as the openwakeword clone:
+# .gitignore and .dockerignore both exclude it, so it never gets committed and never
+# enters a build context, where `COPY src/train/` would carry it in beside what the
 # image installs for itself.
 if [[ ! -d "$CLONE_DIR/.git" ]]; then
     echo "==> cloning OHF-Voice/micro-wake-word into $CLONE_DIR/"

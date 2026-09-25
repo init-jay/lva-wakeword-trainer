@@ -144,7 +144,7 @@ uv run --project src/tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine 
 `KOKORO_FRACTION=0` (or `--kokoro-fraction 0`) runs the historical all-Piper
 corpus and needs only the Piper engine.
 
-The setup script pins the `microwakeword/` clone at repo root to one commit of
+The setup script pins the `src/train/microwakeword/` clone to one commit of
 the fork, builds `src/train/train-mww-applesilicon/.venv` (Python 3.12, tensorflow
 2.21.0 — the version the image installs — numpy 2, which is why this cannot
 share the openWakeWord venv), and verifies the imports. It installs the clone

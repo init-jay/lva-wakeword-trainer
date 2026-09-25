@@ -186,7 +186,7 @@ def main():
                    help="Piper protocol server(s), tcp:// URLs, comma-separated "
                         "to run a fleet (sharded by VOICE - every model pinned "
                         "to one instance for the run, so an instance never "
-                        "reloads a model per request; scripts/start-tts-fleet.sh "
+                        "reloads a model per request; src/scripts/start-tts-fleet.sh "
                         "N launches N on this Mac) (default: %%(default)s)")
     p.add_argument("--piper-speakers", type=int, default=12,
                    help="speakers sampled per multi-speaker voice (default: "

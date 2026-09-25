@@ -1751,7 +1751,7 @@ def main():
     config_json.write_text(json.dumps(resolved, indent=2, default=str) + "\n")
     if args.smoke:
         # NO .last_run_tag on a smoke run. run-oww-training.sh archives the model
-        # by READING that file back, and scripts/sweep.py dies without it - both
+        # by READING that file back, and src/scripts/sweep.py dies without it - both
         # assume it names the last REAL run. A smoke writing it would put a 200-
         # step model where a deployable one's name goes, or break a sweep that
         # happened to interleave. The smoke lives in its own directory, is

@@ -29,7 +29,7 @@ them (the --piper-url shape on both trainers, P2.1 in improvement.md). One
 instance is one resident model and one serial lane, so client threads against
 a single instance queue rather than run (tts_protocol/server.py takes every
 engine call under one lock; the single instance measures 21.66 clips/s in
-tools/bench_tts.py, and the corpus stage ran at ~16 against it, P2.1's fact
+src/scripts/bench_tts.py, and the corpus stage ran at ~16 against it, P2.1's fact
 10). Throughput therefore scales with PROCESSES, and PiperFleet shards the
 corpus BY VOICE - each model, all of its speakers, pinned to ONE instance for
 the whole run. Never round-robin: round-robin would make every instance
@@ -292,7 +292,7 @@ MISPRONOUNCING_PIPER_VOICES: dict[str, list[str]] = {
 # service. An audit of a different instance is only accidentally relevant.
 #
 # THE CATALOG GROWS, IN BOTH UNITS AT ONCE. Measured 2026-09-07 against the 2.4.3
-# wheel (identical in the Docker image and the host venv, scripts/start-piper-host.sh):
+# wheel (identical in the Docker image and the host venv, src/scripts/start-piper-host.sh):
 # 163 voices in the bundled catalog, against 96 at audit time and the 106 the compose
 # service exposed. With units: 96 and 163 are VOICE counts; 106 was a PAIR count. The
 # default selection (en_US/en_GB, 12-speaker cap) measures 37 voices / 2005 pairs raw

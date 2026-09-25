@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run a microWakeWord training pass and report where the model landed.
 
-Wrapped by scripts/run-mww-training.sh, which chains the four stages; the
+Wrapped by src/scripts/run-mww-training.sh, which chains the four stages; the
 openWakeWord equivalent is run-oww-training.sh. This carries over the two lessons
 from it that cost the most:
 
