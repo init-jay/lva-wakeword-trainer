@@ -9,18 +9,18 @@ Step 2 of the pipeline.
 ## Setup, once per machine
 
 ```bash
-./scripts/setup-applesilicon-trainer.sh
+./src/scripts/setup-applesilicon-trainer.sh
 ```
 
 Idempotent; re-run it any time something downstream smells wrong. It clones
-openWakeWord at the pinned commit, applies the patches in `patches/`, builds
-`train-applesilicon/.venv` (Python 3.12), downloads the spacy model, and
+openWakeWord at the pinned commit, applies the patches in `src/train/patches/`, builds
+`src/train/train-applesilicon/.venv` (Python 3.12), downloads the spacy model, and
 verifies.
 
 ## The TTS engines
 
-The Mac's launch mode is the two **uv projects in `tts-service/engines/`**, each
-its own venv, each a protocol server in one terminal (see `tts-service/README.md`
+The Mac's launch mode is the two **uv projects in `src/tts-service/engines/`**, each
+its own venv, each a protocol server in one terminal (see `src/tts-service/README.md`
 for the protocol itself):
 
 - **Kokoro, in-process MLX** (`kokoro_mlx`, port 8900, `uv sync`'d by the setup
@@ -40,18 +40,18 @@ for the protocol itself):
   of OWW's 0.30 Piper fraction; `KOKORO_FRACTION=0` for all-Piper) - and the
   negatives are Piper-only on both routes, so Piper is always needed.
 
-(`scripts/start-kokoro-host.sh` / `start-piper-host.sh` still exist but are for
-raw-API debugging now - `tools/audit_voices.py` and `tools/bench_tts.py` speak the
+(`src/scripts/start-kokoro-host.sh` / `start-piper-host.sh` still exist but are for
+raw-API debugging now - `src/scripts/audit_voices.py` and `src/scripts/bench_tts.py` speak the
 protocol, against the same engines the corpus uses - not for training.)
 
 ## Running openWakeWord
 
 
 ```bash
-uv run --project tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900   # terminal 2
-uv run --project tts-service/engines/piper python -m piper_engine --port 8898              # terminal 3, only if --piper-fraction > 0
+uv run --project src/tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900   # terminal 2
+uv run --project src/tts-service/engines/piper python -m piper_engine --port 8898              # terminal 3, only if --piper-fraction > 0
 
-./scripts/run-oww-training-applesilicon.sh "hey seeree" --piper-fraction 0.3
+./src/scripts/run-oww-training-applesilicon.sh "hey seeree" --piper-fraction 0.3
 ```
 
 `KOKORO_URL` defaults to the mlx engine (`tcp://127.0.0.1:8900`); `--skip-corpus`
@@ -87,7 +87,7 @@ check exists:
   file** (`openwakeword/train.py --augment_clips`) as a subprocess, and a run
   on a de-patched clone dies there with `KeyError: 'piper_sample_generator_path'`
   after the corpus was already built (measured 2026-09-07). If the guard fires,
-  do not hand-patch — re-run `./scripts/setup-applesilicon-trainer.sh`; nothing
+  do not hand-patch — re-run `./src/scripts/setup-applesilicon-trainer.sh`; nothing
   in the run script ever writes to the clone.
 
 The log lands in the repo's **logs/** as `training-<word>-macos-YYYYMMDD-HHMMSS.log`
@@ -98,7 +98,7 @@ The log lands in the repo's **logs/** as `training-<word>-macos-YYYYMMDD-HHMMSS.
 a file that came back unchanged is the **previous** model, and it says so
 explicitly: do not evaluate or deploy it. Two known benign end states:
 `train.py` exits 1 on its own tflite conversion, which this repo replaces with
-`train/oww/onnx2tflite.py`; and your Ctrl+C — both surface as the generic
+`src/train/oww/onnx2tflite.py`; and your Ctrl+C — both surface as the generic
 `TRAINING FAILED (exit …)` footer. Read the log to tell those from a real
 failure.
 
@@ -116,7 +116,7 @@ libc++abi: terminating due to uncaught exception of type
 That is a C++ thread-state failure after a long torch/OpenMP run, not a model
 problem; do not try to fix it inside the trainer venv. The `.onnx` is already
 written at this point. Since 2026-09-21 this repo's wrapper runs the converter
-in a SUBPROCESS (`train/oww/train.py: convert_to_tflite`), so the SIGABRT dies
+in a SUBPROCESS (`src/train/oww/train.py: convert_to_tflite`), so the SIGABRT dies
 with the child and the run still exits 0 with a WARNING — but the converter
 still cannot succeed in this venv (the onnx2tf stack aborts even on a cold
 import), so the .tflite still comes from Docker (multi-arch, native on Apple
@@ -124,7 +124,7 @@ Silicon — `docker compose build oww-trainer` first if the image is absent):
 
 ```bash
 docker run --rm -v "$PWD:/work" -w /work lva-wakeword-trainer-oww-trainer:latest \
-    python /work/train/oww/onnx2tflite.py /work/output/<word>/oww/<word>.onnx \
+    python /work/src/train/oww/onnx2tflite.py /work/output/<word>/oww/<word>.onnx \
     -o /work/output/<word>/oww/<word>.tflite
 ```
 
@@ -135,17 +135,17 @@ One quirk, checked and harmless: `onnx2tf` re-saves the input `.onnx`
 
 ## Running microWakeWord
 ```bash
-./scripts/setup-mww-applesilicon-trainer.sh   # once per machine; idempotent
-uv run --project tts-service/engines/piper python -m piper_engine --port 8898      # in another terminal
-uv run --project tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900  # another, for the default 30% mix
-./scripts/run-mww-training-applesilicon.sh "hey seeree"
+./src/scripts/setup-mww-applesilicon-trainer.sh   # once per machine; idempotent
+uv run --project src/tts-service/engines/piper python -m piper_engine --port 8898      # in another terminal
+uv run --project src/tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900  # another, for the default 30% mix
+./src/scripts/run-mww-training-applesilicon.sh "hey seeree"
 ```
 
 `KOKORO_FRACTION=0` (or `--kokoro-fraction 0`) runs the historical all-Piper
 corpus and needs only the Piper engine.
 
 The setup script pins the `microwakeword/` clone at repo root to one commit of
-the fork, builds `train-mww-applesilicon/.venv` (Python 3.12, tensorflow
+the fork, builds `src/train/train-mww-applesilicon/.venv` (Python 3.12, tensorflow
 2.21.0 — the version the image installs — numpy 2, which is why this cannot
 share the openWakeWord venv), and verifies the imports. It installs the clone
 **editable `--no-deps`**; a non-editable build is a verified failure, because

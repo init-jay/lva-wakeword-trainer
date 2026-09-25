@@ -1,10 +1,10 @@
 """Front a running Kokoro-FastAPI process with the repo's TTS protocol port.
 
-    uv run --project tts-service/engines/kokoro python -m kokoro_http_engine \
+    uv run --project src/tts-service/engines/kokoro python -m kokoro_http_engine \
         --url http://127.0.0.1:8880 --port 8899
 
 The FastAPI process itself is started separately: on a Mac by
-scripts/start-kokoro-host.sh, in Docker by the kokoro compose service (whose
+src/scripts/start-kokoro-host.sh, in Docker by the kokoro compose service (whose
 wrapper runs this same module against the in-image server).
 """
 import argparse

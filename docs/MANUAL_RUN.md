@@ -9,22 +9,22 @@ inside each step, see [../ARCHITECTURE.md](../ARCHITECTURE.md).
 
 **0 · Wordlists and data.** The phrases are the one part that does not transfer
 between wake words — `extend`, `running` and `hey_other` are built from your phrase's
-own consonants and vowels. Copy `wordlists/hey_seeree.yaml`, rewrite those three, then
+own consonants and vowels. Copy `src/wordlists/hey_seeree.yaml`, rewrite those three, then
 fetch the third-party corpora (~43 GB for both trainers; `oww` or `mww` alone is less):
 
 ```bash
-./scripts/download-external-data.sh            # all | oww | mww
+./src/scripts/download-external-data.sh            # all | oww | mww
 ```
 
 **1 · Record.** 20–50 clips per speaker, aiming for a peak near −12 dBFS. Record the
 holdout in the same session — it is evaluated against and never trained on.
 
 ```bash
-cd record
+cd src/record
 uv run record_samples.py --list-devices
 uv run record_samples.py --wake-word "hey seeree" --device 0 --speaker speaker1
 uv run record_samples.py --wake-word "hey seeree" --device 0 --holdout --speaker speaker1
-uv run python check_alignment.py ../data/recordings/samples/speaker1
+uv run python check_alignment.py data/recordings/samples/speaker1
 ```
 
 More than one speaker matters more than more clips from one: a model that reads 97%
@@ -33,8 +33,8 @@ for an adult has measured 24% for a child.
 **2 · Train.** One script per target; they are independent and can run separately.
 
 ```bash
-./scripts/run-oww-training.sh "hey seeree"     # server — one command, builds its own corpus
-./scripts/run-mww-training.sh "hey seeree"     # ESP32  — chains corpus, features, train, manifest
+./src/scripts/run-oww-training.sh "hey seeree"     # server — one command, builds its own corpus
+./src/scripts/run-mww-training.sh "hey seeree"     # ESP32  — chains corpus, features, train, manifest
 ```
 
 Both name their output after the code *and* the audio that produced it, so two runs
@@ -45,15 +45,15 @@ If a run dies *after* the corpus is built — a CUDA OOM at the feature array is
 usual way — resume without paying for the TTS again:
 
 ```bash
-SKIP_CORPUS=1 ./scripts/run-oww-training.sh "hey seeree"
-SKIP_CORPUS=1 ./scripts/run-mww-training.sh "hey seeree"
+SKIP_CORPUS=1 ./src/scripts/run-oww-training.sh "hey seeree"
+SKIP_CORPUS=1 ./src/scripts/run-mww-training.sh "hey seeree"
 ```
 
 For resuming, not for tuning. Training flags still apply; the ones that shape the
 corpus are inert, because the clips already exist.
 
 **3 · Eval.** Runs on whichever machine you are sitting at. The step is self-contained
-in `eval/` - compose file, image and sources - and the only thing it needs from
+in `src/eval/` - compose file, image and sources - and the only thing it needs from
 elsewhere is a TTS server for the adversarial corpus. Generate the corpus once,
 then score:
 
@@ -61,14 +61,14 @@ then score:
 # the TTS server: the base file, from the repo root
 docker compose up -d kokoro
 
-# everything else: eval/ is its own compose project
-cd eval
+# everything else: src/eval/ is its own compose project
+cd src/eval
 docker compose build                  # first time, or after Dockerfile changes
 docker compose run --rm eval python -m eval.generate_negatives \
     --url http://host.docker.internal:8880/v1/audio/speech
 cd .. && docker compose stop kokoro
 
-# the four gates, one model (still in eval/; model paths are relative to /app)
+# the four gates, one model (still in src/eval/; model paths are relative to /app)
 docker compose run --rm eval python -m eval.eval_model \
     --model output/hey_seeree/oww/<tag>.onnx
 
@@ -106,8 +106,8 @@ corpus contains. Pass the `.tflite` or the microWakeWord `.json`; the `.onnx` is
 refused because it is not what the device runs.
 
 ```bash
-cd preflight
-uv run test_model.py --model ../output/hey_seeree/mww/<tag>.json
+cd src/preflight
+uv run test_model.py --model output/hey_seeree/mww/<tag>.json
 ```
 
 If peaks sit just under your threshold, the operating point is wrong for the room —
@@ -128,5 +128,5 @@ export COMPOSE_FILE=docker-compose.yml:docker-compose.cuda.yml
 export COMPOSE_FILE=docker-compose.yml:docker-compose.cpu.yml
 ```
 
-Set one per shell, then use the scripts in `scripts/` unchanged — they read
+Set one per shell, then use the scripts in `src/scripts/` unchanged — they read
 `COMPOSE_FILE` like every other compose command.

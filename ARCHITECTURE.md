@@ -63,15 +63,15 @@ far.
 │   ├── record-samples/SKILL.md   1 · how to get usable recordings, and verify them
 │   ├── write-wordlists/SKILL.md  2+3 · the phrases, the one part that does not transfer
 │   └── eval-models/SKILL.md      3 · how to read a scorecard without misreading it
-├── wordlists/                    per-wake-word phrase lists
+├── src/wordlists/                    per-wake-word phrase lists
 │   ├── __init__.py               loader + the checks that keep eval and train disjoint
 │   └── hey_seeree.yaml           one file per wake word
-├── record/                       1 · record and check
+├── src/record/                       1 · record and check
 │   ├── record_samples.py
 │   ├── check_alignment.py
 │   ├── pyproject.toml            its own uv env - kept together
 │   └── uv.lock
-├── train/                        2 · training run
+├── src/train/                        2 · training run
 │   ├── provenance.py             run tag: the commit AND the audio it trained on
 │   ├── corpus/                   shared by both trainers
 │   │   ├── augment.py
@@ -89,12 +89,15 @@ far.
 │       ├── config.py
 │       ├── train.py
 │       └── manifest.py
-├── tts-service/                  the TTS protocol and the engines that speak it:
+│   ├── sweeps/                   sweep YAMLs for src/scripts/sweep.py
+│   ├── patches/                  openWakeWord patches, applied by setup + Dockerfiles
+│   └── train-applesilicon/ + train-mww-applesilicon/   host uv envs (below the tree)
+├── src/tts-service/                  the TTS protocol and the engines that speak it:
 │                                 tts_protocol/ (the client + shared audio code, what
 │                                 trainers and eval depend on) and engines/ (one uv
 │                                 project per engine - kokoro_mlx and piper, each its
 │                                 own venv and protocol port; README.md there)
-├── eval/                         3 · eval model - self-contained: everything the step needs
+├── src/eval/                         3 · eval model - self-contained: everything the step needs
 │   ├── docker-compose.yml        its own compose project, out of the base training file
 │   ├── Dockerfile                CPU only, native on Apple Silicon
 │   └── src/                      the harness; the image mounts it at /app/eval, keeping
@@ -106,18 +109,12 @@ far.
 │       ├── eval_model.py
 │       ├── compare_models.py
 │       └── check_model_alignment.py
-├── preflight/                    4 · preflight
+├── src/preflight/                    4 · preflight
 │   ├── test_model.py             live mic, the deployment runtime
-│   ├── pyproject.toml            its own uv env - host, like record/
+│   ├── pyproject.toml            its own uv env - host, like src/record/
 │   └── uv.lock
 ├── deploy/                       the current deployment candidate, staged out of
 │   └── README.md                 output/ with its measured status - one at a time
-├── tools/                        not in the diagram - one-off measurement
-│   ├── audit_voices.py
-│   ├── bench_tts.py
-│   ├── tf_probe.py
-│   └── measure_voice_f0.py
-├── patches/
 ├── docker/
 │   ├── Dockerfile.oww.cuda       trains on an NVIDIA GPU, linux/amd64
 │   ├── Dockerfile.mww.cuda       trains on an NVIDIA GPU, linux/amd64
@@ -127,9 +124,11 @@ far.
 │   │                             Wyoming image the trainers no longer speak directly
 │   ├── Dockerfile.kokoro         Kokoro-FastAPI + a protocol wrapper (8899), one container
 │   ├── tts_engines/              the kokoro wrapper's source: kokoro_http_engine
-│   │                             (the piper image bakes in tts-service/engines/piper)
+│   │                             (the piper image bakes in src/tts-service/engines/piper)
 │   └── requirements.txt          shared by BOTH oww trainers, cuda and cpu
-├── scripts/
+├── src/scripts/                  the run scripts, plus the one-off measurement
+│   │                              tools (audit_voices.py, bench_tts.py, tf_probe.py,
+│   │                              score_margins.py, ...) folded in from the old tools/
 │   ├── download-external-data.sh  -> data/external/  [all|oww|mww]
 │   ├── run-oww-training.sh        2 · one command, corpus built by the run
 │   ├── run-mww-training.sh        2 · four stages, corpus built separately
@@ -143,14 +142,14 @@ far.
 │   ├── setup-mww-applesilicon-trainer.sh what Dockerfile.mww.cpu does, on the host
 │   └── run-mww-training-applesilicon.sh  2 · four stages, no container
 ├── .dockerignore                 keeps data/ (~43 GB) out of every build context
-├── docker-compose.yml            no GPU required; the eval step has its own file in eval/
+├── docker-compose.yml            no GPU required; the eval step has its own file in src/eval/
 ├── docker-compose.cuda.yml       overlay: NVIDIA devices - kokoro, trainers
 ├── docker-compose.cpu.yml        overlay: CPU trainers - Apple Silicon, or any non-NVIDIA box
 ├── SPEED.md                      measured timings - the evidence for the README's route calls
-├── train-applesilicon/           host uv env for the oww trainer - SPEED.md
-└── train-mww-applesilicon/       host uv env for the mww trainer - SPEED.md
+├── src/train/train-applesilicon/           host uv env for the oww trainer - SPEED.md
+└── src/train/train-mww-applesilicon/       host uv env for the mww trainer - SPEED.md
 ```
 
-The host envs are Python 3.12 uv venvs (`train-applesilicon/`,
-`train-mww-applesilicon/`) and eval runs under its own pinned env; `cpython-311`/`314`
+The host envs are Python 3.12 uv venvs (`src/train/train-applesilicon/`,
+`src/train/train-mww-applesilicon/`) and eval runs under its own pinned env; `cpython-311`/`314`
 bytecode in any `__pycache__/` is from one-off interpreters and is not canonical.

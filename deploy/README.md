@@ -48,7 +48,7 @@ that carry its numbers.
 
 The operating constraint is a **false-accept rate on the adversarial negatives**, not a
 threshold: `extend` + `hey_other` only, never pooled with the other categories and never
-pooled across speakers. `tools/score_margins.py` derives the fire budget from the size of
+pooled across speakers. `src/scripts/score_margins.py` derives the fire budget from the size of
 the adversarial set it loaded (`ADV_FA_CONSTRAINT`, the largest count strictly inside it),
 so the budget moves with the set instead of being a number somebody typed.
 
@@ -57,7 +57,7 @@ scoring pass over one set of clips**. Curves land in `logs/scorecurves/*.csv`; t
 directory is gitignored, so a reviewer cannot open them — regenerate any row with
 
 ```bash
-eval/.venv/bin/python tools/score_margins.py --model <path> \
+src/eval/.venv/bin/python src/scripts/score_margins.py --model <path> \
   --csv logs/scorecurves/<name>.csv
 ```
 
@@ -71,9 +71,9 @@ Every ESP32 row is the *content* of a run dir's weights file, and the tag alone 
 for it. Two reasons, both structural.
 
 **The tag does not carry the shipped cutoff.** The `h-` half of a tag is a sha over the resolved
-hyperparameters plus the seed (`train/provenance.py`), and `probability_cutoff` is not among
+hyperparameters plus the seed (`src/train/provenance.py`), and `probability_cutoff` is not among
 them — it cannot be, because the cutoff is read off the ROC *after* training
-(`train/mww/train.py` prints it and says "Pick `probability_cutoff` from THIS, not from a
+(`src/train/mww/train.py` prints it and says "Pick `probability_cutoff` from THIS, not from a
 default"). The training-side `stride` and `window_step_ms` *are* in `config.json` and so are
 hashed; what is not hashed is the inference `sliding_window_size` and `probability_cutoff`
 that ship in the manifest's `micro` block. Two runs differing only in shipped cutoff
@@ -83,14 +83,14 @@ therefore share one tag.
 bare filename resolving to its **sibling**. But the corpus directory keeps a copy too
 (`data/corpus/<word>/mww/<corpus-id>/tflite_stream_state_internal_quant/`), and that copy is
 **shared by every run built against that corpus** — last write wins. Scoring from it yields
-per-arm bytes wearing per-seed names, which is why `tools/score_margins.py` refuses a path
+per-arm bytes wearing per-seed names, which is why `src/scripts/score_margins.py` refuses a path
 inside `data/corpus/` outright instead of warning. `prepare_corpus` rmtree's the corpus tree
 at the start of every run, so those bytes are unrecoverable afterwards: a row traced to a
 corpus dir has no evidence left, only a suspicion. What survives is the rule: score the run
 dir, and treat the md5 `score_margins.py` prints as the row's identifier.
 
 ```bash
-eval/.venv/bin/python tools/score_margins.py \
+src/eval/.venv/bin/python src/scripts/score_margins.py \
   --model output/<word>/mww/<tag>/tflite_stream_state_internal_quant/stream_state_internal_quant.tflite \
   --sliding-window-size <n>
 ```
@@ -134,7 +134,7 @@ relying on them, they are not ours to keep stable.
 ## What is never cleared by a measurement here
 
 1. **Preflight, both targets, on a live mic.** Held-out TTS numbers are not a substitute:
-   `cd preflight && uv run test_model.py --model ../deploy/esp32-mww/<candidate>.json`.
+   `cd src/preflight && uv run test_model.py --model deploy/esp32-mww/<candidate>.json`.
 2. **Latency on the target runtime.** The sweep's scorecard times the host runtime; a
    `.tflite` on the actual satellite is a different runtime and has to be timed there.
 3. **A `-dirty` tag.** It does not make a model unreproducible — the dirty files may not

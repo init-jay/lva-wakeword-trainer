@@ -30,8 +30,8 @@ COPY docker/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Clone and install OpenWakeWord
-RUN git clone https://github.com/dscripka/openWakeWord openwakeword \
-    && pip install --no-cache-dir -e ./openwakeword
+RUN mkdir -p src/train && git clone https://github.com/dscripka/openWakeWord src/train/openwakeword \
+    && pip install --no-cache-dir -e ./src/train/openwakeword
 
 # ONNX Runtime with CUDA, for feature computation (melspectrogram + embedding).
 #
@@ -64,60 +64,60 @@ providers = onnxruntime.get_available_providers(); \
 print('onnxruntime', onnxruntime.__version__, 'providers:', providers); \
 assert 'CUDAExecutionProvider' in providers, 'CUDA provider missing from the build'"
 
-COPY patches/skip-piper-import.py /tmp/skip-piper-import.py
-RUN python3 /tmp/skip-piper-import.py openwakeword/openwakeword/train.py
+COPY src/train/patches/skip-piper-import.py /tmp/skip-piper-import.py
+RUN python3 /tmp/skip-piper-import.py src/train/openwakeword/openwakeword/train.py
 
 # Patch: make augmentation_rounds > 1 actually produce more data instead of
 # augmenting N times and discarding all but the first pass
-COPY patches/honour-augmentation-rounds.py /tmp/honour-augmentation-rounds.py
-RUN python3 /tmp/honour-augmentation-rounds.py openwakeword/openwakeword/train.py
+COPY src/train/patches/honour-augmentation-rounds.py /tmp/honour-augmentation-rounds.py
+RUN python3 /tmp/honour-augmentation-rounds.py src/train/openwakeword/openwakeword/train.py
 
 # Patch: choose the feature-computation device from onnxruntime's own providers.
 # Upstream asks torch, so with the CPU build of onnxruntime (which openwakeword's
 # setup.py pins) it requests a CUDA provider that does not exist AND sets ncpu=1,
 # leaving feature computation single-threaded on CPU - 36 min of an 83 min run.
-COPY patches/feature-device-selection.py /tmp/feature-device-selection.py
-RUN python3 /tmp/feature-device-selection.py openwakeword/openwakeword/train.py
+COPY src/train/patches/feature-device-selection.py /tmp/feature-device-selection.py
+RUN python3 /tmp/feature-device-selection.py src/train/openwakeword/openwakeword/train.py
 
 # Patch: take the corpus directory from the config. Upstream derives it from
 # output_dir/model_name, which also names the exported model, so the openWakeWord
 # and microWakeWord corpora could not sit side by side under one wake word without
-# renaming the model. See patches/configurable-corpus-dir.py.
-COPY patches/configurable-corpus-dir.py /tmp/configurable-corpus-dir.py
-RUN python3 /tmp/configurable-corpus-dir.py openwakeword/openwakeword/train.py
+# renaming the model. See src/train/patches/configurable-corpus-dir.py.
+COPY src/train/patches/configurable-corpus-dir.py /tmp/configurable-corpus-dir.py
+RUN python3 /tmp/configurable-corpus-dir.py src/train/openwakeword/openwakeword/train.py
 
 # Patch: seed every RNG from config["seed"], so a sweep point measures the
-# hyperparameter, not the draw. See patches/seed-augment.py.
-COPY patches/seed-augment.py /tmp/seed-augment.py
-RUN python3 /tmp/seed-augment.py openwakeword/openwakeword/train.py
+# hyperparameter, not the draw. See src/train/patches/seed-augment.py.
+COPY src/train/patches/seed-augment.py /tmp/seed-augment.py
+RUN python3 /tmp/seed-augment.py src/train/openwakeword/openwakeword/train.py
 
 # Patch: the base learning rate from config["lr"] (default = upstream's
-# 0.0001), so a sweep can move it from the CLI. See patches/configurable-lr.py.
-COPY patches/configurable-lr.py /tmp/configurable-lr.py
-RUN python3 /tmp/configurable-lr.py openwakeword/openwakeword/train.py
+# 0.0001), so a sweep can move it from the CLI. See src/train/patches/configurable-lr.py.
+COPY src/train/patches/configurable-lr.py /tmp/configurable-lr.py
+RUN python3 /tmp/configurable-lr.py src/train/openwakeword/openwakeword/train.py
 
 # Patch: audit auto_train's two hidden decisions - the per-sequence negative
 # weight (its doubling can turn a requested 2000 into an effective 8000, and
 # whether it fired in a given run was never recorded) and the checkpoint merge
 # (which checkpoints cleared the 90th-percentile gate) - as machine-readable
 # lines the wrapper files in <tag>.config.json. Also lifts the int16 val_steps
-# trap at --training-steps above ~327k. See patches/log-weight-and-merge.py.
-COPY patches/log-weight-and-merge.py /tmp/log-weight-and-merge.py
-RUN python3 /tmp/log-weight-and-merge.py openwakeword/openwakeword/train.py
+# trap at --training-steps above ~327k. See src/train/patches/log-weight-and-merge.py.
+COPY src/train/patches/log-weight-and-merge.py /tmp/log-weight-and-merge.py
+RUN python3 /tmp/log-weight-and-merge.py src/train/openwakeword/openwakeword/train.py
 
 # Patch: hold the training features in VRAM rather than mmap. The 17.28 GB
 # ACAV100M array against 20 GB of RAM leaves training stalling on page faults -
 # GPU at 14%, CPU 37% idle, 7.2 GB swapped. Requires `docker compose stop kokoro
 # kokoro2` before training so their CUDA contexts are not holding ~2.4 GB.
-COPY patches/gpu-resident-features.py /tmp/gpu-resident-features.py
-RUN python3 /tmp/gpu-resident-features.py openwakeword/openwakeword/data.py \
-    && python3 /tmp/gpu-resident-features.py openwakeword/openwakeword/train.py
+COPY src/train/patches/gpu-resident-features.py /tmp/gpu-resident-features.py
+RUN python3 /tmp/gpu-resident-features.py src/train/openwakeword/openwakeword/data.py \
+    && python3 /tmp/gpu-resident-features.py src/train/openwakeword/openwakeword/train.py
 
 # Download embedding models (small, safe to bake into image)
-RUN mkdir -p openwakeword/openwakeword/resources/models \
-    && curl -L -o openwakeword/openwakeword/resources/models/embedding_model.onnx \
+RUN mkdir -p src/train/openwakeword/openwakeword/resources/models \
+    && curl -L -o src/train/openwakeword/resources/models/embedding_model.onnx \
         'https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/embedding_model.onnx' \
-    && curl -L -o openwakeword/openwakeword/resources/models/melspectrogram.onnx \
+    && curl -L -o src/train/openwakeword/resources/models/melspectrogram.onnx \
         'https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/melspectrogram.onnx'
 
 # The onnx -> tflite toolchain, checked here rather than at conversion time.
@@ -125,31 +125,31 @@ RUN python3 -c "import tensorflow as tf; print('tensorflow', tf.__version__)" \
     && python3 -c "import onnx2tf" \
     && command -v onnx2tf
 
-# The whole train/ package: train.corpus is shared, train.oww is this trainer.
-# And the TTS protocol client beside it: train/corpus/__init__.py adds
-# tts-service/tts_protocol/ to sys.path, so importing anything from train.corpus
+# The whole src/train/ package: train.corpus is shared, train.oww is this trainer.
+# And the TTS protocol client beside it: src/train/corpus/__init__.py adds
+# src/tts-service/tts_protocol/ to sys.path, so importing anything from train.corpus
 # exercises it - including the import check below. The engines are NOT here - the
 # trainers are protocol clients, and the engines live in the kokoro/piper compose
 # services (tts-service/README.md).
-COPY train/ ./train/
-COPY tts-service/ ./tts-service/
+COPY src/train/ ./src/train/
+COPY src/tts-service/ ./src/tts-service/
 
-# scripts/ IS NOT COPIED - docker-compose bind-mounts it, as it does train/ over the
+# src/scripts/ IS NOT COPIED - docker-compose bind-mounts it, as it does src/train/ over the
 # copy above. The two are treated differently on purpose:
 #
-#   COPY train/   so the import check below runs at BUILD time. A package that does
+#   COPY src/train/   so the import check below runs at BUILD time. A package that does
 #                 not import should fail the build, not a training run that has
 #                 already spent an hour building a corpus.
-#   mount train/  so editing a trainer does not mean rebuilding a CUDA image. The
+#   mount src/train/  so editing a trainer does not mean rebuilding a CUDA image. The
 #                 mount shadows the copy at runtime; the copy is what the build
 #                 checked, the mount is what actually runs.
-#   mount scripts/ only. Nothing in the build depends on it, and a shell script that
+#   mount src/scripts/ only. Nothing in the build depends on it, and a shell script that
 #                 needed an image rebuild to fix a typo is the liability
 #                 Dockerfile.eval already calls out.
 
 # Fail the build rather than a training run if the package does not import.
 # train.corpus.kokoro is what pulls in the protocol client (train/corpus/__init__.py
 # adds it to sys.path), so this single line checks that copy too.
-RUN python3 -c "import train.corpus.augment, train.corpus.negatives, \
+RUN python3 -c "import sys; sys.path.insert(0, '/app/src'); import train.corpus.augment, train.corpus.negatives, \
                        train.corpus.real, train.corpus.piper, \
                        train.corpus.kokoro"

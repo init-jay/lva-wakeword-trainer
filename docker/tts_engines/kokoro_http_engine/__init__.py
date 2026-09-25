@@ -2,7 +2,7 @@
 
 The Kokoro HTTP protocol adapter since the tts-service split (2026-09-08): it
 fronts a running Kokoro-FastAPI process and exposes it on the repo's TTS
-protocol port. It lives in the docker/ build context (not in tts-service/)
+protocol port. It lives in the docker/ build context (not in src/tts-service/)
 because it exists only where a Kokoro-FastAPI image runs: the compose service
 runs the FastAPI server and this wrapper in one container -
 
@@ -11,7 +11,7 @@ runs the FastAPI server and this wrapper in one container -
 (docker/Dockerfile.kokoro, whose CMD starts both). On a Mac this module is
 never run at all: the mlx engine is a separate in-process server
 (tts-service/engines/kokoro_mlx/), and that is why there is no `engines/kokoro`
-project next to it. The URL-facing functions below are what train/corpus/
+project next to it. The URL-facing functions below are what src/train/corpus/
 kokoro.py used to be before it became a thin re-export of the protocol
 client.
 """
@@ -146,7 +146,7 @@ def kokoro_tts_batch(kokoro_url: str, voice: str, texts: list, speed: float):
     single forward pass - so callers must group by (voice, speed) before calling.
 
     The split and the re-basing live in split_joined (engine.py); this is the URL
-    entry point the run-on generator in train/oww/train.py still calls directly.
+    entry point the run-on generator in src/train/oww/train.py still calls directly.
     """
     if not texts:
         return []

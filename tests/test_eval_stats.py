@@ -1,6 +1,6 @@
 """Guards for the eval harness statistics: threshold_for_fa and
-bootstrap_diff_ci (eval/src/compare_models.py), wilson_interval and
-threshold_sweep (eval/src/eval_model.py).
+bootstrap_diff_ci (src/eval/src/compare_models.py), wilson_interval and
+threshold_sweep (src/eval/src/eval_model.py).
 
 These are the arithmetic behind the repo's two measurement rules: never
 compare models at a fixed threshold (two runs of an identical config
@@ -11,10 +11,10 @@ gates the "best model" line on real evidence instead of a coin flip
 (compare_models main()).
 
 IMPORT: on the host, eval/ has no __init__.py - the eval IMAGE mounts
-eval/src as the package `eval` (eval/docker-compose.yml), and both
+src/eval/src as the package `eval` (src/eval/docker-compose.yml), and both
 compare_models.py and eval_model.py do `from eval import backends, ...`,
 which only resolves in that layout. We replicate it here: register a bare
-module named `eval` whose __path__ is eval/src, which is exactly what the
+module named `eval` whose __path__ is src/eval/src, which is exactly what the
 mount does at runtime. Nothing outside this process is touched.
 """
 
@@ -26,12 +26,12 @@ from pathlib import Path
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
 
 if "eval" not in sys.modules:
     _pkg = types.ModuleType("eval")
-    _pkg.__path__ = [str(REPO_ROOT / "eval" / "src")]
+    _pkg.__path__ = [str(REPO_ROOT / "src" / "eval" / "src")]
     sys.modules["eval"] = _pkg
 
 from eval.compare_models import bootstrap_diff_ci, threshold_for_fa  # noqa: E402

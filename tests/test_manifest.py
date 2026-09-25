@@ -1,4 +1,4 @@
-"""Guards for train/corpus/manifest.py: the frozen-corpus identity check.
+"""Guards for src/train/corpus/manifest.py: the frozen-corpus identity check.
 
 The failure mode this module exists to make loud: `--skip-corpus` /
 `--corpus reuse` used to fail SILENTLY in both directions - a changed
@@ -17,8 +17,8 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
 
 import train.corpus.manifest as man  # noqa: E402
 

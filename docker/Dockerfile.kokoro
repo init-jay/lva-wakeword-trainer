@@ -54,7 +54,7 @@ FROM ${KOKORO_IMAGE}
 # owned by the build host's uid, so the source has to be re-copied into a
 # directory appuser owns first. The _src trees are left in /tmp - appuser
 # cannot unlink root-owned files and /tmp is ephemeral.
-COPY tts-service/tts_protocol/ /tmp/tts_protocol_src/
+COPY src/tts-service/tts_protocol/ /tmp/tts_protocol_src/
 COPY docker/tts_engines/ /tmp/tts_engines_src/
 RUN set -eux; \
     mkdir /tmp/pipsrc; \

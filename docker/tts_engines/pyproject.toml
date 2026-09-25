@@ -4,14 +4,14 @@ version = "0.1.0"
 description = "tts-protocol server that fronts the in-image Kokoro-FastAPI server"
 requires-python = ">=3.11"
 
-# Lives in the docker build context, not in tts-service/: this adapter exists
+# Lives in the docker build context, not in src/tts-service/: this adapter exists
 # only where a Kokoro-FastAPI image runs (the CUDA box). On a Mac the in-process
 # MLX server (tts-service/engines/kokoro_mlx) and the Piper server
 # (tts-service/engines/piper) are the two engine processes, and the FastAPI
 # stack this fronts never runs at all.
 #
 # tts-protocol is deliberately NOT a dependency here: the Dockerfile installs
-# tts-service/tts_protocol first, and uv-style path sources are not something
+# src/tts-service/tts_protocol first, and uv-style path sources are not something
 # pip can resolve.
 dependencies = [
     "numpy",

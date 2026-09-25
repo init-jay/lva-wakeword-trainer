@@ -1,7 +1,7 @@
-"""Pins for tools/matched_fa_table.py: one grid, a derived budget, a real override.
+"""Pins for src/scripts/matched_fa_table.py: one grid, a derived budget, a real override.
 
 WHY THESE EXIST. The tool once re-declared the sweep grid (a copy of
-eval/src/eval_model.py's SWEEP_GRID) and defaulted --budgets to the literal
+src/eval/src/eval_model.py's SWEEP_GRID) and defaulted --budgets to the literal
 "6,12" - counts that are only right for one adversarial set's size. A 298-clip
 set derives 5 under the repo's 2% constraint, so the out-of-the-box reading sat
 on the wrong side of the budget it exists to hold. Both drifts are pinned here
@@ -13,8 +13,8 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "tools"))
-sys.path.insert(0, str(REPO_ROOT / "eval" / "src"))
+sys.path.insert(0, str(REPO_ROOT / "src" / "scripts"))
+sys.path.insert(0, str(REPO_ROOT / "src" / "eval" / "src"))
 
 import eval_model as ev        # noqa: E402
 import matched_fa_table as mft  # noqa: E402

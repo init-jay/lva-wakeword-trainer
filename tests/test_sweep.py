@@ -1,4 +1,4 @@
-"""Guards for scripts/sweep.py: the grid must reach the trainer command.
+"""Guards for src/scripts/sweep.py: the grid must reach the trainer command.
 
 The bug these tests exist for (bug.md B1, 2026-09-22): the per-point grid
 dict was used for labels and the ledger field but never translated into
@@ -36,10 +36,10 @@ from pathlib import Path
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
 
-spec = importlib.util.spec_from_file_location("sweep", REPO_ROOT / "scripts" / "sweep.py")
+spec = importlib.util.spec_from_file_location("sweep", REPO_ROOT / "src" / "scripts" / "sweep.py")
 sweep = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sweep)
 
@@ -216,7 +216,7 @@ def _dry_run(overrides):
     wake word keeps the ledger read empty, so it is safe in-process."""
     path = _write_spec(overrides)
     saved = sys.argv
-    sys.argv = [str(REPO_ROOT / "scripts" / "sweep.py"), path, "--dry-run"]
+    sys.argv = [str(REPO_ROOT / "src" / "scripts" / "sweep.py"), path, "--dry-run"]
     out = io.StringIO()
     try:
         with contextlib.redirect_stdout(out):
@@ -404,7 +404,7 @@ def test_eval_cmd_omits_flag_when_not_configured():
 
 def test_mww_ambient_dirs_follow_the_ambient_flag():
     # The bug: trainer_cmd spread the auto-discovered ambient dirs straight after
-    # --tag, positional. train/mww/train.py's --ambient is nargs="*", so the bare
+    # --tag, positional. src/train/mww/train.py's --ambient is nargs="*", so the bare
     # directories parsed as "zero ambient sets" and the run died at its own preflight
     # ("no validation_ambient or testing_ambient data in any feature set", exit 1) -
     # and every point of an early sweep failed this way. argparse does NOT reject

@@ -1,10 +1,10 @@
-"""Guards for wordlists/__init__.py: the wordlist validation.
+"""Guards for src/wordlists/__init__.py: the wordlist validation.
 
 The rule the module exists to enforce: THE EVAL AND TRAINING LISTS MUST BE
 DISJOINT. A phrase in both is trained on and then measured, which turns a
 generalisation measurement into a memorisation one - and the number moves
 in the direction that looks like success (module docstring). Three
-hand-written comments in train/corpus/negatives.py used to ask the reader
+hand-written comments in src/train/corpus/negatives.py used to ask the reader
 to check this by hand; `load(..., validate_lists=True)` does it instead.
 The tests pin that an overlapping phrase raises with the two lists named,
 and that a clean wordlist passes.
@@ -17,8 +17,8 @@ from pathlib import Path
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
 
 import wordlists  # noqa: E402
 

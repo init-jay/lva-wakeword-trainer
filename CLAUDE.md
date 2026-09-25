@@ -13,23 +13,23 @@ orchestration between them.
 That single sentence is enough to start. Run the steps in this order, and stop at
 each **STOP** until the human has done their part.
 
-1. **Wordlists.** `wordlists/<x>.yaml`. Do this first: the adversarial phrases are
+1. **Wordlists.** `src/wordlists/<x>.yaml`. Do this first: the adversarial phrases are
    built from the wake word's own consonants and vowels, and nothing downstream is
-   meaningful without them. Use `write-wordlists`. Copy `wordlists/hey_seeree.yaml`
+   meaningful without them. Use `write-wordlists`. Copy `src/wordlists/hey_seeree.yaml`
    as the worked example.
 2. **STOP — recording.** You cannot do this. The recorder blocks on `input()` and
    needs a person at a microphone. Use `record-samples` to hand over the commands,
    then verify what comes back: clip counts, levels, alignment.
-3. **External data**, once per machine: `./scripts/download-external-data.sh [all|oww|mww]`.
+3. **External data**, once per machine: `./src/scripts/download-external-data.sh [all|oww|mww]`.
    ~43 GB for both. Check `df -h` first.
-4. **Train.** `./scripts/run-oww-training.sh "X"` and/or `./scripts/run-mww-training.sh "X"`.
+4. **Train.** `./src/scripts/run-oww-training.sh "X"` and/or `./src/scripts/run-mww-training.sh "X"`.
    On an Apple Silicon Mac both targets run on the host instead - the
    `train-apple-silicon` skill carries both routes, including the oww
    tflite-conversion workaround and the host Piper for mww. Hours.
    Ask which target they want before running both.
 5. **Eval.** Use `eval-models`. Report per speaker and at matched false accepts.
 6. **STOP — preflight.** Also needs their microphone:
-   `cd preflight && uv run test_model.py --model ../output/<x>/mww/<tag>.json`
+   `cd src/preflight && uv run test_model.py --model output/<x>/mww/<tag>.json`
 
 Ask which wake word and which target before starting anything expensive. Do not
 guess a wake word from the repo's existing `hey_seeree` files.
@@ -73,19 +73,19 @@ mmap'd, and running short of memory page-faults rather than erroring.
 `SKIP_BUILD=1` on either training script reuses the image; needed after a
 `docker builder prune`, since the rebuild is then cold.
 
-A Mac can also train both targets entirely outside Docker: `train-applesilicon/`
-is a host uv env (torch, `scripts/setup-applesilicon-trainer.sh`) run with
-`scripts/run-oww-training-applesilicon.sh`, and `train-mww-applesilicon/` (TF,
-`scripts/setup-mww-applesilicon-trainer.sh`) with
-`scripts/run-mww-training-applesilicon.sh`. Neither script starts TTS of its
-own - the corpus clients speak the TTS protocol in `tts-service/` to the engine
+A Mac can also train both targets entirely outside Docker: `src/train/train-applesilicon/`
+is a host uv env (torch, `src/scripts/setup-applesilicon-trainer.sh`) run with
+`src/scripts/run-oww-training-applesilicon.sh`, and `src/train/train-mww-applesilicon/` (TF,
+`src/scripts/setup-mww-applesilicon-trainer.sh`) with
+`src/scripts/run-mww-training-applesilicon.sh`. Neither script starts TTS of its
+own - the corpus clients speak the TTS protocol in `src/tts-service/` to the engine
 uv projects there (kokoro-mlx on 8900, in-process piper-tts on 8898; see
-`tts-service/README.md`), or a Docker service on a reachable port. The mww
+`src/tts-service/README.md`), or a Docker service on a reachable port. The mww
 host route is the measured-faster one on a Mac (full run measured 14m14s there
 against 26m06s in the container, 1.8x); its corpus is Piper-majority with a 30%
 Kokoro mix by default (`KOKORO_FRACTION=0` for the all-Piper corpus). Do not
 scale corpus depth in search of quality: doubling it (with double the training
-steps) produced no deployable model in either engine mix - `train/mww/corpus.py`
+steps) produced no deployable model in either engine mix - `src/train/mww/corpus.py`
 and SPEED.md record both runs.
 The route rationale and the measurements: SPEED.md.
 
@@ -93,7 +93,7 @@ The route rationale and the measurements: SPEED.md.
 
 - **`data/recordings/holdout/` is never trained on.** The guarantee is *positional* —
   it is a sibling of `samples/`, not a child, because the trainer globs the samples
-  tree recursively. `eval/src/paths.py` enforces and explains it.
+  tree recursively. `src/eval/src/paths.py` enforces and explains it.
 - **`data/` is inputs and generated corpus; `output/` is models.** The trainers
   `rmtree` their corpus every run, so the split is what keeps that away from models.
 - **Never compare models at a fixed threshold.** Two runs of an identical config
@@ -101,7 +101,7 @@ The route rationale and the measurements: SPEED.md.
 - **Never pool per-speaker results.** An average hides the voice that fails: 24% for
   a child against 97% for an adult, in the run that motivated the augmentation.
 - **Never pool negative categories.** `extend` and `hey_other` carry the signal.
-- **A tag is code + data**, `<commit>-d<audio hash>` — see `train/provenance.py`.
+- **A tag is code + data**, `<commit>-d<audio hash>` — see `src/train/provenance.py`.
   Expect the data half to move between runs even when nothing changed; the TTS is
   not bit-reproducible.
 - **`--seed` is a guarantee, not a convenience.** Same seed gives a byte-identical

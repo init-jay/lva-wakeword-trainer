@@ -67,8 +67,8 @@ Is this good enough to ship?
 ### Prefer to drive it yourself?
 
 **`make help`** is the entry point, and **[docs/MANUAL_RUN.md](docs/MANUAL_RUN.md)** has the
-four steps end to end, with the commands for each of the three scripts in `scripts/`.
-The change-one-thing loop itself is a tool: `scripts/sweep.py` runs a small
+four steps end to end, with the commands for each of the three scripts in `src/scripts/`.
+The change-one-thing loop itself is a tool: `src/scripts/sweep.py` runs a small
 grid against a frozen corpus and appends every point to a per-wake-word
 ledger (`output/<word>/runs.jsonl`); `python -m train.ledger --wake-word ...`
 summarises it.
@@ -97,7 +97,7 @@ you what to expect.
 | Preflight | needs a mic | needs a mic |
 
 - Corpus generation is the largest stage of either run; it speaks to a TTS
-  engine (`tts-service/`: Kokoro on 8900, Piper via `scripts/start-tts-fleet.sh`),
+  engine (`src/tts-service/`: Kokoro on 8900, Piper via `src/scripts/start-tts-fleet.sh`),
   which is why it is a separate, server-needing stage the trainers can skip -
   `--skip-corpus` on the oww scripts, `SKIP_CORPUS=1` on mww - and the re-run
   flags save about 10-15 minutes off the numbers above.

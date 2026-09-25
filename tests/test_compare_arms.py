@@ -1,11 +1,11 @@
-"""Guards for tools/compare_arms.py, the cross-arm ledger reader.
+"""Guards for src/scripts/compare_arms.py, the cross-arm ledger reader.
 
 The tool's whole contract is honest reading of the sweep arms: group on the
 grid VALUE (the arm), count distinct (config-hash, seed) pairs (bug.md C2),
 never pool per speaker or per negative category (CLAUDE.md), read
 matched-FA as a point pick on each arm's OWN curve at the ledger's common
 budget (bug.md C3 step 2), and label the mixed vintages. Warnings (divergent
-duplicates, multi-corpus arms) go to stderr like train/ledger.py's.
+duplicates, multi-corpus arms) go to stderr like src/train/ledger.py's.
 
 Plain-python convention (tests/_runner.py): no pytest, no fixture files in
 the repo - the synthetic ledger is written to a tempfile and handed to the
@@ -13,7 +13,7 @@ real CLI through its --ledger flag, so the whole main() -> render() path is
 exercised and captured stdout/stderr is what gets asserted on.
 
 Fixture rows are shaped EXACTLY like the ledger lines the pipeline writes
-(field names copied from the writers in the repo: train/ledger.py's
+(field names copied from the writers in the repo: src/train/ledger.py's
 record(), the eval block eval_model.py --json writes, and the sweep's
 grid extra key). One test pins the fixture's key sets against those writers,
 hermetically: it reads the writers' SOURCE, which a clean clone has -
@@ -28,10 +28,10 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-if str(REPO_ROOT / "tools") not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT / "tools"))
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
+if str(REPO_ROOT / "src" / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src" / "scripts"))
 
 import compare_arms  # noqa: E402
 
@@ -55,7 +55,7 @@ def rec(tag, seed, value, det, fa, extend=(9, 148), hey_other=(2, 150),
         ryan=(3, 6), jay=(33, 35), jen=(10, 10), threshold=0.5,
         curve=None, vhs=None, corpus_id="f9c065b"):
     """One ledger record, field-for-field in the shape of a real row:
-    the same top-level keys train/ledger.py record() files, and the same
+    the same top-level keys src/train/ledger.py record() files, and the same
     eval_block keys eval_model.py --json writes (model/threshold/backend/
     timestamp/false_accepts_by_category/adversarial/positives/per_speaker/
     command_following/gates, plus threshold_sweep and voice_holdout_set when
@@ -182,27 +182,27 @@ def test_fixture_shape_matches_the_writers():
              curve=_curve([0.5], [0.03], [0.9]), vhs=0.87)["eval_block"]
     row = rec("aaa1111-corp0000-h1234567", 42, "ryan=30", 0.90, 0.037)
 
-    # TOP LEVEL: train/ledger.py record() assembles the row - its fixed
+    # TOP LEVEL: src/train/ledger.py record() assembles the row - its fixed
     # keys plus "recorded_utc", which it sets right after rec.update(extra).
     top = {"wake_word", "target", "tag", "corpus_id", "seed", "config",
            "wall_time", "eval_block", "recorded_utc"}
     assert set(row) == top | {"grid"}, f"fixture top-level keys drifted: {set(row)}"
-    ledger_src = (REPO_ROOT / "train" / "ledger.py").read_text()
+    ledger_src = (REPO_ROOT / "src" / "train" / "ledger.py").read_text()
     for key in top:
         assert _quoted_in(key, ledger_src), \
-            f"top-level key {key!r} no longer a quoted literal in train/ledger.py"
+            f"top-level key {key!r} no longer a quoted literal in src/train/ledger.py"
     # "grid" cannot be pinned in record(): it lands via **extra
     # (rec.update(extra)), never as a literal in the writer. The supplier
-    # is scripts/sweep.py, where spec.get("grid") builds the dict and
+    # is src/scripts/sweep.py, where spec.get("grid") builds the dict and
     # ledger.record(..., grid=gp) passes it, so pin against that source.
-    sweep_src = (REPO_ROOT / "scripts" / "sweep.py").read_text()
+    sweep_src = (REPO_ROOT / "src" / "scripts" / "sweep.py").read_text()
     assert _quoted_in("grid", sweep_src), \
-        "'grid' no longer a quoted literal in scripts/sweep.py"
+        "'grid' no longer a quoted literal in src/scripts/sweep.py"
 
     # EVAL BLOCK: the dict eval_model.py writes under --json, built inline
     # around its main() tail (per_speaker[speaker] = {...},
     # "false_accepts_by_category": {...}, "latency_median_ms", "missed").
-    eval_src = (REPO_ROOT / "eval" / "src" / "eval_model.py").read_text()
+    eval_src = (REPO_ROOT / "src" / "eval" / "src" / "eval_model.py").read_text()
     eval_block_keys = {"model", "threshold", "backend", "timestamp",
                        "false_accepts_by_category", "adversarial",
                        "positives", "per_speaker", "command_following",
@@ -217,7 +217,7 @@ def test_fixture_shape_matches_the_writers():
     if "eval" not in sys.modules:
         import types as _types
         _pkg = _types.ModuleType("eval")
-        _pkg.__path__ = [str(REPO_ROOT / "eval" / "src")]
+        _pkg.__path__ = [str(REPO_ROOT / "src" / "eval" / "src")]
         sys.modules["eval"] = _pkg
     from eval.eval_model import threshold_sweep  # noqa: E402
     sweep_keys = set(threshold_sweep([0.5, 0.3], [0.4], grid=[0.5]).keys())
@@ -300,7 +300,7 @@ def test_same_seed_different_corpus_is_an_arm_not_a_determinism_failure():
     TTS per arm, so the flat and the balanced arm share a config hash and a seed and
     differ in corpus - and their evals are EXPECTED to differ, because the corpus is
     the variable under test. Keying on the pair alone called that a determinism
-    failure and named both tags, which is the false positive train/ledger.py widened
+    failure and named both tags, which is the false positive src/train/ledger.py widened
     its own key to stop. Nothing pinned it: the fixtures above vary corpus_id only
     together with the seed or the config, where both keys group identically.
     """
@@ -371,7 +371,7 @@ def test_matched_fa_budget_and_unreachable_floor():
 def test_sweepless_rows_keep_labelled_fallback():
     """Rows without threshold_sweep (every pre-sweep row) keep the
     labelled @-threshold reading and get '- (no sweep on file)' in the
-    matched cell - train/ledger.py's mixed-vintage behavior. When NO arm
+    matched cell - src/train/ledger.py's mixed-vintage behavior. When NO arm
     has a sweep at all, there is no budget to derive."""
     out, _ = _run([
         rec("aaa1111-corp0000-h1111111", 42, "", 0.90, 0.037),

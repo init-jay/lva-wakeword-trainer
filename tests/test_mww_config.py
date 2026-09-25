@@ -1,4 +1,4 @@
-"""Guards for train/mww/config.py.
+"""Guards for src/train/mww/config.py.
 
 Each test here guards a decision that once cost a full mWW training run (tens
 of minutes) when it broke:
@@ -20,12 +20,12 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from train.mww import config as mww  # noqa: E402
 
-# The upstream notebook defaults train/mww/train.py actually launches with -
+# The upstream notebook defaults src/train/mww/train.py actually launches with -
 # the "known-good" architecture. Kept in lockstep with MODEL_FLAGS there.
 KNOWN_GOOD_FLAGS = {
     "pointwise_filters": "64,64,64,64",
@@ -133,7 +133,7 @@ def test_the_clips_factory_does_not_hand_the_split_back_to_upstream():
 
     A seed there makes microwakeword/audio/clips.py:145-157 build split_clips itself, and
     upstream splits per FILE - so the N copies of one human recording scatter across train
-    and validation. That is the leak train/mww/split.py exists to close, and it returns
+    and validation. That is the leak src/train/mww/split.py exists to close, and it returns
     silently: every count still looks right, only the held-out recordings stop being held
     out. The factory has no caller today (every feature set the trainers assemble is
     mmap_feature_set), which is precisely why nothing else would notice it being wired up

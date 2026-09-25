@@ -34,7 +34,7 @@ If capture fails immediately, that is the first thing to check.
 Device numbering differs per backend, so list with the same `--backend` used to record:
 
 ```bash
-cd record
+cd src/record
 uv run record_samples.py --list-devices
 ```
 
@@ -44,7 +44,7 @@ Then, one directory per speaker:
 uv run record_samples.py \
   --wake-word "hey seeree" \
   --device 0 \
-  --output-dir ../data/recordings/samples/speaker1
+  --output-dir data/recordings/samples/speaker1
 ```
 
 Take-by-take: ENTER arms, "SPEAK NOW!" cues, 2 s captured, levels reported. `q` or Ctrl-C
@@ -68,7 +68,7 @@ take is kept under `data/recordings/raw/<speaker>/`, so it can be re-cut with
 
 ## More than one speaker matters
 
-`train/corpus/augment.py` shifts synthetic clips into the child range specifically because
+`src/train/corpus/augment.py` shifts synthetic clips into the child range specifically because
 a run measured a 4-year-old at 24% detection against 97% for the adult, while being 26% of
 the real corpus. Under-representation was not the cause — the fundamental sat outside
 everything the model had seen. If the wake word needs to work for a child or a very
@@ -84,7 +84,7 @@ find data/recordings/samples -name '*.wav' | wc -l
 ls data/recordings/samples/
 
 # where speech sits in openWakeWord's detection window
-cd record && uv run python check_alignment.py ../data/recordings/samples/
+cd src/record && uv run python check_alignment.py data/recordings/samples/
 ```
 
 Trailing silence pushes the phrase earlier than the alignment the model sees when
@@ -102,7 +102,7 @@ Holdout clips exist to be evaluated against and are **never trained on**. They b
 trainer globs the samples tree recursively for positives.
 
 ```bash
-cd record
+cd src/record
 uv run record_samples.py --holdout --speaker speaker1
 ```
 

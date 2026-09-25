@@ -14,7 +14,7 @@ Three environments, all measured with `time` on the same wake word:
 
 - **CUDA box** — RTX 3090, 20 GB RAM, 4 cores, `docker-compose.cuda.yml`
 - **Mac, Docker** — M1 Max, 64 GB, 10 cores, `docker-compose.cpu.yml`, no GPU
-- **Mac, host** — same Mac, no container: `scripts/*-applesilicon.sh`
+- **Mac, host** — same Mac, no container: `src/scripts/*-applesilicon.sh`
 
 | Step | CUDA box | Mac, Docker | Mac, host |
 |---|---|---|---|
@@ -49,7 +49,7 @@ augmentation, training and the tflite conversion. The two targets are independen
 
 Four things move these numbers more than the hardware does. `SKIP_CORPUS=1` skips
 corpus generation on a re-run, which is the largest single stage. `KOKORO_EXTERNAL=1`
-with `scripts/start-kokoro-host.sh` takes TTS out of the container, worth 3.7x on
+with `src/scripts/start-kokoro-host.sh` takes TTS out of the container, worth 3.7x on
 that stage. Docker Desktop's memory limit decides whether the 17.28 GB array is
 mmap'd or thrashed, and falling short page-faults rather than erroring. And on the
 CUDA box, holding the card alone is the difference between finishing and not: a
@@ -85,7 +85,7 @@ re-runs so a broken feature stage fails in minutes, not hours.
 
 ## First sweep: 25k vs 50k steps - not a win at matched false accepts (measured 2026-09-22)
 
-`sweeps/oww-training-steps.yaml`: 25k vs 50k steps, two repeats each, on the
+`src/train/sweeps/oww-training-steps.yaml`: 25k vs 50k steps, two repeats each, on the
 frozen cf9c065b corpus, seeds 42/43 (25k) and 1042/1043 (50k). The matched-FA
 curves were built by hand - 40 evals driving `eval_model.py` across decision
 thresholds 0.25-0.85 - because the automated matched-FA path (eval's
@@ -189,7 +189,7 @@ variance before, but the direction was consistent everywhere.
 route there.** The old reason to leave it in Docker was measured in the wrong
 library: macOS torch ships without oneDNN and measured 12x slower on conv1d, and
 mixednet is the convolutional model — a fair prior, but that probe was torch, and
-mWW trains with TF 2.21.0. Measured in TF instead (`tools/tf_probe.py`): batch 128, the actual op shapes in `train/mww/train.py`
+mWW trains with TF 2.21.0. Measured in TF instead (`src/scripts/tf_probe.py`): batch 128, the actual op shapes in `src/train/mww/train.py`
 (first conv (5,1) s3, the three MDConv blocks, a 1024³ GEMM, and a full train step
 forward+grad+update), the same `tensorflow==2.21.0` source build in both
 environments:
@@ -209,7 +209,7 @@ section above — smaller, because mixednet's convolutions are too skinny to fee
 GEMM kernel, which is why the torch conv prior looked the way it did.
 
 The other half of a run is TTS, where most of a run goes, and the host servers are
-faster for both engines in the corpus. `tools/bench_tts.py`, the same
+faster for both engines in the corpus. `src/scripts/bench_tts.py`, the same
 `wyoming-piper` 2.4.3 / `piper-tts` 1.7.0 in both environments, 140 "hey seeree"
 clips:
 
@@ -245,7 +245,7 @@ the all-Piper 6m12s — the mix costs about a minute of Kokoro render, and the f
 run stayed at 14m24s against 14m14s.
 
 **What the runs bought** (matched-false-accept comparisons on the holdout,
-`eval/src/compare_models.py`). These are records of past runs against the
+`src/eval/src/compare_models.py`). These are records of past runs against the
 adversarial set as it then was; the denominator changed on 2026-09-22 (32 ->
 298 clips, P1.1), so every `x/32` figure below is not comparable to a modern
 scorecard's `x/298` - the comparisons WITHIN this section are unaffected, the
@@ -283,12 +283,12 @@ comparison ACROSS the date is not:
   recall, not rejection: run-on 37 (against 65-93 for the 1x runs),
   detection-with-command 57%, median latency 261 ms — the conservative model fires
   late — and the per-speaker wall (jen 20-40%) survived it, as it has every lever
-  so far. Recorded as point 5 of `train/mww/corpus.py`.
+  so far. Recorded as point 5 of `src/train/mww/corpus.py`.
 
 The levers that remain are the ones depth cannot touch: more real recordings (the
 per-speaker spread is the standing failure in every configuration, including jen at
 0% on the firehose), and the run-on positives that take the word timestamps Kokoro
-already provides (`train/mww/corpus.py` records both measurements). The training
+already provides (`src/train/mww/corpus.py` records both measurements). The training
 stage beat its 1.17x probe, because the conversion and ROC calibration that follow
 it run in the same process and carried the same gap. One caveat that would change
 the training-stage conclusion if it ever bites: the container side was measured in
@@ -319,7 +319,7 @@ path at all. Kokoro is the one measured exception (below).
 The question the Metal section above does NOT close: the feature stage runs the
 melspectrogram + embedding ONNX models through onnxruntime on CPU (the largest
 non-TTS host stage, ~12 min at 22,144 clips in the 2026-09-21 bar-test run),
-and onnxruntime on this Mac ships a CoreMLExecutionProvider. `tools/coreml_probe.py`
+and onnxruntime on this Mac ships a CoreMLExecutionProvider. `src/scripts/coreml_probe.py`
 ran the real models at the real batch shape (16 clips x 19,200 samples,
 ncpu 5 as in the stage), CPU's threaded per-clip/per-window path (what runs
 today) vs CoreML batched:
@@ -337,12 +337,12 @@ that are baked into every trained model. The graphs only partially convert
 (11 of 18 melspec nodes, 44 of 65 embedding nodes), so the rest falls back to
 CPU inside the same call. Verdict: do not add a CoreML branch to the feature
 stage; the question is closed by measurement, the way the Metal section is.
-(The probe is reproducible: `train-applesilicon/.venv/bin/python tools/coreml_probe.py`.)
+(The probe is reproducible: `src/train/train-applesilicon/.venv/bin/python src/scripts/coreml_probe.py`.)
 
 ## Piper fleet (N instances): no N>1 scaling on one machine (2026-09-22, re-measured the same day with repeats)
 
 P2.1 in `improvement.md` ships `PiperFleet` (voice-pinned sharding across N
-`piper_engine` processes, `scripts/start-tts-fleet.sh`) to scale the corpus
+`piper_engine` processes, `src/scripts/start-tts-fleet.sh`) to scale the corpus
 stage. The first measurement — one clean run per N, machine load not recorded
 — read:
 
@@ -353,7 +353,7 @@ N = 1      2      4       6       8
 
 Non-monotonic (a 45% loss at N=2 that "recovers" at N=4), and this file's
 ±30% / same-day rules do not license a conclusion from a single reading, so it
-was re-measured the same evening: `tools/bench_piper_fleet.py --trials 3`, the
+was re-measured the same evening: `src/scripts/bench_piper_fleet.py --trials 3`, the
 same 1,440-clip oww workload at every N (25 models, 90 (voice, speaker) pairs
 x 16 clips, built once and re-used, so a change between sizes is the fleet not
 the workload; each model's one 0.6 s load is paid, not warmed away), three
@@ -441,8 +441,8 @@ sideways during the Apple Silicon port: chasing Kokoro throughput turned up the 
 Kokoro-FastAPI version running **3.7x** faster in a host uv venv than in a
 container on this hardware — native arm64 both times, no emulation. That is a torch
 gap, the same Accelerate story as every table above, and it is what made
-`scripts/start-kokoro-host.sh` worth building. The standing warning attached to
-it: `train/oww/train.py` records the server pinned at 101.8% CPU — exactly one
+`src/scripts/start-kokoro-host.sh` worth building. The standing warning attached to
+it: `src/train/oww/train.py` records the server pinned at 101.8% CPU — exactly one
 core — while the GPU sat at 21% and VRAM at 1.5 of 24 GB. The bottleneck was a
 serialised stage, not compute, so the accelerator was mostly idle, and "it
 initialised" and "it helped" are different claims.
@@ -477,14 +477,14 @@ Fixing it recovered run-on recall by +10 to +14 points at every operating point 
 6/32 false accepts upward, which confirms the cut was the mechanism. It did not close
 the gap: 84/61 against the host server's 90/82. Something in the audio itself - bf16
 weights, misaki phonemisation - still costs run-on detection, and that is unexplained.
-See `BUGREPORT-kokoro-mlx.md` and `tts-service/engines/kokoro_mlx/`.
+See `BUGREPORT-kokoro-mlx.md` and `src/tts-service/engines/kokoro_mlx/`.
 
 **What this settled:** voice count is not the problem. The same FastAPI corpus at 22
 voices scored BETTER than an earlier one at 36 (82/65 against 76/56 at 4/32), so the
 13 voices MLX lacks cost nothing - they are `v0` legacy variants of speakers it
 already has, not distinct ones. Those are now skipped by default for every engine,
 which takes ~36% off the Kokoro clips: see `LEGACY_VOICE_MARKER` in
-`train/corpus/negatives.py`.
+`src/train/corpus/negatives.py`.
 
 MLX remains worth having for plain clips and negatives, which are 79% of the corpus
 and show no regression. That is the split to build if the remaining run-on gap turns
