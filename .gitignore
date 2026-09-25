@@ -63,5 +63,11 @@ __pycache__/
 logs/
 *.log
 
-# deployment staging dir
-deploy/
+# deployment staging dir: the RECORD is tracked, the blobs are not.
+# `deploy/` ignored the whole directory, which meant the file that says what is staged and
+# what the rules for changing it are - deploy/README.md - lived outside version control, so
+# its own "corrections are errata in git history" rule was unsatisfiable. No model binary is
+# tracked anywhere in this repo, so ignore the weights and keep the markdown, the row-per-
+# measurement JSONL and the ESPHome/LVA manifests, which are text and are diffable.
+deploy/**/*.tflite
+deploy/**/*.onnx
