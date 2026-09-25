@@ -18,12 +18,12 @@
 #
 #   1. NOT computing features single-threaded. That cost 36 minutes of an 83-minute
 #      run, and the cause was a device-selection bug, not the absence of a GPU -
-#      patches/feature-device-selection.py fixes it by asking onnxruntime instead of
+#      src/train/patches/feature-device-selection.py fixes it by asking onnxruntime instead of
 #      torch. Multi-threaded CPU feature computation is the fixed state, not a
 #      degraded one.
 #   2. NOT swapping. The 17.28 GB ACAV100M feature array thrashed against the VM's
 #      20 GB of RAM. On a machine with enough memory that problem does not exist,
-#      which is why patches/gpu-resident-features.py is deliberately NOT applied
+#      which is why src/train/patches/gpu-resident-features.py is deliberately NOT applied
 #      below - see the patch section.
 #
 # Neither is a claim that this is as fast as a 3090. It is a claim about which of
@@ -119,7 +119,7 @@ print('no nvidia-* packages installed')"
 #     AssertionError: Could not find "cmake" executable!
 #
 # Installing cmake would "fix" it by compiling a C++ ONNX simplifier that THIS REPO
-# NEVER RUNS: train/oww/onnx2tflite.py invokes `onnx2tf -i ... -o ... -nuo -osd`,
+# NEVER RUNS: src/train/oww/onnx2tflite.py invokes `onnx2tf -i ... -o ... -nuo -osd`,
 # and -nuo is --not_use_onnxsim. So the dependency is real to pip and dead to us.
 #
 # --no-deps skips the resolution entirely, and onnxsim-prebuilt supplies the same
@@ -155,7 +155,7 @@ RUN grep -vx 'onnx2tf' requirements.txt > requirements.cpu.txt \
 #   this image (onnx2tf 1.29.24)  reshape 7.15e-07 MATCH | transpose 4.22e-01 wrong
 #   the CUDA image on the VM      reshape 9.83e-01 wrong | transpose 8.94e-08 MATCH
 #
-# Per train/oww/onnx2tflite.py, reshape-correct is the OLDER onnx2tf behaviour and
+# Per src/train/oww/onnx2tflite.py, reshape-correct is the OLDER onnx2tf behaviour and
 # transpose-correct the NEWER, so the VM's floating install is AHEAD of this pin.
 # Both models are correct - that script bakes in whichever adaptation scored and
 # refuses to write one if neither does - so nothing ships broken either way. What it
@@ -169,8 +169,8 @@ RUN pip install --no-cache-dir --no-deps \
         onnx2tf==1.29.24 \
         onnxsim-prebuilt==0.4.39.post2
 
-RUN git clone https://github.com/dscripka/openWakeWord openwakeword \
-    && pip install --no-cache-dir -e ./openwakeword
+RUN git clone https://github.com/dscripka/openWakeWord /opt/openwakeword \
+    && pip install --no-cache-dir -e /opt/openwakeword
 
 # NO onnxruntime-gpu SWAP HERE, unlike the CUDA image. onnxruntime-gpu publishes no
 # macOS or linux/arm64 wheel, and there is no GPU to reach in any case, so the CPU
@@ -184,33 +184,33 @@ assert 'CPUExecutionProvider' in onnxruntime.get_available_providers()"
 
 # --- patches ---------------------------------------------------------------------
 #
-# SEVEN OF THE EIGHT, and the omission is the point. See patches/ for each.
+# SEVEN OF THE EIGHT, and the omission is the point. See src/train/patches/ for each.
 
-COPY patches/skip-piper-import.py /tmp/skip-piper-import.py
-RUN python3 /tmp/skip-piper-import.py openwakeword/openwakeword/train.py
+COPY src/train/patches/skip-piper-import.py /tmp/skip-piper-import.py
+RUN python3 /tmp/skip-piper-import.py /opt/openwakeword/openwakeword/train.py
 
-COPY patches/honour-augmentation-rounds.py /tmp/honour-augmentation-rounds.py
-RUN python3 /tmp/honour-augmentation-rounds.py openwakeword/openwakeword/train.py
+COPY src/train/patches/honour-augmentation-rounds.py /tmp/honour-augmentation-rounds.py
+RUN python3 /tmp/honour-augmentation-rounds.py /opt/openwakeword/openwakeword/train.py
 
 # Still needed on CPU, and arguably more. Upstream picks the device from torch and
 # sets ncpu=1 whenever torch reports CUDA; here torch reports no CUDA, so upstream
 # would take the multi-threaded branch by luck rather than by decision. The patch
 # makes it a decision, and keeps the two images behaving identically.
-COPY patches/feature-device-selection.py /tmp/feature-device-selection.py
-RUN python3 /tmp/feature-device-selection.py openwakeword/openwakeword/train.py
+COPY src/train/patches/feature-device-selection.py /tmp/feature-device-selection.py
+RUN python3 /tmp/feature-device-selection.py /opt/openwakeword/openwakeword/train.py
 
-COPY patches/configurable-corpus-dir.py /tmp/configurable-corpus-dir.py
-RUN python3 /tmp/configurable-corpus-dir.py openwakeword/openwakeword/train.py
+COPY src/train/patches/configurable-corpus-dir.py /tmp/configurable-corpus-dir.py
+RUN python3 /tmp/configurable-corpus-dir.py /opt/openwakeword/openwakeword/train.py
 
 # Seed every RNG from config["seed"], so a sweep point measures the hyperparameter,
-# not the draw. See patches/seed-augment.py.
-COPY patches/seed-augment.py /tmp/seed-augment.py
-RUN python3 /tmp/seed-augment.py openwakeword/openwakeword/train.py
+# not the draw. See src/train/patches/seed-augment.py.
+COPY src/train/patches/seed-augment.py /tmp/seed-augment.py
+RUN python3 /tmp/seed-augment.py /opt/openwakeword/openwakeword/train.py
 
 # The base learning rate from config["lr"] (default = upstream's 0.0001), so
-# a sweep can move it from the CLI. See patches/configurable-lr.py.
-COPY patches/configurable-lr.py /tmp/configurable-lr.py
-RUN python3 /tmp/configurable-lr.py openwakeword/openwakeword/train.py
+# a sweep can move it from the CLI. See src/train/patches/configurable-lr.py.
+COPY src/train/patches/configurable-lr.py /tmp/configurable-lr.py
+RUN python3 /tmp/configurable-lr.py /opt/openwakeword/openwakeword/train.py
 
 # Make auto_train's two hidden decisions visible: the per-sequence negative
 # weight (its doubling can turn a requested 2000 into an effective 8000, and
@@ -218,9 +218,9 @@ RUN python3 /tmp/configurable-lr.py openwakeword/openwakeword/train.py
 # merge (which checkpoints cleared the 90th-percentile gate). Both print
 # machine-readable lines the wrapper files in <tag>.config.json. Also lifts
 # the int16 val_steps trap at --training-steps above ~327k.
-# See patches/log-weight-and-merge.py.
-COPY patches/log-weight-and-merge.py /tmp/log-weight-and-merge.py
-RUN python3 /tmp/log-weight-and-merge.py openwakeword/openwakeword/train.py
+# See src/train/patches/log-weight-and-merge.py.
+COPY src/train/patches/log-weight-and-merge.py /tmp/log-weight-and-merge.py
+RUN python3 /tmp/log-weight-and-merge.py /opt/openwakeword/openwakeword/train.py
 
 # ANOTHER PATCH THIS IMAGE NEEDS AND THE CUDA ONE DOES NOT, and it patches an
 # installed dependency rather than the openWakeWord clone.
@@ -231,14 +231,14 @@ RUN python3 /tmp/log-weight-and-merge.py openwakeword/openwakeword/train.py
 # This image is Python 3.12 and torchaudio <1 has no cp312 wheel, so that escape does
 # not exist and no pin can create it. See the patch for the full account.
 #
-# It runs AFTER `pip install -e ./openwakeword` above deliberately: that install is
+# It runs AFTER `pip install -e /opt/openwakeword` above deliberately: that install is
 # the last thing that can move torchaudio or torch-audiomentations, and patching a
 # file pip may still replace would silently undo it.
 #
 # The import check below is what proves it worked. This failed AFTER a full corpus
 # generation - the whole expensive half of a run - because the import happens in the
 # augmentation subprocess, not at startup.
-COPY patches/torchaudio-set-audio-backend.py /tmp/torchaudio-set-audio-backend.py
+COPY src/train/patches/torchaudio-set-audio-backend.py /tmp/torchaudio-set-audio-backend.py
 # The path is GLOBBED, not imported. Asking Python where torch_audiomentations lives
 # means importing it, which is the exact thing that raises here - so site-packages is
 # searched on disk instead. An empty result fails the build rather than silently
@@ -252,7 +252,7 @@ RUN TA_IO="$(python3 -c 'import glob, site; \
     && python3 -c "import torch_audiomentations; print('torch_audiomentations imports OK')" \
     && python3 -c "import openwakeword.data; print('openwakeword.data imports OK')"
 
-# patches/gpu-resident-features.py IS NOT APPLIED, and must not be. It moves the
+# src/train/patches/gpu-resident-features.py IS NOT APPLIED, and must not be. It moves the
 # 17.28 GB feature array into VRAM. There is no VRAM here, so it would fail - and
 # the problem it solves is a RAM shortage, not a missing GPU: the VM had 20 GB and
 # swapped 7.2 of 8 GB. Give this container enough memory and mmap is fine.
@@ -263,10 +263,10 @@ RUN TA_IO="$(python3 -c 'import glob, site; \
 # escape, on a machine that has the RAM but did not give it to Docker. Raise
 # Settings > Resources > Memory before blaming the CPU for a slow run.
 
-RUN mkdir -p openwakeword/openwakeword/resources/models \
-    && curl -L -o openwakeword/openwakeword/resources/models/embedding_model.onnx \
+RUN mkdir -p /opt/openwakeword/openwakeword/resources/models \
+    && curl -L -o /opt/openwakeword/openwakeword/resources/models/embedding_model.onnx \
         'https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/embedding_model.onnx' \
-    && curl -L -o openwakeword/openwakeword/resources/models/melspectrogram.onnx \
+    && curl -L -o /opt/openwakeword/openwakeword/resources/models/melspectrogram.onnx \
         'https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/melspectrogram.onnx'
 
 # The onnx -> tflite toolchain, checked at BUILD time for the reason the CUDA image
@@ -276,15 +276,15 @@ RUN python3 -c "import tensorflow as tf; print('tensorflow', tf.__version__)" \
     && python3 -c "import onnx2tf" \
     && command -v onnx2tf
 
-# COPY for the build-time import check; docker-compose bind-mounts train/ and
-# tts-service/ over the copies at runtime. Same split as Dockerfile.oww.cuda, and
+# COPY for the build-time import check; docker-compose bind-mounts src/train/ and
+# src/tts-service/ over the copies at runtime. Same split as Dockerfile.oww.cuda, and
 # the same reasons. The TTS protocol client has its own directory at the repo root
-# (see tts-service/README.md); train/corpus/__init__.py adds it to sys.path, so
+# (see src/tts-service/README.md); src/train/corpus/__init__.py adds it to sys.path, so
 # the import below exercises it. The engines are not in this image - the trainers
 # are protocol clients and the engines are the kokoro/piper compose services.
-COPY train/ ./train/
-COPY tts-service/ ./tts-service/
+COPY src/train/ ./src/train/
+COPY src/tts-service/ ./src/tts-service/
 
-RUN python3 -c "import train.corpus.augment, train.corpus.negatives, \
+RUN python3 -c "import sys; sys.path.insert(0, '/app/src'); import train.corpus.augment, train.corpus.negatives, \
                        train.corpus.real, train.corpus.piper, \
                        train.corpus.kokoro"

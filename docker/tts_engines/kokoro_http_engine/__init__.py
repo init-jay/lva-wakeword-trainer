@@ -2,7 +2,7 @@
 
 The Kokoro HTTP protocol adapter since the tts-service split (2026-09-08): it
 fronts a running Kokoro-FastAPI process and exposes it on the repo's TTS
-protocol port. It lives in the docker/ build context (not in tts-service/)
+protocol port. It lives in the docker/ build context (not in src/tts-service/)
 because it exists only where a Kokoro-FastAPI image runs: the compose service
 runs the FastAPI server and this wrapper in one container -
 
@@ -10,8 +10,8 @@ runs the FastAPI server and this wrapper in one container -
 
 (docker/Dockerfile.kokoro, whose CMD starts both). On a Mac this module is
 never run at all: the mlx engine is a separate in-process server
-(tts-service/engines/kokoro_mlx/), and that is why there is no `engines/kokoro`
-project next to it. The URL-facing functions below are what train/corpus/
+(src/tts-service/engines/kokoro_mlx/), and that is why there is no `engines/kokoro`
+project next to it. The URL-facing functions below are what src/train/corpus/
 kokoro.py used to be before it became a thin re-export of the protocol
 client.
 """
@@ -69,7 +69,7 @@ def get_kokoro_voices(kokoro_url: str) -> list:
     except Exception as e:
         print(f"ERROR: Cannot connect to Kokoro at {kokoro_url}: {e}")
         print("Make sure the Kokoro-FastAPI process it fronts is up - the host uv")
-        print("venv (scripts/start-kokoro-host.sh) or the in-image server (docker)")
+        print("venv (src/scripts/start-kokoro-host.sh) or the in-image server (docker)")
         print("- and that this wrapper was pointed at it with --url.")
         sys.exit(1)
 
@@ -146,7 +146,7 @@ def kokoro_tts_batch(kokoro_url: str, voice: str, texts: list, speed: float):
     single forward pass - so callers must group by (voice, speed) before calling.
 
     The split and the re-basing live in split_joined (engine.py); this is the URL
-    entry point the run-on generator in train/oww/train.py still calls directly.
+    entry point the run-on generator in src/train/oww/train.py still calls directly.
     """
     if not texts:
         return []

@@ -1,4 +1,4 @@
-"""Guards for tools/score_margins.py's artifact resolution, threshold and budget choice.
+"""Guards for src/scripts/score_margins.py's artifact resolution, threshold and budget choice.
 
 WHY THESE EXIST. An mww run dir lays out so that one wrong path component still opens
 *a* model and prints numbers: every manifest is named `<word>.json` and every model
@@ -19,7 +19,7 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "tools"))
+sys.path.insert(0, str(REPO_ROOT / "src" / "scripts"))
 
 import score_margins as sm  # noqa: E402
 

@@ -1,4 +1,4 @@
-"""Guards for train/ledger.py's summarise: the runs were sound, the tool
+"""Guards for src/train/ledger.py's summarise: the runs were sound, the tool
 that summarised them was not.
 
 C1: group on the RESOLVED config, not the grid label. An early sweep ran
@@ -8,7 +8,7 @@ grouping on the label printed a misleading "25k" mean that was really a
 25k/50k mix - contradicting the hand-built verdict.
 
 C2: n counts (config-hash, seed) PAIRS, not records. Two records sharing the
-tag's h-half (the config hash, train/provenance.py) and the seed are the
+tag's h-half (the config hash, src/train/provenance.py) and the seed are the
 same run computed at two commits - not two draws from a distribution. Exact
 duplicates collapse; duplicates whose evals differ are a determinism
 regression and must be named, not averaged over.
@@ -47,8 +47,8 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from train import ledger  # noqa: E402
 
@@ -397,7 +397,7 @@ def _byte_pin_fixture():
 
 # Byte-pins for test_renderer_output_is_byte_pinned: the exact text
 # summarise prints for _byte_pin_fixture(). The provenance citations and
-# dates inside them are the renderer's own words (train/ledger.py), copied
+# dates inside them are the renderer's own words (src/train/ledger.py), copied
 # verbatim because that is what a byte pin pins. Re-capture DELIBERATELY -
 # this fixture is fixed, it does not grow like the real ledger: run
 # _byte_pin_fixture(), paste its stdout (minus the path-bearing first line)
@@ -431,7 +431,7 @@ _PINNED_STDOUT_BODY = """
   '*': the group's curve never reaches FA <= B; the marked value is its best
   reachable point, at its own FA - a floor, not a reading at the budget."""
 
-_PINNED_STDERR = """  WARNING: group oww training-steps=50000 spans 2 corpus_id(s) a1b2c3d, base (2 record(s)) - cross-corpus rows must never be silently averaged: part of the [min-max] spread is TTS redraw, not seed noise (tools/compare_arms.py is the per-corpus view)
+_PINNED_STDERR = """  WARNING: group oww training-steps=50000 spans 2 corpus_id(s) a1b2c3d, base (2 record(s)) - cross-corpus rows must never be silently averaged: part of the [min-max] spread is TTS redraw, not seed noise (src/scripts/compare_arms.py is the per-corpus view)
 """
 
 
@@ -461,7 +461,7 @@ def test_corpus_id_is_part_of_the_duplicate_key():
 
     Neither direction was pinned before. Every fixture that varied corpus_id varied the
     seed along with it - the byte pin's two corpora sit at seeds 43 and 44 - where the
-    pair key and the triple key group identically, so reverting train/ledger.py to
+    pair key and the triple key group identically, so reverting src/train/ledger.py to
     (config-hash, seed) rendered byte-for-byte the same output and the suite stayed green.
     """
     flat = rec("aaa1111-base-h1111111", 25000, 25000, 42, 0.85, 0.02)

@@ -5,12 +5,12 @@ description: Score trained wake-word models against held-out recordings and deci
 
 # Evaluating trained wake-word models
 
-Step 3. On a Mac it runs in the host uv env - `eval/.venv`, set up by
-`./scripts/setup-eval-host.sh` - no Docker (improvement.md P2.4); everywhere else,
-in the eval container built from `eval/` - its own compose project. Both carry
+Step 3. On a Mac it runs in the host uv env - `src/eval/.venv`, set up by
+`./src/scripts/setup-eval-host.sh` - no Docker (improvement.md P2.4); everywhere else,
+in the eval container built from `src/eval/` - its own compose project. Both carry
 both inference stacks and neither trainer, because scoring a model and training
 one have incompatible pins - and both pin the SAME deployment-runtime wheels
-(`eval/pyproject.toml` and `eval/Dockerfile` must stay equal), so a number from
+(`src/eval/pyproject.toml` and `src/eval/Dockerfile` must stay equal), so a number from
 one checks against a number from the other.
 
 ## You can run this one yourself
@@ -21,13 +21,13 @@ harness prints has a way of being read wrongly, and the sections below are those
 
 ## Preflight
 
-The whole step is self-contained in `eval/` — the uv project and the Python
+The whole step is self-contained in `src/eval/` — the uv project and the Python
 sources, or (container) a compose file and an image over the same sources.
 
 Host, the Mac default, from the repo root:
 
 ```bash
-./scripts/setup-eval-host.sh          # once per machine; idempotent
+./src/scripts/setup-eval-host.sh          # once per machine; idempotent
 ls output/*/oww output/*/mww          # models to score
 ls data/recordings/holdout/           # what to score them against
 ls data/corpus/eval/negatives_tts/    # the adversarial corpus
@@ -36,11 +36,12 @@ ls data/corpus/eval/negatives_tts/    # the adversarial corpus
 The same checks, for the container:
 
 ```bash
-cd eval
+cd src/eval
 docker compose build            # first time, or after Dockerfile changes
-ls ../output/*/oww ../output/*/mww       # models to score
-ls ../data/recordings/holdout/           # what to score them against
-ls ../data/corpus/eval/negatives_tts/    # the adversarial corpus
+cd ../..                        # back to the repo root for the data-relative paths below
+ls output/*/oww output/*/mww       # models to score
+ls data/recordings/holdout/           # what to score them against
+ls data/corpus/eval/negatives_tts/    # the adversarial corpus
 ```
 
 If the negatives are missing, `eval_model.py` and `compare_models.py` both exit before
@@ -48,7 +49,7 @@ scoring anything — 366 clips across 6 categories for this corpus, so it is not
 
 Generation is self-contained — it speaks the TTS protocol to whichever Kokoro
 engine you point it at. On a Mac that is the mlx engine (a uv project, not
-Docker — see `tts-service/README.md`); on the training box it is the `kokoro`
+Docker — see `src/tts-service/README.md`); on the training box it is the `kokoro`
 compose service (CPU image, or the CUDA overlay).
 
 Host, the mlx engine is a process on this same machine, so its loopback port is
@@ -56,21 +57,21 @@ the URL:
 
 ```bash
 # the mlx engine, in another terminal on the Mac
-uv run --project tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900
+uv run --project src/tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900
 
 # from the repo root, plain-path form
-eval/.venv/bin/python eval/src/generate_negatives.py --url tcp://127.0.0.1:8900
-eval/.venv/bin/python eval/src/generate_positives.py \
+src/eval/.venv/bin/python src/eval/src/generate_negatives.py --url tcp://127.0.0.1:8900
+src/eval/.venv/bin/python src/eval/src/generate_positives.py \
     --url tcp://127.0.0.1:8900 --wake-word "hey seeree"
 ```
 
 In the container, the eval project cannot reach the Mac's mlx engine by a name
 it owns — the engine is a HOST process — so it goes through the host's
-published port via `host.docker.internal` (`eval/docker-compose.yml` maps that
+published port via `host.docker.internal` (`src/eval/docker-compose.yml` maps that
 name to `host-gateway`, which Linux needs):
 
 ```bash
-# from eval/
+# from src/eval/
 docker compose run --rm eval python -m eval.generate_negatives \
     --url tcp://host.docker.internal:8900
 docker compose run --rm eval python -m eval.generate_positives \
@@ -85,7 +86,7 @@ name:
 ```bash
 # from the repo root
 docker compose up -d kokoro
-# from eval/
+# from src/eval/
 docker compose run --rm eval python -m eval.generate_negatives --url tcp://kokoro:8899
 ```
 
@@ -114,38 +115,38 @@ retargeting for a different one.
 ## The commands
 
 Two invocation forms, and which is which is load-bearing. Inside the image,
-`eval/src/` is mounted AS the `eval` package, so the tools run as modules —
-`python -m eval.X`, all from `eval/`, with model paths relative to the
+`src/eval/src/` is mounted AS the `eval` package, so the tools run as modules —
+`python -m eval.X`, all from `src/eval/`, with model paths relative to the
 container's `/app` workdir, which is the mounted repo root. On the host there
-is no such package (`eval/` is a namespace directory, `eval/src/` its sources),
+is no such package (`src/eval/` is a namespace directory, `src/eval/src/` its sources),
 so the invocation is the plain-path form, from the repo root:
 
 ```bash
 # HOST (the Mac default) - plain-path form, from the repo root
 
 # the four gates, one model
-eval/.venv/bin/python eval/src/eval_model.py \
+src/eval/.venv/bin/python src/eval/src/eval_model.py \
     --model output/hey_seeree/oww/hey_seeree_705c23b.onnx
 
 # is the new run better than the last one
-eval/.venv/bin/python eval/src/compare_models.py \
+src/eval/.venv/bin/python src/eval/src/compare_models.py \
     --models output/hey_seeree/oww/<new>.onnx output/hey_seeree/oww/<previous-best>.onnx
 
 # openWakeWord candidate against the microWakeWord build
-eval/.venv/bin/python eval/src/compare_models.py --models \
+src/eval/.venv/bin/python src/eval/src/compare_models.py --models \
     output/hey_seeree/oww/hey_seeree_705c23b.onnx \
     output/hey_seeree/mww/hey_seeree_705c23b.json
 
 # choosing a deployment operating point for one model
-eval/.venv/bin/python eval/src/compare_models.py --models M --sweep
+src/eval/.venv/bin/python src/eval/src/compare_models.py --models M --sweep
 
-# CONTAINER - module form, from eval/
+# CONTAINER - module form, from src/eval/
 # the four gates, one model
 docker compose run --rm eval python -m eval.eval_model \
     --model output/hey_seeree/oww/hey_seeree_705c23b.onnx
 
 # the other three commands, with `docker compose run --rm eval python -m
-# eval.compare_models` in place of `eval/.venv/bin/python eval/src/compare_models.py`
+# eval.compare_models` in place of `src/eval/.venv/bin/python src/eval/src/compare_models.py`
 ```
 
 **Pass the microWakeWord `.json`, not its `.tflite`.** `MicroWakeWord.from_config()`
@@ -187,7 +188,7 @@ false-accept points, not at one.
 
 Every pooled number is an average over speakers, and an average is exactly what hides
 the person the model does not work for. This is not hypothetical: the run that
-motivated the child-range shifting in `train/corpus/augment.py` measured a 4-year-old
+motivated the child-range shifting in `src/train/corpus/augment.py` measured a 4-year-old
 at **24% while the adult read 97%**, and the pooled figure looked healthy throughout.
 
 So `eval_model.py` always prints a per-speaker table when there is more than one
@@ -271,9 +272,9 @@ deploying it.
 
 Before spending an eval — and before making any "this one is better" claim — look at
 what has already been measured. Every completed run is appended to
-`output/<wake_word>/runs.jsonl` (the sweep runner `scripts/sweep.py` files each grid
+`output/<wake_word>/runs.jsonl` (the sweep runner `src/scripts/sweep.py` files each grid
 point there; a manual run files a line the same way), and
-`train-mww-applesilicon/.venv/bin/python train/ledger.py --wake-word "X"` (any python
+`src/train/train-mww-applesilicon/.venv/bin/python src/train/ledger.py --wake-word "X"` (any python
 with PyYAML; the system `python3` works too) prints each `(target, setting)` group's
 false-accept and detection rates as mean [min–max] across repeats, grouped by corpus
 ID. If both models you are about to compare are already in the ledger, the answer is
@@ -304,7 +305,7 @@ five points has told you nothing. Say which single variable moved, and re-run.
 
 ## Known gaps — check before promising output
 
-- `train/mww/manifest.py` reads
+- `src/train/mww/manifest.py` reads
   `output/<wake_word>/mww/<run-tag>/tflite_stream_state_internal_quant/`, one
   directory per run — microWakeWord refuses to train into an existing directory, so
   runs cannot be flattened. The commit-tagged files sitting directly in
@@ -323,7 +324,7 @@ five points has told you nothing. Say which single variable moved, and re-run.
 
 A third corpus at `data/corpus/eval/voice_holdout_tts/`, rendered by
 `make render-voice-holdout` (Kokoro on 8900): positives from the voices
-`wordlists/voice_holdout.yaml` **holds out of every corpus build** (oww and
+`src/wordlists/voice_holdout.yaml` **holds out of every corpus build** (oww and
 mww trainers enforce the exclusion; the live TTS catalog is the source of
 truth, so a stale list is an error, not a skip), at speeds inside the
 0.7-1.3 training range. The held-out axis is therefore the voice alone:
@@ -335,5 +336,5 @@ points go to. The directory is labelled by its own `set.json`; score it
 with the separate block, never merged into the gates:
 
 ```bash
-eval/.venv/bin/python eval/src/eval_model.py --model M --voice-holdout-set data/corpus/eval/voice_holdout_tts
+src/eval/.venv/bin/python src/eval/src/eval_model.py --model M --voice-holdout-set data/corpus/eval/voice_holdout_tts
 ```

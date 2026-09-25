@@ -3,14 +3,16 @@
 # Every service builds with `context: .`, so without this file the whole repo is
 # tarred and sent to the daemon on every build - INCLUDING data/, which is ~43 GB
 # once download-external-data.sh has run. None of it is reachable by a COPY: the
-# only sources any Dockerfile names are train/, docker/requirements.txt and
-# patches/*.py.
+# only sources any Dockerfile names are src/train/, src/tts-service/,
+# docker/requirements.txt and src/train/patches/*.py. These patterns are
+# context-rooted (no leading **), so they carry the src/ prefix the restructure added.
 #
-# THIS BECAME LOAD-BEARING WITH THE HOST TRAINER. train-applesilicon/ has its own uv
-# environment, and a macOS torch install is several GB. It sits outside train/ for
-# exactly this reason - a .venv under train/ would be swept up by `COPY train/`
-# and baked into both trainer images - but keeping it out of the context as well
-# means the mistake cannot be made by moving one directory.
+# THIS BECAME LOAD-BEARING WITH THE HOST TRAINER. src/train/train-applesilicon/ has
+# its own uv environment, and a macOS torch install is several GB. It keeps its
+# .venv out of the context for exactly this reason - a .venv under src/train/ would
+# be swept up by `COPY src/train/ ./src/train/` and baked into both trainer images - and
+# keeping the whole directory out of the context as well means the mistake cannot
+# be made by moving one directory.
 #
 # Only ADD entries that no Dockerfile COPYs. Excluding something a build needs
 # fails at build time with a confusing "file not found", not here.
@@ -20,23 +22,24 @@
 data/
 output/
 
-# Host uv environments. Not used in any image; record/ and preflight/ never were.
+# Host uv environments. Not used in any image; src/record/ and src/preflight/
+# never were. Context-rooted, hence the src/ prefix on the two trainer envs.
 .venv/
 venv/
 .venv-*/
 **/.venv/
-train-applesilicon/
-train-mww-applesilicon/
+src/train/train-applesilicon/
+src/train/train-mww-applesilicon/
 
 # The openWakeWord clone the HOST trainer patches. The images make their own clone
 # at build time (see docker/Dockerfile.oww.cuda) and must not inherit a host one
 # patched for a different device.
-openwakeword/
+src/train/openwakeword/
 
 # The microWakeWord clone the HOST trainer installs editable. The images make their
 # own clone at build time (docker/Dockerfile.mww.cpu) and must not inherit a host
 # one pinned to a different commit.
-microwakeword/
+src/train/microwakeword/
 
 # History and editor state.
 .git/
@@ -51,13 +54,14 @@ __pycache__/
 **/__pycache__/
 *.pyc
 *.egg-info/
-# uv build artifacts from tts-service/tts_protocol (see .gitignore).
+# uv build artifacts from src/tts-service/tts_protocol (see .gitignore).
 **/build/
 
 # Host-only steps and prose. Kept out of the context so a doc edit does not
-# re-send it; nothing in any image reads them.
-record/
-preflight/
+# re-send it; nothing in any image reads them. Context-rooted: src/ prefix for
+# the restructured layout.
+src/record/
+src/preflight/
 docs/
 deploy/
 *.md

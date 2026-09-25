@@ -1,4 +1,4 @@
-"""Guards for phrase_end_sample (re-exported by train/corpus/kokoro.py from
+"""Guards for phrase_end_sample (re-exported by src/train/corpus/kokoro.py from
 tts_protocol.audio).
 
 The contract it broke before: the wake-word end of a Kokoro clip is cut at
@@ -14,8 +14,8 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from train.corpus.kokoro import phrase_end_sample  # noqa: E402
 

@@ -1,0 +1,60 @@
+# The evaluation step, self-contained: this file, Dockerfile and the Python
+# sources in this directory are everything a machine needs to score a model.
+# It is deliberately NOT in ../../docker-compose.yml - the base file is the
+# training project (trainers, TTS), and an eval-only machine would otherwise
+# be asked to build trainer images it will never run.
+#
+#     cd src/eval
+#     docker compose build                  # first time, or after Dockerfile changes
+#     docker compose run --rm eval python -m eval.eval_model \
+#         --model output/hey_seeree/oww/<tag>.onnx
+#
+# The explicit image name keeps the one this step had while it lived in the base
+# file, so a machine that already has it does not rebuild; without it compose
+# would call it eval-eval after this directory and `run` would rebuild on every
+# invocation because the built tag and the looked-up name would disagree.
+
+services:
+  eval:
+    image: lva-wakeword-trainer-eval:latest
+    build:
+      context: .
+    volumes:
+      # The harness source. Mounted, not baked in: it is edited far more often
+      # than the dependencies are (Dockerfile). Only src/ goes in - the compose
+      # file and Dockerfile beside it are build inputs, not runtime files - and
+      # the mount point is what keeps the in-image package name `eval`, which
+      # every `python -m eval.X` invocation depends on.
+      - ./src:/app/eval:ro
+      # train/ for `python -m train.mww.manifest`, which cuts the ESPHome manifest
+      # from a measured cutoff - an evaluation decision, so it belongs in this image.
+      - ../../src/train:/app/src/train:ro
+      # The TTS protocol client, for the corpus generators' --tts-url. The eval
+      # scripts add it to sys.path themselves (their REPO_ROOT is /app here) -
+      # the engines are NOT in this image, same as the trainers: pure client.
+      - ../../src/tts-service:/app/src/tts-service:ro
+      # The per-wake-word phrase lists the eval corpus is generated from. Read-only:
+      # generate_negatives.py renders them, it does not edit them - they are written
+      # by hand or by the `write-wordlists` skill, and a corpus that silently stopped
+      # matching its wordlist would be untraceable.
+      - ../../src/wordlists:/app/src/wordlists:ro
+      - ../../output:/app/output
+      - ../../data/recordings/holdout:/app/data/recordings/holdout:ro
+      # Training positives, for the rare deliberate check against them. Scoring here
+      # reports TRAINING accuracy, and src/eval/src/paths.py warns when a run is pointed here.
+      - ../../data/recordings/samples:/app/data/recordings/samples:ro
+      - ../../data/corpus/eval:/app/data/corpus/eval
+    # /app/src is the import root: `python -m train.mww.manifest` resolves the
+    # mounted package from there, the same convention as the trainer images.
+    environment:
+      - PYTHONPATH=/app/src
+    extra_hosts:
+      # This is its own compose project, so it cannot resolve the base file's
+      # `kokoro`/`piper` services by name - different project, different network.
+      # TTS is reached through their PUBLISHED protocol ports instead, on whatever
+      # machine the eval runs on:
+      #     --url tcp://host.docker.internal:8899    (Docker box, kokoro service)
+      #     --url tcp://host.docker.internal:8900    (Mac, the in-process mlx engine)
+      # On Docker Desktop that name is defined by default; host-gateway is what
+      # defines it on Linux.
+      - "host.docker.internal:host-gateway"

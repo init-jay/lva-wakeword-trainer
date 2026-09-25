@@ -27,7 +27,7 @@ services:
       - "8881:8880"
       # Same wrapper, second process. The published protocol port must dodge
       # both 8899 (kokoro's) and 8900 - the Mac's in-process mlx engine's
-      # default (tts-service/engines/kokoro_mlx), which is THE Kokoro on a
+      # default (src/tts-service/engines/kokoro_mlx), which is THE Kokoro on a
       # Mac and takes precedence: a Mac that runs compose at all does not
       # run docker kokoro, and publishing 8900 only collided with it
       # (2026-09-17 review). 8901 is unused elsewhere in this repo.
@@ -38,7 +38,7 @@ services:
     ports:
       - "8898:8898"   # the TTS protocol - the image's default command serves it
 
-  # The eval step has moved out of this file into eval/docker-compose.yml - its
+  # The eval step has moved out of this file into src/eval/docker-compose.yml - its
   # own project, because the base file is the training one and an eval-only
   # machine should not be building trainer images.
 
@@ -63,19 +63,22 @@ services:
       # Trained models and their manifests. A SEPARATE TREE from the corpus, so the
       # rmtree above cannot reach a model even in principle.
       - ./output:/app/output
-      - ./wordlists:/app/wordlists:ro       # the phrases, per wake word
-      # SOURCE IS MOUNTED, NOT BAKED IN. The images COPY train/ and tts-service/ so
+      - ./src/wordlists:/app/src/wordlists:ro       # the phrases, per wake word
+      # SOURCE IS MOUNTED, NOT BAKED IN. The images COPY src/train/ and src/tts-service/ so
       # their build-time import check has something to check, and these mounts shadow
       # that copy at runtime - so editing a trainer or a script does not mean
       # rebuilding a CUDA image. Read-only: the trainers read their source, they
       # never write it.
-      - ./train:/app/train:ro
-      # The TTS protocol client (train/corpus's sys.path bootstrap finds it at
-      # /app/tts-service/tts_protocol). The trainers carry no engine code - the
-      # engines are the `kokoro` and `piper` services. tts-service/README.md.
-      - ./tts-service:/app/tts-service:ro
-      - ./scripts:/app/scripts:ro
+      - ./src/train:/app/src/train:ro
+      # The TTS protocol client (src/train/corpus's sys.path bootstrap finds it at
+      # /app/src/tts-service/tts_protocol). The trainers carry no engine code - the
+      # engines are the `kokoro` and `piper` services. src/tts-service/README.md.
+      - ./src/tts-service:/app/src/tts-service:ro
+      - ./src/scripts:/app/src/scripts:ro
     environment:
+      # /app/src is the import root: the repo modules (train, wordlists, eval) import by
+      # their pre-reorg names, and they are mounted there, not installed.
+      - PYTHONPATH=/app/src
       # Named explicitly: inside this container the trainers' loopback defaults
       # point at nothing. The box's run-mww-training.sh passes --kokoro-fraction 0
       # (all-Piper, matching the services it starts - only piper), but the module
@@ -94,17 +97,23 @@ services:
       # output/ is models. train.py rmtree's data/corpus/<wake_word>/oww/ every run.
       - ./data:/app/data
       - ./output:/app/output
-      - ./wordlists:/app/wordlists:ro
-      # SOURCE IS MOUNTED, NOT BAKED IN. The images COPY train/ and tts-service/ so
+      - ./src/wordlists:/app/src/wordlists:ro
+      # SOURCE IS MOUNTED, NOT BAKED IN. The images COPY src/train/ and src/tts-service/ so
       # their build-time import check has something to check, and these mounts shadow
       # that copy at runtime - so editing a trainer or a script does not mean
       # rebuilding a CUDA image. Read-only: the trainers read their source, they
       # never write it.
-      - ./train:/app/train:ro
+      - ./src/train:/app/src/train:ro
       # The TTS protocol client - same mount as mww-trainer above.
-      - ./tts-service:/app/tts-service:ro
-      - ./scripts:/app/scripts:ro
+      - ./src/tts-service:/app/src/tts-service:ro
+      - ./src/scripts:/app/src/scripts:ro
     environment:
+      # Import root, same as the mww service above.
+      - PYTHONPATH=/app/src
+      # The image's patched openWakeWord clone. Outside /app/src/train on purpose:
+      # the mount above would hide a clone there. src/train/oww/train.py falls back
+      # to src/train/openwakeword, the host clone, when this is unset.
+      - OWW_CLONE=/opt/openwakeword
       # Both instances; each is a separate single-threaded process. The
       # protocol port, not the raw API port: the trainer no longer speaks
       # OpenAI-compatible HTTP.

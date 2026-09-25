@@ -59,12 +59,12 @@ where it now belongs.
 
 ## Where it goes
 
-`wordlists/<wake_word>.yaml`, with underscores and lowercase — `wordlists/okay_jarvis.yaml`.
-Copy `wordlists/hey_seeree.yaml` as the worked example; its comments explain each
+`src/wordlists/<wake_word>.yaml`, with underscores and lowercase — `src/wordlists/okay_jarvis.yaml`.
+Copy `src/wordlists/hey_seeree.yaml` as the worked example; its comments explain each
 category in place. Then:
 
 ```bash
-cd eval
+cd src/eval
 docker compose run --rm eval python -m eval.generate_negatives \
     --wake-word "okay jarvis" --dry-run
 ```
@@ -74,7 +74,7 @@ server. Fix anything it reports before generating audio.
 
 ## What validation will reject
 
-`wordlists/__init__.py` checks these because each one produces a *misleading number*
+`src/wordlists/__init__.py` checks these because each one produces a *misleading number*
 rather than an error:
 
 - **An empty category.** Reads as "the model never false-accepts here."
@@ -96,7 +96,7 @@ write "hey serious" for eval, write "hey Serena" for training.
 ## The training side
 
 Same method, different destination. The trainer's lists currently live as Python
-constants in `train/corpus/negatives.py`, keyed by wake word:
+constants in `src/train/corpus/negatives.py`, keyed by wake word:
 
 - **`CONFUSABLE_NEGATIVES`** — the same three adversarial shapes as above. This is the
   single biggest measured cause of false accepts: a model trained without them scored
@@ -110,16 +110,16 @@ constants in `train/corpus/negatives.py`, keyed by wake word:
   in training every clip with trailing speech would otherwise be positive. Aim for 12,
   and keep them disjoint from the eval `command` list.
 
-`wordlists/__init__.py` already validates a `train:` section against `eval:`, so those
+`src/wordlists/__init__.py` already validates a `train:` section against `eval:`, so those
 constants can move into the YAML whenever the trainer is migrated — the check is
 waiting for them.
 
 ## One thing you cannot generate
 
-`MISPRONOUNCING_VOICES` in `train/corpus/negatives.py` is per wake word and **must be
+`MISPRONOUNCING_VOICES` in `src/train/corpus/negatives.py` is per wake word and **must be
 found by listening**, not written. Some TTS voices guess the wake word's pronunciation
 wrong, and every clip such a voice produces is a mislabelled positive — six voices out
 of 42 was ~14% of the corpus. Duration is not a usable proxy: `bm_fable` sits at exactly
-the median length and is wrong. `tools/audit_voices.py` narrows the field; it does not
+the median length and is wrong. `src/scripts/audit_voices.py` narrows the field; it does not
 replace the listening. Tell the user this is a manual step rather than producing a list
 that looks authoritative.

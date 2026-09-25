@@ -7,13 +7,13 @@
 #   data/recordings/    real samples, raw takes, holdout   (1 · record)
 #   data/corpus/        generated positives / negatives    (2 · train)
 #   data/corpus/eval/   the TTS evaluation corpora         (3 · eval)
-#   data/audit/         tools/ one-off measurement output
+#   data/audit/         src/scripts/ one-off measurement output
 #
 #   output/             trained oww + mww models, training_config.yaml, scorecards
 data/
 output/
 
-# Written by train/oww/train.py at the START of every run and handed to
+# Written by src/train/oww/train.py at the START of every run and handed to
 # openwakeword as --training_config. Purely intermediate: nothing else reads it, and
 # the next run overwrites it - so as a record of "what produced this model" it only
 # ever describes whichever run finished last.
@@ -23,7 +23,7 @@ output/
 # copy forever.
 #
 # Provenance is covered instead by the run tag - <commit>-d<audio hash>, see
-# train/provenance.py - which ties settings to the artefact rather than to the clock.
+# src/train/provenance.py - which ties settings to the artefact rather than to the clock.
 training_config.yaml
 
 # Virtual environments
@@ -31,25 +31,28 @@ venv/
 .venv/
 .venv-*/
 
-# The openWakeWord clone that scripts/setup-applesilicon-trainer.sh makes at the repo
-# root. It is upstream's code plus our patches applied in place - reproducible from
-# that script, and never ours to commit. train/oww/train.py resolves it as
-# WORK_DIR/"openwakeword/...", which is why it sits here rather than out of the way.
-# .dockerignore excludes it too: inside a build context it would shadow the clone each
-# image makes for itself, with one patched for a different device.
+# The openWakeWord clone that src/scripts/setup-applesilicon-trainer.sh makes under
+# src/train/. It is upstream's code plus our patches applied in place - reproducible from
+# that script, and never ours to commit. src/train/oww/train.py resolves it as
+# OWW_CLONE (src/train/openwakeword/...), which is why it sits there rather than out of
+# the way. The pattern has no leading slash, so it matches at this depth and anywhere
+# else the clone moves to. .dockerignore excludes it too: inside a build context it
+# would shadow the clone each image makes for itself, with one patched for a
+# different device.
 openwakeword/
 
-# The microWakeWord clone that scripts/setup-mww-applesilicon-trainer.sh makes at the
-# repo root, pinned to one commit of OHF-Voice/micro-wake-word. The venv in
-# train-mww-applesilicon/ installs it editable, so HEAD is state - .dockerignore
+# The microWakeWord clone that src/scripts/setup-mww-applesilicon-trainer.sh makes under
+# src/train/, pinned to one commit of OHF-Voice/micro-wake-word. The venv in
+# src/train/train-mww-applesilicon/ installs it editable, so HEAD is state - .dockerignore
 # excludes it for the same reason as openwakeword/.
+# (No leading slash: the pattern matches at any depth, wherever the clone lives.)
 microwakeword/
 
 # Python
 __pycache__/
 *.pyc
 *.egg-info/
-# uv build artifacts from tts-service/tts_protocol.
+# uv build artifacts from src/tts-service/tts_protocol.
 **/build/
 
 # OS / IDE / archives
@@ -59,7 +62,7 @@ __pycache__/
 *.zip
 .claude/settings.json
 
-# training logs - one per run, written by the run-*.sh scripts into logs/
+# training logs - one per run, written by the run-*.sh scripts into src/logs/
 logs/
 *.log
 

@@ -1,4 +1,4 @@
-"""Guards for train/mww/features.py's identity-aware split.
+"""Guards for src/train/mww/features.py's identity-aware split.
 
 WHY THESE TESTS EXIST. microWakeWord splits its feature corpus per FILE
 (microwakeword/audio/clips.py, an HF train_test_split over the directory). A person's
@@ -6,7 +6,7 @@ real recordings enter the corpus as N copies of each - that is how openWakeWord 
 them, and the copy weight is a lever on this target. Per-file scattering puts copy 3 of
 a recording in training and copy 7 of it in validation, and mWW then SELECTS the weights
 it ships on validation `average_viable_recall` - so the copies are not just a flattering
-number, they bias which checkpoint ships. train/corpus/real.py's NOTE told the port not
+number, they bias which checkpoint ships. src/train/corpus/real.py's NOTE told the port not
 to bring raw copies for exactly this reason; the split below is what makes the note
 obsolete, and these tests are what make the split safe.
 
@@ -34,8 +34,8 @@ from collections import defaultdict
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
 
 # Imported from train.mww.split, not features: features pulls in microwakeword and
 # mmap_ninja at module scope, and the Makefile:53 suite runs under the oww venv.

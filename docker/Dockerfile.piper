@@ -1,8 +1,8 @@
 # Piper TTS behind the repo's TTS protocol port (8898). CPU, on every architecture.
 #
 # SAME ENGINE AS THE MAC, NOT A WYOMING CLIENT. The trainer no longer speaks
-# Wyoming: it speaks the TTS protocol (tts-service/tts_protocol/), and both the
-# Docker image and the Mac's engine project (tts-service/engines/piper) run the
+# Wyoming: it speaks the TTS protocol (src/tts-service/tts_protocol/), and both the
+# Docker image and the Mac's engine project (src/tts-service/engines/piper) run the
 # SAME in-process piper-tts code behind it. One implementation to audit, one
 # G2P to pin, and the measured behaviour transfers across machines.
 #
@@ -22,9 +22,9 @@
 # wyoming-piper:2.4.3 image carried in its /usr/src/.venv (verified 2026-09-07
 # by running the image); a fresh `pip install piper-tts` today resolves 1.8.0 -
 # a newer G2P, which changes what the voices say. The exclusion lists in
-# train/corpus/piper.py were audited against 1.7.0, so bumping this MUST happen
-# together with tts-service/engines/piper/pyproject.toml (the Mac's copy of the
-# same pin) and scripts/start-piper-host.sh, with a re-audit. onnxruntime is
+# src/train/corpus/piper.py were audited against 1.7.0, so bumping this MUST happen
+# together with src/tts-service/engines/piper/pyproject.toml (the Mac's copy of the
+# same pin) and src/scripts/start-piper-host.sh, with a re-audit. onnxruntime is
 # pinned to the version 1.7.0 resolves, so the inference runtime matches what
 # was measured.
 #
@@ -44,8 +44,8 @@ RUN pip install --no-cache-dir \
         piper-tts==1.7.0 \
         onnxruntime==1.29.0
 
-COPY tts-service/tts_protocol/ /tmp/tts_protocol/
-COPY tts-service/engines/piper/ /tmp/piper_engine/
+COPY src/tts-service/tts_protocol/ /tmp/tts_protocol/
+COPY src/tts-service/engines/piper/ /tmp/piper_engine/
 RUN pip install --no-cache-dir --no-deps /tmp/tts_protocol /tmp/piper_engine \
     && rm -rf /tmp/tts_protocol /tmp/piper_engine
 
@@ -57,6 +57,6 @@ EXPOSE 8898
 
 # One voice loaded at a time, serial by design: the protocol server holds a
 # single lock (tts_protocol/server.py), and the voice-outer order of
-# train/corpus/piper.py is a correctness property on top of that.
+# src/train/corpus/piper.py is a correctness property on top of that.
 CMD ["python", "-m", "piper_engine", "--host", "0.0.0.0", "--port", "8898", \
      "--voices", "/data"]

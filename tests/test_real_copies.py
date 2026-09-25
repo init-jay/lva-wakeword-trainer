@@ -1,4 +1,4 @@
-"""Guards for train/corpus/real.py's per-speaker copy weight
+"""Guards for src/train/corpus/real.py's per-speaker copy weight
 (--real-copies-override). The global copy weight is one lever aimed at every
 speaker at once; this flag aims the same lever at one thin voice, so these
 tests pin: the named speaker gets the override, every other speaker keeps the
@@ -14,8 +14,8 @@ import numpy as np
 import scipy.io.wavfile
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from train.corpus.real import balanced_copy_weights, copy_real_samples  # noqa: E402
 

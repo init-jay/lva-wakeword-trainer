@@ -1,6 +1,6 @@
-"""Guards for the voice holdout (wordlists/voice_holdout.yaml, improvement.md P1.2).
+"""Guards for the voice holdout (src/wordlists/voice_holdout.yaml, improvement.md P1.2).
 
-The phrase rule in wordlists/__init__.py keeps the eval and training corpora
+The phrase rule in src/wordlists/__init__.py keeps the eval and training corpora
 disjoint on PHRASE; the voice holdout keeps them disjoint on VOICE. The
 enforcement contract, from the task it came out of:
 
@@ -21,8 +21,8 @@ from pathlib import Path
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
 
 import wordlists  # noqa: E402
 

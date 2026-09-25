@@ -1,4 +1,4 @@
-"""Guards for train/mww/corpus.py's --real-vtlp (the microWakeWord port of the
+"""Guards for src/train/mww/corpus.py's --real-vtlp (the microWakeWord port of the
 per-speaker copy lever).
 
 The oww side measured the split between dilution and diversity: raw
@@ -7,7 +7,7 @@ that were already detected, while shifted copies are NEW acoustic variants
 of the same recording - diversity is not paid for in row count. The shifted
 copies are what port to mww, because mww generates its spectrogram feature
 rows UP FRONT
-(train/mww/features.py): a shifted wav is a distinct row, a raw copy is only
+(src/train/mww/features.py): a shifted wav is a distinct row, a raw copy is only
 another draw of the same voice (and one more slot in the per-file train/val/
 test split - the NOTE at the copy call in corpus.py is why there is no
 --real-copies-override here).
@@ -21,7 +21,7 @@ The contract, from the task it came out of:
   filename (CHILD_STRETCH["m"], the synthetic child-lever's range), and are
   not digitally silent - the int16-in/int16-out contract of vocal_tract_shift,
   whose float-input trap produced near-silence in a holdout probe
-  (train/corpus/real.py);
+  (src/train/corpus/real.py);
 * the parsed setting is part of the corpus manifest shaping, so a different
   --real-vtlp refuses the --skip reuse path instead of training on a corpus
   shaped differently than requested.
@@ -37,8 +37,8 @@ import numpy as np
 import scipy.io.wavfile
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
 
 import train.mww.corpus as mww_corpus  # noqa: E402
 from train.corpus import manifest as corpus_manifest  # noqa: E402
@@ -136,7 +136,7 @@ def test_parser_refuses_unknown_speaker():
 
 
 # ---------------------------------------------------------------------------
-# the copies themselves (train/corpus/real.py, consumed by the mww corpus)
+# the copies themselves (src/train/corpus/real.py, consumed by the mww corpus)
 # ---------------------------------------------------------------------------
 
 def test_vtlp_copies_written_for_named_speaker_only():
@@ -162,7 +162,7 @@ def test_vtlp_copies_written_for_named_speaker_only():
 def test_vtlp_copies_non_silence_ratio_and_dtype():
     # The int16-in/int16-out contract of vocal_tract_shift: a float input
     # peak-normalises against 32767 and returns digital silence - the dtype
-    # bug a holdout probe paid for (train/corpus/real.py). Every
+    # bug a holdout probe paid for (src/train/corpus/real.py). Every
     # shifted copy must be a real int16 signal, its ratio in the
     # CHILD_STRETCH["m"] range it drew from, and roughly the source's
     # duration (the shift preserves delivery speed).
@@ -212,7 +212,7 @@ def _mww_manifest(tmp, real_vtlp):
             "real_copies": 1,
             "real_vtlp": real_vtlp,
             # A corpus manifest written before this key existed is refused for
-            # reuse by design (train/corpus/manifest.py is strict, one variable at
+            # reuse by design (src/train/corpus/manifest.py is strict, one variable at
             # a time), so a fixture that wants the reuse path must carry it.
             "balance_real_copies": "",
             "piper_speakers": 12,
