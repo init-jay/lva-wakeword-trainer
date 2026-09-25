@@ -46,7 +46,12 @@ def _repo_root():
     for parent in Path(__file__).resolve().parents:
         if (parent / "wordlists").is_dir() and (parent / "Makefile").is_file():
             return parent
-    raise RuntimeError(f"no repo root (data/recordings/ and wordlists/) above {__file__}")
+    raise RuntimeError(
+        f"no repo root above {__file__}: looked for an ancestor holding BOTH "
+        "data/recordings/ and wordlists/, then for one holding the tracked pair "
+        "(wordlists/ and Makefile). A fresh clone has no data/ at all - it is gitignored "
+        "and produced by the record and corpus steps - so if the second walk also failed, "
+        "this file is not inside a checkout of the repo.")
 
 REPO_ROOT = _repo_root()
 

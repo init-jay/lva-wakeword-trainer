@@ -61,8 +61,10 @@ def balanced_copy_weights(counts: dict, base_copies: int, speakers=None,
     the weight from the counts instead of carrying it by hand, and let recording
     more of a thin speaker shrink the correction rather than change a flag.
 
-    The rule is EQUALISE UP, never down: the target is the richest named speaker's row
-    count at the base weight, and every other named speaker is lifted to it.
+    The rule is EQUALISE UP, never down: the target is the richest speaker the balance
+    set is actually balancing - a speaker carrying an explicit `--real-copies-override`
+    is out of the set, so it cannot be the anchor - at the base weight, and every other
+    named speaker is lifted to it.
     Cutting the richest speaker back to the thinnest one's row count would balance
     the table by removing data rather than adding it, and the only measured way to
     spend one speaker's presence to buy another's came out negative.
@@ -93,8 +95,18 @@ def balanced_copy_weights(counts: dict, base_copies: int, speakers=None,
     if unknown:
         raise ValueError(f"unknown speaker(s) {unknown}; the samples tree has "
                          f"{sorted(counts)}")
-    target = max(counts[s] for s in named) * base_copies
-    richest = max(named, key=lambda s: counts[s])
+    # The anchor is the richest speaker actually being balanced. An explicit override
+    # takes a speaker OUT of the balance set (it keeps the weight it was given), so
+    # letting one anchor the target produced a note naming a speaker nobody was
+    # balanced to and a row count nobody reaches - the same class of wrong as a label
+    # disagreeing with the number beside it, which the cap note below goes out of its
+    # way to avoid.
+    balanced = [s for s in named if s not in explicit]
+    if balanced:
+        target = max(counts[s] for s in balanced) * base_copies
+        richest = max(balanced, key=lambda s: counts[s])
+    else:
+        target = richest = None
     weights, notes = {}, []
     for s, n in sorted(counts.items()):
         if s in explicit:
@@ -125,8 +137,13 @@ def balanced_copy_weights(counts: dict, base_copies: int, speakers=None,
                              f"{base_copies}x rather than cutting a speaker")
             want = capped
         weights[s] = max(want, base_copies)
-    notes.insert(0, f"balanced against {richest} at {target} rows "
-                   f"({counts[richest]} clips x {base_copies})")
+    if balanced:
+        notes.insert(0, f"balanced against {richest} at {target} rows "
+                        f"({counts[richest]} clips x {base_copies})")
+    else:
+        notes.insert(0, "every speaker in the balance set carries an explicit "
+                        "--real-copies-override, so there is nothing to equalise - the "
+                        "weights below are the overrides")
     total = sum(weights[s] * counts[s] for s in counts)
     for s in sorted(counts):
         rows = weights[s] * counts[s]

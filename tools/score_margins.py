@@ -114,19 +114,82 @@ def operating_threshold(adv_peaks, budget, grid=ev.SWEEP_GRID):
     return None
 
 
+# ONE width spec for the CURVE table, shared by the header and every body row. They
+# used to carry their own and they disagreed: the body's FA field rendered 9 characters
+# (`>5` + "/" + `<3`) under an 8-wide `advFA` header, and pooled rendered 8 plus two
+# literal spaces under a 9-wide header, so every speaker column started two characters
+# right of its label. Misaligned columns are not cosmetics here - the table is read
+# across, and reading across is how a number gets attributed to the wrong speaker.
+CURVE_THR_W = 5
+CURVE_FA_W = 9
+CURVE_POOLED_W = 9
+CURVE_SPEAKER_W = 9
+
+
+def curve_widths(speakers):
+    """The speaker-column width: the default, or the longest name when that is longer.
+
+    Widening every speaker column beats truncating a name (two speakers could share a
+    prefix) and beats letting the header grow alone (which is what shifted the columns).
+    """
+    return max([CURVE_SPEAKER_W] + [len(s) for s in speakers])
+
+
 def curve_header(speakers):
     """The CURVE table's header: one column per speaker, in holdout order."""
-    return (f"    {'thr':>5}{'advFA':>8}{'pooled':>9}"
-            + "".join(f"{s:>9}" for s in speakers) + "   (each speaker n fixed)")
+    w = curve_widths(speakers)
+    return (f"    {'thr':>{CURVE_THR_W}}{'advFA':>{CURVE_FA_W}}"
+            f"{'pooled':>{CURVE_POOLED_W}}"
+            + "".join(f"{s:>{w}}" for s in speakers) + "   (each speaker n fixed)")
 
 
 def curve_cells(pos_peaks, speakers, g):
     """`k/n` at threshold g for EVERY speaker named - a hardcoded pair here is how a
     holdout speaker gets dropped from the one table built to show what the FA budget
-    costs the voice with the fewest clips."""
-    return "".join(
-        f"{sum(1 for _, p in pos_peaks[s] if p >= g):>4}/{len(pos_peaks[s]):<4}"
-        for s in speakers)
+    costs the voice with the fewest clips. Widths come from curve_widths, the same spec
+    curve_header uses."""
+    w = curve_widths(speakers)
+    cells = []
+    for s in speakers:
+        hit = sum(1 for _, p in pos_peaks[s] if p >= g)
+        cells.append(f"{hit}/{len(pos_peaks[s])}".rjust(w))
+    return "".join(cells)
+
+
+def curve_row(g, fa, n_adv, det, n_pos, pos_peaks, speakers):
+    """One CURVE body row, from the SAME width spec as curve_header.
+
+    A function rather than an inline f-string in report() because the misalignment it
+    replaces was invisible to every test that could only see the header: the two sides
+    were formatted in different places, and only printing both together showed the
+    columns two characters apart.
+    """
+    fa_cell = f"{fa}/{n_adv}"
+    det_cell = f"{det / n_pos:.0%}" if n_pos else "-"
+    return (f"    {g:>{CURVE_THR_W}.2f}{fa_cell:>{CURVE_FA_W}}"
+            f"{det_cell:>{CURVE_POOLED_W}}{curve_cells(pos_peaks, speakers, g)}")
+
+
+def require_measurable(adv, all_pos, neg_dir, pos_dirs):
+    """Refuse before any division, naming the set that came back empty and where from.
+
+    Both sets are assembled by MATCHING NAMES, so a tree whose names do not match loads
+    empty rather than failing: a clip whose name misses CATEGORY_RE is filed under
+    '(uncategorised)' and is not adversarial. Left alone that surfaced as a
+    ZeroDivisionError eight lines into the report - after the header had already printed
+    a budget derived from n=0, which is the part that gets quoted.
+    """
+    if not adv:
+        raise SystemExit(
+            f"no adversarial clips loaded from {neg_dir}: the categories read as "
+            f"adversarial are {' + '.join(ev.ADVERSARIAL)} and nothing under that "
+            "directory matched them. There is no false-accept axis to derive a budget "
+            "or read a matched-FA point against - check the tree and its category "
+            "prefixes.")
+    if not all_pos:
+        raise SystemExit(
+            f"no positive clips loaded from {', '.join(str(d) for d in pos_dirs)}: "
+            "there is nothing to measure detection on.")
 
 
 def report(model, pos_dirs, neg_dir, budget, top_n, csv_path=None, window=None):
@@ -145,6 +208,7 @@ def report(model, pos_dirs, neg_dir, budget, top_n, csv_path=None, window=None):
     adv = [p for c in ev.ADVERSARIAL for _, p in neg_peaks.get(c, [])]
     adv_names = [(c, n, p) for c in ev.ADVERSARIAL for n, p in neg_peaks.get(c, [])]
     all_pos = [p for rows in pos_peaks.values() for _, p in rows]
+    require_measurable(adv, all_pos, neg_dir, pos_dirs)
 
     t = operating_threshold(adv, budget)
     artifact, digest = artifact_of(model)
@@ -202,9 +266,8 @@ def report(model, pos_dirs, neg_dir, budget, top_n, csv_path=None, window=None):
     for g in ev.SWEEP_GRID:
         fa = sum(1 for p in adv if p >= g)
         det = sum(1 for p in all_pos if p >= g)
-        cells = curve_cells(pos_peaks, speakers, g)
         mark = " <- operating" if abs(g - t) < 1e-9 else ""
-        print(f"    {g:>5.2f}{fa:>5}/{len(adv):<3}{det / len(all_pos):>8.0%}  {cells}{mark}")
+        print(curve_row(g, fa, len(adv), det, len(all_pos), pos_peaks, speakers) + mark)
     # What one more point of FA budget buys at the operating point - the price of
     # shaving a single blocker, read off the same curve.
     below = sorted([p for p in adv if p < t], reverse=True)

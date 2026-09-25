@@ -128,6 +128,24 @@ def test_build_weight_change_changes_the_top_level_config():
     assert a != b
 
 
+def test_the_clips_factory_does_not_hand_the_split_back_to_upstream():
+    """random_split_seed is None: the split stays ours.
+
+    A seed there makes microwakeword/audio/clips.py:145-157 build split_clips itself, and
+    upstream splits per FILE - so the N copies of one human recording scatter across train
+    and validation. That is the leak train/mww/split.py exists to close, and it returns
+    silently: every count still looks right, only the held-out recordings stop being held
+    out. The factory has no caller today (every feature set the trainers assemble is
+    mmap_feature_set), which is precisely why nothing else would notice it being wired up
+    with a seed later.
+    """
+    fs = mww.clips_feature_set("dir", "hey seeree", 1.0, 0.1, [], [])
+    settings = fs["clips_settings"]
+    assert settings["random_split_seed"] is None, settings
+    assert settings["split_count"] == 0.1, settings
+    assert settings["remove_silence"] is False, settings
+
+
 def main():
     import _runner
     _runner.run(sys.modules[__name__])

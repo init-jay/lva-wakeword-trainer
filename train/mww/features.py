@@ -72,7 +72,8 @@ from microwakeword.audio.spectrograms import SpectrogramGeneration  # noqa: E402
 from train.mww import config as mww_config  # noqa: E402
 # The partition rules live in their own dependency-free module so they can be
 # tested without microwakeword; see train/mww/split.py.
-from train.mww.split import group_partition, recording_identity  # noqa: E402, F401
+from train.mww.split import (  # noqa: E402, F401
+    group_partition, partition_indices, recording_identity)
 
 # split -> (Clips generator mode, slide_frames). Upstream's notebook values.
 SPLITS = {
@@ -96,9 +97,13 @@ def build_split(clips_dir: Path, out_root: Path, name: str, impulse, background,
         split_count=split_count,
     )
 
-    # THE SPLIT, OURS. Clips leaves split_clips unset when random_split_seed is None, so
-    # build it here in the shape SpectrogramGeneration expects: three HF subsets of the
-    # same rows Clips already filtered (duration etc), selected by position.
+    # THE SPLIT, OURS. microwakeword/audio/clips.py:145-157 builds split_clips ONLY when
+    # random_split_seed is not None, and we pass None, so build it here in the shape
+    # SpectrogramGeneration expects: three HF subsets of the same rows Clips already
+    # filtered (duration etc), selected BY POSITION. That premise is CHECKED, not trusted:
+    # upstream splitting for us, or handing back a different row count than the paths read
+    # below, would make every index address the wrong clip while all three counts still
+    # looked right - the silent failure this module's whole reason for existing warns about.
     import datasets as hf_datasets          # noqa: PLC0415  (Clips pulls it in anyway)
     # Read the paths back with decoding OFF. `clips.clips["audio"]` on the column Clips
     # already cast to Audio(sampling_rate=16000) DECODES every clip to a numpy array -
@@ -108,15 +113,19 @@ def build_split(clips_dir: Path, out_root: Path, name: str, impulse, background,
     # clips.clips' rows.
     paths = [Path(row["path"]).name for row in
              clips.clips.cast_column("audio", hf_datasets.Audio(decode=False))["audio"]]
-    assignment = group_partition(paths, split_count)
-    by_mode = {"train": [], "validation": [], "test": [], "dropped": []}
-    # Index by the ORIGINAL row order: clips.clips.select() addresses rows of that
-    # dataset, while group_partition iterates groups in hash order. Enumerating its
-    # values instead of `paths` would select the wrong rows - and every count would
-    # still look right.
-    for idx, p in enumerate(paths):
-        by_mode[assignment[p]].append(idx)
-    dropped = by_mode.pop("dropped")
+    if getattr(clips, "split_clips", None) is not None:
+        raise SystemExit(
+            f"ERROR: Clips split {clips_dir} itself - upstream no longer leaves "
+            "split_clips unset when random_split_seed is None, so the per-FILE split "
+            "train/mww/split.py exists to replace is back. Re-pin the clone or move the "
+            "partition to where upstream now expects it.")
+    if len(paths) != len(clips.clips):
+        raise SystemExit(
+            f"ERROR: read {len(paths)} paths for {len(clips.clips)} rows under "
+            f"{clips_dir} - the split indexes rows BY POSITION, so a row count that does "
+            "not match the paths would select the wrong clips and report plausible "
+            "counts.")
+    by_mode, dropped = partition_indices(paths, split_count)
     if not by_mode["validation"] or not by_mode["test"]:
         # Unreachable in practice - group_partition refuses first - but the cost of it
         # ever being wrong is a run that selects nothing, so keep the guard on both sides.

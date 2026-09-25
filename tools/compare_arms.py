@@ -2,7 +2,7 @@
 """Cross-arm comparison over the run ledger, one grid key at a time.
 
     train-applesilicon/.venv/bin/python tools/compare_arms.py \
-        --wake-word "hey seeree" --grid-key real-vtlp [--ledger PATH]
+        --wake-word "<wake word>" --grid-key real-vtlp [--ledger PATH]
 
 Built for the corpus_axes sweeps: the sweep varies
 the CORPUS, not the trainer, so its rows are not comparable by ledger's plain
@@ -92,19 +92,28 @@ def _arm_label(value):
 def _arm_samples(recs):
     """(n_pairs, n_runs, samples, pair_tags) - the ledger's pair semantics, per arm.
 
-    Two records sharing the tag's h-half (config hash) AND the seed are the
-    same run computed at two commits: not two draws. Exact duplicates
+    Two records sharing the tag's h-half (config hash), the seed AND the corpus are
+    the same run computed at two commits: not two draws. Exact duplicates
     (identical eval signature) collapse to one sample; duplicates whose evals
     differ are a DETERMINISM WARNING naming both tags, and both values stay
     in the row - the pair does not collapse.
+
+    corpus_id is part of the key because this tool is built for corpus_axes
+    sweeps, where one (config, seed) legitimately spans two corpora and the two
+    evals are EXPECTED to differ - that is the arm, not a regression. Keying on
+    the pair alone shouted a determinism failure at the variable under test,
+    which is the same false positive train/ledger.py widened its own key to
+    stop; the two keys have to agree or this tool contradicts the ledger it
+    reads.
     """
     pairs = {}
     for r in recs:
-        pairs.setdefault((ledger._config_hash(r), r.get("seed")), []).append(r)
+        pairs.setdefault(
+            (ledger._config_hash(r), r.get("seed"), r.get("corpus_id")), []).append(r)
     samples = []
     pair_tags = {}
-    for (chash, seed), dups in pairs.items():
-        pair_tags[(chash, seed)] = [r.get("tag", "?") for r in dups]
+    for key, dups in pairs.items():
+        pair_tags[key] = [r.get("tag", "?") for r in dups]
         sigs = [ledger._eval_signature(r) for r in dups]
         collapsed = len(sigs) <= 1 or len(set(sigs)) == 1
         if not collapsed:
@@ -114,7 +123,7 @@ def _arm_samples(recs):
                          if len({s[i] for s in sigs}) > 1]
             for a, b in itertools.combinations(dups, 2):
                 print(f"  DETERMINISM WARNING: {a.get('tag')} and {b.get('tag')} "
-                      f"are the same (config-hash, seed) run but their evals "
+                      f"are the same (config-hash, seed, corpus) run but their evals "
                       f"differ - {', '.join(differing)}. The pair does not "
                       "collapse; both values stay in the row - the "
                       "byte-identity bar is not holding",

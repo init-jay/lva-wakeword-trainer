@@ -278,7 +278,7 @@ def test_arm_grouping_and_duplicate_collapse():
 
 
 def test_divergent_duplicate_warns_naming_both_tags():
-    """Same (config-hash, seed) pair whose evals DIFFER must not collapse
+    """Same (config-hash, seed, corpus) triple whose evals DIFFER must not collapse
     silently: a DETERMINISM WARNING on stderr names both tags."""
     out, err = _run([
         rec("aaa1111-corp0000-h1111111", 42, "ryan=30", 0.90, 0.03),
@@ -290,6 +290,33 @@ def test_divergent_duplicate_warns_naming_both_tags():
     # Both values stay in the row: the pair does not collapse to one sample.
     assert "n=1 (2 runs)" in out
     assert "67.0-90.0" in out  # min-max carries both readings
+
+
+def test_same_seed_different_corpus_is_an_arm_not_a_determinism_failure():
+    """corpus_id is part of the duplicate key, so one (config, seed) spanning two
+    corpora is two samples of two ARMS, not one run that disagreed with itself.
+
+    This is the whole reason the key is a triple: the corpus_axes sweeps redraw the
+    TTS per arm, so the flat and the balanced arm share a config hash and a seed and
+    differ in corpus - and their evals are EXPECTED to differ, because the corpus is
+    the variable under test. Keying on the pair alone called that a determinism
+    failure and named both tags, which is the false positive train/ledger.py widened
+    its own key to stop. Nothing pinned it: the fixtures above vary corpus_id only
+    together with the seed or the config, where both keys group identically.
+    """
+    out, err = _run([
+        rec("aaa1111-1111111-h1111111", 42, "ryan=30", 0.90, 0.03,
+            corpus_id="f9c065b"),
+        rec("bbb2222-2222222-h1111111", 42, "ryan=30", 0.67, 0.05,
+            corpus_id="ab34d90"),
+    ])
+    assert "DETERMINISM WARNING" not in err, err
+    # Two samples, not one collapsed pair - and the arm still says it spans corpora,
+    # because averaging across a TTS redraw is a different sin than a determinism
+    # failure and remains loud.
+    assert "n=2" in out, out
+    assert "corpus ab34d90 + f9c065b" in out
+    assert "silently averaged" in err
 
 
 def test_multi_corpus_arm_is_loudly_warned():

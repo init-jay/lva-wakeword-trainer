@@ -449,6 +449,38 @@ def test_renderer_output_is_byte_pinned():
     assert err == _PINNED_STDERR
 
 
+def test_corpus_id_is_part_of_the_duplicate_key():
+    """The duplicate key is (config-hash, seed, corpus_id), pinned in BOTH directions.
+
+    Direction one: a corpus_axes sweep holds the trainer fixed and redraws the TTS per
+    arm, so two rows sharing a config hash and a seed but differing in corpus are two
+    ARMS, not one run that disagreed with itself - no DETERMINISM REGRESSION, and the
+    cross-corpus warning is the one that fires instead. Direction two: the same triple
+    with divergent evals IS the regression the line exists for, so the key cannot be
+    widened past the corpus either.
+
+    Neither direction was pinned before. Every fixture that varied corpus_id varied the
+    seed along with it - the byte pin's two corpora sit at seeds 43 and 44 - where the
+    pair key and the triple key group identically, so reverting train/ledger.py to
+    (config-hash, seed) rendered byte-for-byte the same output and the suite stayed green.
+    """
+    flat = rec("aaa1111-base-h1111111", 25000, 25000, 42, 0.85, 0.02)
+    other_corpus = rec("bbb2222-base-h1111111", 25000, 25000, 42, 0.70, 0.03)
+    other_corpus["corpus_id"] = "a1b2c3d"
+    with tmp_ledger([flat, other_corpus]), _err() as err:
+        ledger.summarise("test word")
+    err = err.getvalue()
+    assert "DETERMINISM REGRESSION" not in err, err
+    assert "spans 2 corpus_id(s)" in err, err
+
+    twin = rec("ccc3333-base-h1111111", 25000, 25000, 42, 0.60, 0.04)
+    with tmp_ledger([flat, twin]), _err() as err2:
+        ledger.summarise("test word")
+    err2 = err2.getvalue()
+    assert "DETERMINISM REGRESSION" in err2, err2
+    assert "aaa1111-base-h1111111" in err2 and "ccc3333-base-h1111111" in err2, err2
+
+
 def main():
     import _runner
     _runner.run(sys.modules[__name__])

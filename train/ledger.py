@@ -250,6 +250,13 @@ def _config_hash(rec):
     same run measured twice. Tags without an h-half (legacy d-format, smoke
     runs) have no config half to compare, so the whole tag is the identity
     and nothing can collapse.
+
+    The h-half and the seed are NOT the whole identity: the duplicate key below
+    is (config-hash, seed, corpus_id), because a corpus_axes sweep holds the
+    trainer fixed and redraws the TTS per arm, so one (config, seed) legitimately
+    spans two corpora whose evals differ by design. Treating that pair as one run
+    measured twice is what shouted a determinism regression at the variable under
+    test.
     """
     parts = (rec.get("tag") or "").split("-")
     if parts and len(parts[-1]) > 1 and parts[-1].startswith("h"):

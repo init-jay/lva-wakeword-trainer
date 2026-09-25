@@ -12,13 +12,43 @@ that fails gets averaged away.
 """
 import argparse
 import csv
+import sys
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 
-GRID = [round(0.05 * i, 2) for i in range(1, 20)]
-ADV = ("extend", "hey_other")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "eval" / "src"))
+sys.path.insert(0, str(REPO_ROOT / "tools"))
+
+import eval_model as ev   # noqa: E402
+import score_margins as sm  # noqa: E402
+
+# The ONE grid definition, imported from the sweep that records it
+# (eval/src/eval_model.py:205): a local copy could drift and then this table
+# would read thresholds the eval sweep never recorded - a number that does not
+# exist. (eval/src is not a package, hence the sys.path insert, the same way
+# score_margins.py reaches it.)
+GRID = ev.SWEEP_GRID
+# The adversarial set the same way score_margins.py defines its FA axis
+# (ev.ADVERSARIAL at eval/src/eval_model.py:117). This file used to carry its
+# own tuple ("extend", "hey_other"); the two agreed, so they are one definition now.
+ADV = ev.ADVERSARIAL
+
+
+def resolve_budgets(adv, explicit):
+    """Budgets for one CSV: the parsed --budgets list, or the constraint-derived one.
+
+    Reuses score_margins.default_budget / ADV_FA_CONSTRAINT instead of re-deriving
+    the arithmetic a third time. The old literal default "6,12" was stale: a budget
+    that is a count silently changes meaning when the adversarial set changes size,
+    and for the 298-clip set the 2% constraint derives 5 (298 * 0.02 = 5.96, strictly
+    inside -> 5), which neither 6 nor 12 is.
+    """
+    if explicit is not None:
+        return explicit
+    return [sm.default_budget(len(adv))]
 
 
 def load(path):
@@ -38,14 +68,18 @@ def load(path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("csvs", nargs="+")
-    ap.add_argument("--budgets", default="6,12",
-                    help="comma-separated counts of extend+hey_other fires allowed")
+    ap.add_argument("--budgets", default=None,
+                    help="comma-separated counts of extend+hey_other fires allowed "
+                         "(default: derived from the adversarial set in the files "
+                         "given - score_margins.default_budget, the largest count "
+                         "strictly inside the 2%% constraint)")
     args = ap.parse_args()
-    budgets = [int(b) for b in args.budgets.split(",")]
+    explicit = None if args.budgets is None else [int(b) for b in args.budgets.split(",")]
 
     rows = []
     for p in args.csvs:
         model, pos, adv = load(p)
+        budgets = resolve_budgets(adv, explicit)
         speakers = sorted(pos)
         allpos = [v for s in speakers for v in pos[s]]
         for b in budgets:

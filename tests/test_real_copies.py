@@ -17,7 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from train.corpus.real import copy_real_samples  # noqa: E402
+from train.corpus.real import balanced_copy_weights, copy_real_samples  # noqa: E402
 
 SR = 16000
 
@@ -216,6 +216,33 @@ def test_balance_accepts_the_all_sentinel_as_every_speaker():
     assert w == balanced_copy_weights(counts, 10, speakers=None)[0], \
         f"'all' must mean every speaker: {w}"
     assert w == {"jay": 10, "jen": 16, "ryan": 27}, w
+
+
+def test_a_speaker_carrying_an_override_is_not_the_balance_anchor():
+    """The anchor is drawn from the SPEAKERS STILL BEING BALANCED, not the loudest name.
+
+    The richest speaker carrying an explicit override is the one being lifted deliberately,
+    so anchoring on it named a speaker nobody was balanced to and a row count nobody
+    reaches - next to a table in the same output that said otherwise. jen (5 clips) is now
+    the anchor at 5*10=50 rows, so ryan (3) lifts to ceil(50/3)=17.
+    """
+    w, notes = balanced_copy_weights(_counts(jay=8, jen=5, ryan=3), 10,
+                                     explicit={"jay": 100})
+    assert w["jay"] == 100, w
+    assert w["jen"] == 10, w
+    assert w["ryan"] == 17, f"ceil(50/3)=17, got {w['ryan']}"
+    assert any("balanced against jen at 50 rows" in n for n in notes), notes
+    assert not any("balanced against jay" in n for n in notes), notes
+
+
+def test_every_speaker_overridden_says_there_is_nothing_to_equalise():
+    # The all-explicit branch has no balanced speakers left to anchor on; it must say so
+    # rather than name the richest speaker, whose weight is itself an override.
+    w, notes = balanced_copy_weights(_counts(jay=8, jen=5), 10,
+                                     explicit={"jay": 3, "jen": 40})
+    assert w == {"jay": 3, "jen": 40}, w
+    assert any("nothing to equalise" in n for n in notes), notes
+    assert not any("balanced against" in n for n in notes), notes
 
 
 def main():

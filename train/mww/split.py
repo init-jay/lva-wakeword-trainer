@@ -17,6 +17,7 @@ each.
 """
 
 import hashlib
+import os
 import re
 
 # real_<copy>_<speaker>_<file>.wav               (copy_real_samples' raw copies)
@@ -34,11 +35,19 @@ _COPY_PREFIX_RE = re.compile(
 def recording_identity(name):
     """The filename of the RECORDING a corpus file is a copy of.
 
-    `real_7_<speaker>_<word>_0012.wav`, `real_v3_1.22_<speaker>_<word>_0012.wav` and
-    `vtlp1.22_<voice>_<word>_0012.wav` are one utterance - copied, weighted and shifted -
-    and must never straddle a split. Everything else (an unshifted TTS render, an ambient
-    set member) is its own identity, so it partitions exactly as it did when Clips split
-    the directory per file.
+    Two producers write copies, and each has to be stripped or the copy keeps its own
+    identity and can land on the other side of the split from its source:
+
+      real_7_<speaker>_<word>_0012.wav        copy_real_samples' raw copy of a recording
+      real_v3_1.22_<speaker>_<word>_0012.wav  its vocal-tract variant of the SAME recording
+      vtlp1.22_<tts clip>.wav                 corpus/augment.py's shift of a TTS render
+
+    The first two are one human utterance, copied and weighted. The third is a shifted
+    TTS render and groups with the UNSHIFTED render it was made from - not with any real
+    recording; a synthetic clip and a human one are never the same utterance, and the
+    regex only ever strips a prefix, so it cannot make them one. Everything else (an
+    unshifted TTS render, an ambient set member) is its own identity, so it partitions
+    exactly as it did when Clips split the directory per file.
     """
     return _COPY_PREFIX_RE.sub("", name)
 
@@ -59,6 +68,11 @@ def group_partition(names, split_count, holdout_copies=1):
     and the seed comparison measures the split instead of the seed. A `--split-seed` flag
     used to sit on top of this and did nothing - the digest never read it - so it is gone
     rather than wired up; wiring it would have bought the failure mode just described.
+    "Does the result depend on WHICH recordings were held out?" is still answerable, just
+    not from a command line: change the hash input below (a salt prefix on the identity),
+    rebuild the features, and compare the two models. One edit to this module, deliberately
+    not a flag - a flag is what makes it easy to move the holdout by accident and then
+    read the difference as the seed.
 
     `holdout_copies` is the part that matters once the copy factor is high. The first
     identity-aware version held out whole copy blocks, which made the budget a ROW budget:
@@ -94,7 +108,12 @@ def group_partition(names, split_count, holdout_copies=1):
     # would put the whole of speaker 'emily' in validation and none in test, or whatever
     # the alphabet says, which is a hidden correlation with the corpus layout).
     for i, (ident, members) in enumerate(sorted(
-            groups.items(), key=lambda kv: hashlib.sha256(kv[0].encode()).hexdigest())):
+            groups.items(),
+            # fsencode, not str.encode: a filename the filesystem handed back with
+            # surrogate escapes (a byte sequence that is not valid utf-8) raises
+            # UnicodeEncodeError on .encode(), and the pipeline before this module just
+            # shuffled such a name rather than dying on it.
+            key=lambda kv: hashlib.sha256(os.fsencode(kv[0])).hexdigest())):
         if i < hold_groups:
             split = min(sizes, key=sizes.get)
             # Deterministic which rows survive: name order inside one recording is
@@ -124,3 +143,30 @@ def group_partition(names, split_count, holdout_copies=1):
             f"{hold_groups:.0f} of {len(groups)} recordings, which rounded to none: "
             f"raise --split-count.")
     return out
+
+
+def partition_indices(names, split_count, holdout_copies=1):
+    """(by_mode, dropped): ROW INDICES per split, in the order `names` was given.
+
+    This exists as its own function because it is the half of the split that fails
+    SILENTLY. `group_partition` returns {name: mode} and iterates groups in hash order,
+    while the caller selects rows BY POSITION from a dataset in listing order - so
+    enumerating the assignment's values as indices would address unrelated rows, and
+    every count would still look right because the totals are unchanged. Indexing
+    `names` is the only correct source, and here it is checkable without the TensorFlow
+    environment train/mww/features.py needs to run.
+
+    `by_mode` has exactly the three keys a DatasetDict of splits needs; "dropped" rows
+    are returned separately as names, because they are excluded from every split and a
+    caller that forgot to handle them would silently train on a held-out recording.
+    """
+    assignment = group_partition(names, split_count, holdout_copies)
+    by_mode = {"train": [], "validation": [], "test": []}
+    dropped = []
+    for idx, name in enumerate(names):
+        mode = assignment[name]
+        if mode == "dropped":
+            dropped.append(name)
+        else:
+            by_mode[mode].append(idx)
+    return by_mode, dropped

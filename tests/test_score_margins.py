@@ -192,6 +192,97 @@ def test_a_corpus_tree_model_is_refused():
             sm.REPO_ROOT = saved
 
 
+def _fields(line, speakers):
+    """The line cut at the width spec's column boundaries, indent included.
+
+    Cut BY POSITION rather than split on whitespace: right-aligned fields ABUT when a
+    speaker name is as wide as its column, so split() merges two columns into one token
+    and reports a misalignment that is not there. The 4-space indent both lines start
+    with is not a column and is skipped.
+    """
+    widths = [sm.CURVE_THR_W, sm.CURVE_FA_W, sm.CURVE_POOLED_W]
+    widths += [sm.curve_widths(speakers)] * len(speakers)
+    fields, pos = [], 4
+    for w in widths:
+        fields.append(line[pos:pos + w])
+        pos += w
+    assert pos == len(line), f"the width spec does not account for the whole line: {line!r}"
+    return fields
+
+
+def assert_columns_flush(head, row, speakers):
+    """Every field ends at its column boundary, on both sides.
+
+    Right-aligned content that stops short of the boundary is the misalignment: it means
+    that side formatted the column narrower than the shared spec, so everything to its
+    right reads under the wrong label.
+    """
+    for i, (h, r) in enumerate(zip(_fields(head, speakers), _fields(row, speakers))):
+        assert h == h.rstrip(), f"header column {i} ends short of its boundary: {head!r}"
+        assert r == r.rstrip(), f"row column {i} ends short of its boundary: {row!r}"
+
+
+def test_the_curve_header_and_body_share_one_width_spec():
+    """Header and body are rendered by the SAME width spec, pinned by column offset.
+
+    The header used to render 'advFA'/'pooled' one and two characters narrower than the
+    rows rendered them, so every column after the threshold read two characters to the
+    left of its label - 'pooled' sat over the advFA numbers and the first speaker's label
+    over the pooled ones. Nothing could see it: sm.curve_header was tested, the rows were
+    an f-string inside report(), and the two were only ever printed together.
+    """
+    peaks = {"a": [("a0", 0.9)],
+             "averylongspeakername": [("b0", 0.8), ("b1", 0.1)]}
+    speakers = list(peaks)
+    head = sm.curve_header(speakers).partition("   (each")[0]   # drop the legend
+    row = sm.curve_row(0.5, 12, 298, 40, 51, peaks, speakers)
+    assert_columns_flush(head, row, speakers)
+    # ... and the cells still carry the same information the old inline f-string did.
+    assert row.split() == ["0.50", "12/298", "78%", "1/1", "1/2"], row
+
+
+def test_the_column_width_spec_follows_the_labels():
+    """A long name widens the columns, it does not push them out of alignment.
+
+    This is the case where a speaker name is WIDER than the default column, so the label
+    and its cell abut the neighbouring column with no padding between them.
+    """
+    wide = {"averyveryverylongspeakername": [("a0", 0.9)]}
+    speakers = list(wide)
+    head = sm.curve_header(speakers).partition("   (each")[0]
+    row = sm.curve_row(0.4, 1, 10, 5, 5, wide, speakers)
+    assert sm.curve_widths(speakers) > sm.CURVE_SPEAKER_W
+    assert_columns_flush(head, row, speakers)
+
+
+def test_an_empty_adversarial_set_refuses_naming_the_directory():
+    """The refusal is pinned at the helper, not at report(): no audio in the test tree.
+
+    A name mismatch loads an EMPTY set rather than failing - a clip whose name misses
+    CATEGORY_RE is filed under '(uncategorised)' and is not adversarial - so the guard is
+    the only thing between that and a ZeroDivisionError printed eight lines after a
+    header whose budget was derived from n=0. That was the observed failure mode.
+    """
+    try:
+        sm.require_measurable([], [0.5], "data/negatives", ["pos_dir"])
+    except SystemExit as e:
+        assert "data/negatives" in str(e), e
+        assert "extend" in str(e) and "hey_other" in str(e), e
+        assert "ZeroDivision" not in str(e), e
+    else:
+        raise AssertionError("an empty adversarial set must refuse, not divide by zero")
+
+
+def test_empty_positives_refuse_naming_the_directories():
+    try:
+        sm.require_measurable([0.5], [], "neg_dir",
+                              ["data/recordings/holdout/jay"])
+    except SystemExit as e:
+        assert "data/recordings/holdout/jay" in str(e), e
+    else:
+        raise AssertionError("an empty positive set must refuse")
+
+
 def main():
     import _runner
     _runner.run(sys.modules[__name__])

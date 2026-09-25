@@ -39,7 +39,8 @@ if str(REPO_ROOT) not in sys.path:
 
 # Imported from train.mww.split, not features: features pulls in microwakeword and
 # mmap_ninja at module scope, and the Makefile:53 suite runs under the oww venv.
-from train.mww.split import group_partition, recording_identity  # noqa: E402
+from train.mww.split import (group_partition, partition_indices,  # noqa: E402
+                             recording_identity)
 
 
 def _names(speaker="jen", base="hey_seeree_0012", copies=5, variants=3):
@@ -169,6 +170,94 @@ def test_copy_block_larger_than_the_holdout_refuses():
         assert "validation or test empty" in str(e), str(e)
     else:
         raise AssertionError("refused nothing: validation would be empty")
+
+
+def test_partition_indices_address_the_names_they_came_from():
+    """by_mode holds INDICES INTO names, not positions in the assignment's iteration order.
+
+    group_partition returns {name: mode} and walks groups in hash order, while the caller
+    selects rows BY POSITION from a dataset in listing order - so enumerating the
+    assignment's values as indices would address unrelated rows, and every COUNT would
+    still look right because the totals are unchanged. That is why the correspondence is
+    pinned here rather than the counts.
+    """
+    names = [f"real_{i}_jay_hey_seeree_{i:04d}.wav" for i in range(60)]
+    names += [f"vtlp1.20_jen_hey_seeree_{i:04d}.wav" for i in range(60)]
+    assignment = group_partition(names, 0.1)
+    by_mode, dropped = partition_indices(names, 0.1)
+
+    assert set(by_mode) == {"train", "validation", "test"}, by_mode.keys()
+    for mode, idxs in by_mode.items():
+        assert [names[i] for i in idxs] == [
+            n for n in names if assignment[n] == mode], mode
+        assert idxs == sorted(idxs), f"{mode} must stay in listing order"
+        assert all(0 <= i < len(names) for i in idxs), mode
+    assert dropped == [n for n in names if assignment[n] == "dropped"]
+
+    # The trap, spelled out: reading the assignment's values as indices gives a different
+    # selection, so the assertions above are not vacuous on this fixture.
+    naive = {"train": [], "validation": [], "test": []}
+    for i, mode in enumerate(assignment.values()):
+        if mode in naive:
+            naive[mode].append(i)
+    assert naive["train"] != by_mode["train"], (
+        "fixture no longer separates the two readings - hash order happens to coincide "
+        "with listing order here, so change the names before trusting this test")
+
+
+def test_extra_copies_of_a_held_out_recording_come_back_by_name():
+    """Rows excluded from every split are RETURNED, not merely absent from by_mode.
+
+    A caller that forgot to handle them would silently train on a held-out recording, and
+    nothing downstream would notice: the counts still add up.
+    """
+    base = [f"real_{i}_jay_hey_seeree_{i:04d}.wav" for i in range(60)]
+
+    def with_copies(src):
+        """`base` plus five extra copies of the recording `src` is a copy of."""
+        return base + [f"real_{i}_{recording_identity(src)}" for i in range(200, 205)]
+
+    # Duplicating a recording changes the row counts the split sizes are derived from, so
+    # the recording to duplicate is chosen against the FINAL name list: only one the
+    # partition holds out can have copies dropped from it. Deterministic (hashlib over the
+    # identity, no seed), so the choice is stable across runs and machines.
+    src = next(n for n in base
+               if group_partition(with_copies(n), 0.1)[n] in ("validation", "test"))
+    ident = recording_identity(src)
+    names = with_copies(src)
+
+    by_mode, dropped = partition_indices(names, 0.1, holdout_copies=1)
+    assert len(dropped) == 5, f"6 copies of one recording, 1 may survive: {dropped}"
+    assert all(recording_identity(n) == ident for n in dropped), dropped
+    kept = [names[i] for m in ("train", "validation", "test") for i in by_mode[m]]
+    assert not any(n in dropped for n in kept), "a dropped row reached a split"
+    assert sum(1 for n in kept if recording_identity(n) == ident) == 1, kept
+
+
+def test_a_name_the_filesystem_cannot_decode_still_partitions():
+    """A filename carrying surrogate escapes partitions instead of raising.
+
+    A directory holding a byte sequence that is not valid utf-8 yields a `Path.name` with
+    surrogate escapes; hashing that with `.encode()` raises UnicodeEncodeError. The
+    pipeline upstream of this module had already shuffled such a name without complaint,
+    so the split was the first place it could fail - and it failed the whole feature build.
+    `os.fsencode` round-trips the original bytes instead.
+    """
+    odd = "real_0_jay_hey_seeree_\udcff\xfe.wav"      # not encodable as utf-8
+    try:
+        odd.encode()
+    except UnicodeEncodeError:
+        pass
+    else:
+        raise AssertionError("fixture name must be unencodable or this proves nothing")
+
+    names = [odd] + [f"real_{i}_jay_hey_seeree_{i:04d}.wav" for i in range(40)]
+    part = group_partition(names, 0.1)                 # raised before the fix
+    assert part[odd] in ("train", "validation", "test", "dropped"), part[odd]
+
+    by_mode, dropped = partition_indices(names, 0.1)
+    accounted = dropped + [names[i] for m in by_mode.values() for i in m]
+    assert sorted(accounted) == sorted(names), "every name lands in exactly one place"
 
 
 def main():
