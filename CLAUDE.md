@@ -29,7 +29,7 @@ each **STOP** until the human has done their part.
    Ask which target they want before running both.
 5. **Eval.** Use `eval-models`. Report per speaker and at matched false accepts.
 6. **STOP — preflight.** Also needs their microphone:
-   `cd src/preflight && uv run test_model.py --model output/<x>/mww/<tag>.json`
+   `cd src/preflight && uv run test_model.py --model ../../output/<x>/mww/<tag>.json`
 
 Ask which wake word and which target before starting anything expensive. Do not
 guess a wake word from the repo's existing `hey_seeree` files.

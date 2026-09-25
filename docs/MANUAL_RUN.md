@@ -107,7 +107,7 @@ refused because it is not what the device runs.
 
 ```bash
 cd src/preflight
-uv run test_model.py --model output/hey_seeree/mww/<tag>.json
+uv run test_model.py --model ../../output/hey_seeree/mww/<tag>.json
 ```
 
 If peaks sit just under your threshold, the operating point is wrong for the room —
