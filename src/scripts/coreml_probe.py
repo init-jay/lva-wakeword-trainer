@@ -47,8 +47,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODELS = os.path.join(REPO, "openwakeword/openwakeword/resources/models")
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+MODELS = os.path.join(REPO, "src/train/openwakeword/openwakeword/resources/models")
 
 # The real feature-stage shapes (train/oww/train.py defaults):
 BATCH = 16                 # augmentation_batch_size
