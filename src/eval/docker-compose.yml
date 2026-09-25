@@ -1,10 +1,10 @@
 # The evaluation step, self-contained: this file, Dockerfile and the Python
 # sources in this directory are everything a machine needs to score a model.
-# It is deliberately NOT in ../docker-compose.yml - the base file is the
+# It is deliberately NOT in ../../docker-compose.yml - the base file is the
 # training project (trainers, TTS), and an eval-only machine would otherwise
 # be asked to build trainer images it will never run.
 #
-#     cd eval
+#     cd src/eval
 #     docker compose build                  # first time, or after Dockerfile changes
 #     docker compose run --rm eval python -m eval.eval_model \
 #         --model output/hey_seeree/oww/<tag>.onnx
@@ -28,22 +28,22 @@ services:
       - ./src:/app/eval:ro
       # train/ for `python -m train.mww.manifest`, which cuts the ESPHome manifest
       # from a measured cutoff - an evaluation decision, so it belongs in this image.
-      - ../src/train:/app/src/train:ro
+      - ../../src/train:/app/src/train:ro
       # The TTS protocol client, for the corpus generators' --tts-url. The eval
       # scripts add it to sys.path themselves (their REPO_ROOT is /app here) -
       # the engines are NOT in this image, same as the trainers: pure client.
-      - ../src/tts-service:/app/src/tts-service:ro
+      - ../../src/tts-service:/app/src/tts-service:ro
       # The per-wake-word phrase lists the eval corpus is generated from. Read-only:
       # generate_negatives.py renders them, it does not edit them - they are written
       # by hand or by the `write-wordlists` skill, and a corpus that silently stopped
       # matching its wordlist would be untraceable.
-      - ../src/wordlists:/app/src/wordlists:ro
-      - ../output:/app/output
-      - ../data/recordings/holdout:/app/data/recordings/holdout:ro
+      - ../../src/wordlists:/app/src/wordlists:ro
+      - ../../output:/app/output
+      - ../../data/recordings/holdout:/app/data/recordings/holdout:ro
       # Training positives, for the rare deliberate check against them. Scoring here
       # reports TRAINING accuracy, and src/eval/src/paths.py warns when a run is pointed here.
-      - ../data/recordings/samples:/app/data/recordings/samples:ro
-      - ../data/corpus/eval:/app/data/corpus/eval
+      - ../../data/recordings/samples:/app/data/recordings/samples:ro
+      - ../../data/corpus/eval:/app/data/corpus/eval
     # /app/src is the import root: `python -m train.mww.manifest` resolves the
     # mounted package from there, the same convention as the trainer images.
     environment:
