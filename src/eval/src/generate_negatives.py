@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate a targeted negative corpus for wake-word evaluation, speaking the repo's
-TTS protocol (tts-service/tts_protocol) to whatever engine the URL points at.
+TTS protocol (src/tts-service/tts_protocol) to whatever engine the URL points at.
 
 A hundred random sentences would mostly measure nothing: a wake-word model that is
 already quiet on ordinary speech scores zero on all of them. The useful negatives are
@@ -21,7 +21,7 @@ Categories:
     other_ww    other assistants' wake words
     general     ordinary conversation, for a baseline false-accept rate
 
-THE PHRASES ARE NOT IN THIS FILE. They live in wordlists/<wake_word>.yaml, because
+THE PHRASES ARE NOT IN THIS FILE. They live in src/wordlists/<wake_word>.yaml, because
 they are the one part of this pipeline that does not transfer between wake words:
 "hey serious" probes the boundary of "hey seeree" and says nothing about "okay
 jarvis". Hardcoding them here made the repo look general while being about one
@@ -53,7 +53,7 @@ Examples
 and `mlx://` forms are rejected at the probe with an explanation, because they
 used to mean different backends with different audio and a silent misread rendered
 a whole corpus from the wrong one. The engines that publish a protocol port are
-listed in tts-service/README.md (the MLX engine on 8900, the Docker kokoro on
+listed in src/tts-service/README.md (the MLX engine on 8900, the Docker kokoro on
 8899, Piper on 8898).
 
 Then score a model against the result with `eval_model.py --negatives ...`, reading
@@ -73,7 +73,7 @@ from pathlib import Path
 import numpy as np
 from scipy.io import wavfile
 
-# Runnable as `python eval/src/generate_negatives.py` as well as `python -m
+# Runnable as `python src/eval/src/generate_negatives.py` as well as `python -m
 # eval.generate_negatives`. The module form has the `eval` package importable;
 # the plain-path form only has this directory on sys.path, so try both. Then put
 # the repo root on sys.path for `wordlists` - paths.py finds the root.
@@ -89,7 +89,7 @@ except ImportError:
 
 if paths is not None:
     sys.path.insert(0, str(paths.REPO_ROOT / "src"))
-    # The TTS protocol package lives at src/tts-service/tts_protocol/; the hyphens
+    # The TTS protocol package lives at src/src/tts-service/tts_protocol/; the hyphens
     # in both directory names mean that string is not importable, so its parent
     # (src/) goes on sys.path. The engines are NOT here -
     # they run as separate servers that this script only speaks to over TCP.
@@ -195,7 +195,7 @@ def main():
                    help="output directory for the WAVs (default: %(default)s, where "
                         "the eval tools look for them)")
     p.add_argument("--wake-word", default="hey seeree",
-                   help="picks wordlists/<wake_word>.yaml (default: %(default)s)")
+                   help="picks src/wordlists/<wake_word>.yaml (default: %(default)s)")
     p.add_argument("--wordlist", default=None,
                    help="explicit path to a wordlist YAML, instead of --wake-word")
     p.add_argument("--categories", nargs="+", default=list(wordlists.EVAL_CATEGORIES),

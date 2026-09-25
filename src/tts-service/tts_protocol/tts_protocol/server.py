@@ -7,7 +7,7 @@ is the whole server side of it, so a new machine is a new adapter module and
 this file, not a new protocol.
 
     # Apple Silicon, in-process MLX
-    cd tts-service/engines/kokoro_mlx && uv run python -m kokoro_mlx_engine --port 8900
+    cd src/tts-service/engines/kokoro_mlx && uv run python -m kokoro_mlx_engine --port 8900
 
     # the CUDA box: inside the kokoro image, in front of the in-image FastAPI
     # server (docker/Dockerfile.kokoro starts both, wrapper on 8899)
@@ -15,7 +15,7 @@ this file, not a new protocol.
 
     # the piper engine, in-process on any machine (Mac uv project or the
     # Docker image that bakes in the same project)
-    cd tts-service/engines/piper && uv run python -m piper_engine --port 8898
+    cd src/tts-service/engines/piper && uv run python -m piper_engine --port 8898
 
 WHAT THE SERVER DECIDES, AND WHY IT DECIDES LITTLE:
 

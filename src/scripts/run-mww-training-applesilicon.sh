@@ -3,10 +3,10 @@
 # Run the microWakeWord trainer on the HOST, on Apple Silicon. 
 #
 #
-#     ./scripts/setup-mww-applesilicon-trainer.sh                     # once
+#     ./src/scripts/setup-mww-applesilicon-trainer.sh                     # once
 #     uv run --project src/tts-service/engines/piper python -m piper_engine --port 8898   # another terminal
 #     uv run --project src/tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900  # another, for the default 30% mix
-#     ./scripts/run-mww-training-applesilicon.sh "hey seeree"
+#     ./src/scripts/run-mww-training-applesilicon.sh "hey seeree"
 #
 # KOKORO_FRACTION (default 0.3, or --kokoro-fraction on the command line) is the
 # share of the PHRASE-ALONE positive budget Kokoro renders instead of Piper -
@@ -46,7 +46,7 @@
 # PIPER FLEET - the fast path for the corpus stage. One Piper instance is one
 # serial lane: the engine holds one model resident and takes every call under
 # one lock, so client threads queue instead of run, and the single instance
-# measures 21.66 clips/s in tools/bench_tts.py, against the ~16 the mww corpus
+# measures 21.66 clips/s in src/scripts/bench_tts.py, against the ~16 the mww corpus
 # stage ran at against it (improvement.md P2.1 - the corpus stage is the
 # serial wall of a Mac run, ~5 of its ~14 measured minutes). Throughput scales
 # with PROCESSES: PIPER_URLS takes the comma-joined list scripts/start-tts-fleet.sh
@@ -55,8 +55,8 @@
 # pinned to one instance for the whole run, so an instance loads each of its
 # models once, not per request (corpus/piper.py, PiperFleet):
 #
-#     PIPER_URLS="$(./scripts/start-tts-fleet.sh 4)" \
-#         ./scripts/run-mww-training-applesilicon.sh "hey seeree"
+#     PIPER_URLS="$(./src/scripts/start-tts-fleet.sh 4)" \
+#         ./src/scripts/run-mww-training-applesilicon.sh "hey seeree"
 #
 # One server stays PIPER_URL, unchanged; PIPER_URLS wins over it when both are
 # set, because a comma list is an explicit statement and a bare PIPER_URL left
@@ -70,7 +70,7 @@
 # smoke-<stamp> run directory (train/mww/train.py --smoke). The smoke-named model
 # files in output/<wake>/mww/ cannot be mistaken for a real run's archive:
 #
-#     SMOKE=1 ./scripts/run-mww-training-applesilicon.sh "hey seeree"
+#     SMOKE=1 ./src/scripts/run-mww-training-applesilicon.sh "hey seeree"
 
 set -euo pipefail
 
@@ -104,7 +104,7 @@ shift
 # still. Both are setup-script territory, so say that here, now, in the message a
 # tired reader will actually read.
 if [[ ! -x "$ENV_DIR/.venv/bin/python" ]]; then
-    echo "ERROR: $ENV_DIR/.venv missing. Run ./scripts/setup-mww-applesilicon-trainer.sh" >&2
+    echo "ERROR: $ENV_DIR/.venv missing. Run ./src/scripts/setup-mww-applesilicon-trainer.sh" >&2
     exit 2
 fi
 "$ENV_DIR/.venv/bin/python" - <<'PY' || exit 2
@@ -125,13 +125,13 @@ PY
 # in, after the corpus is already generated. Read-only; the repair is the
 # setup script, which is idempotent.
 if [[ ! -d "$CLONE_DIR/.git" ]]; then
-    echo "ERROR: no $CLONE_DIR/ clone. Run ./scripts/setup-mww-applesilicon-trainer.sh" >&2
+    echo "ERROR: no $CLONE_DIR/ clone. Run ./src/scripts/setup-mww-applesilicon-trainer.sh" >&2
     exit 2
 fi
 if [[ "$(git -C "$CLONE_DIR" rev-parse HEAD)" != "$MWW_COMMIT" ]]; then
     echo "ERROR: $CLONE/ is at $(git -C "$CLONE_DIR" rev-parse --short HEAD), not $MWW_COMMIT." >&2
     echo "       The venv's editable install resolves to whatever HEAD is. Re-run" >&2
-    echo "       ./scripts/setup-mww-applesilicon-trainer.sh (idempotent) to pin it," >&2
+    echo "       ./src/scripts/setup-mww-applesilicon-trainer.sh (idempotent) to pin it," >&2
     echo "       then start this run again." >&2
     exit 2
 fi
@@ -315,7 +315,7 @@ PYEOF
         echo "  first render, not now. Start the engine in another terminal:" >&2
         echo "  uv run --project src/tts-service/engines/piper python -m piper_engine --port 8898" >&2
         echo "  (it uses the voices under data/external/piper) or point PIPER_URL / --piper-url at an existing one." >&2
-        echo "  A fleet:  PIPER_URLS=\"\$(./scripts/start-tts-fleet.sh 4)\"" >&2
+        echo "  A fleet:  PIPER_URLS=\"\$(./src/scripts/start-tts-fleet.sh 4)\"" >&2
         exit 1
     fi
 
@@ -507,7 +507,7 @@ fi
 # === collect =======================================================================
 #
 # The three shipped files, commit-tagged, in output/<wake>/mww/ - the same shape
-# run-oww-training.sh produces and what eval/src/paths.py documents. Verbatim from
+# run-oww-training.sh produces and what src/eval/src/paths.py documents. Verbatim from
 # run-mww-training.sh, including the manifest rewrite: its "model" key is a bare
 # sibling filename, so a manifest copied beside a renamed model points at a file
 # that is not there.
@@ -543,11 +543,11 @@ if [[ "${SMOKE:-}" == "1" ]]; then
 else
 echo
 echo "    Compare the wall time against the container's 26m06s (this machine, 2026-09-06)"
-echo "    and the per-stage numbers against tools/tf_probe.py and tools/bench_tts.py."
+echo "    and the per-stage numbers against src/scripts/tf_probe.py and src/scripts/bench_tts.py."
 echo
 echo "    Evaluate (host, P2.4; Docker still works):"
-echo "      eval/.venv/bin/python eval/src/eval_model.py --model $TAGGED_MODEL"
-echo "      # or: cd eval && docker compose run --rm eval python -m eval.eval_model \\ --model ..."
+echo "      src/eval/.venv/bin/python src/eval/src/eval_model.py --model $TAGGED_MODEL"
+echo "      # or: cd src/eval && docker compose run --rm eval python -m eval.eval_model \\ --model ..."
 echo "    Confirm the cutoff against the held-out recordings before deploying it;"
 echo "    the per-speaker rows are the ones that decide it."
 fi

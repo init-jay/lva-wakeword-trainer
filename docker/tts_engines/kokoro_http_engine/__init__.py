@@ -10,7 +10,7 @@ runs the FastAPI server and this wrapper in one container -
 
 (docker/Dockerfile.kokoro, whose CMD starts both). On a Mac this module is
 never run at all: the mlx engine is a separate in-process server
-(tts-service/engines/kokoro_mlx/), and that is why there is no `engines/kokoro`
+(src/tts-service/engines/kokoro_mlx/), and that is why there is no `engines/kokoro`
 project next to it. The URL-facing functions below are what src/train/corpus/
 kokoro.py used to be before it became a thin re-export of the protocol
 client.

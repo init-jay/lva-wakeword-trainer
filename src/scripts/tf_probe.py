@@ -14,7 +14,7 @@ blocks - depthwise (7,1)/(11,1) split across the channels, pointwise (1,1) ->
 64 - matching "[5], [7,11], [9,15], [23]" and pointwise_filters 64. The GEMM
 row is Phase 1b's, kept so the two probes read against each other.
 
-    python tools/tf_probe.py [--interop N]
+    python src/scripts/tf_probe.py [--interop N]
 
 `--interop` sets inter-op parallelism before any layer is built. Both sides
 run once at the install default - that is the comparison against the measured

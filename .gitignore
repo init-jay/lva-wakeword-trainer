@@ -7,7 +7,7 @@
 #   data/recordings/    real samples, raw takes, holdout   (1 · record)
 #   data/corpus/        generated positives / negatives    (2 · train)
 #   data/corpus/eval/   the TTS evaluation corpora         (3 · eval)
-#   data/audit/         src/scripts/ one-off one-off measurement output
+#   data/audit/         src/scripts/ one-off measurement output
 #
 #   output/             trained oww + mww models, training_config.yaml, scorecards
 data/

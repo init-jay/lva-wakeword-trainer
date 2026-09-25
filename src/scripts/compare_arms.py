@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cross-arm comparison over the run ledger, one grid key at a time.
 
-    train-applesilicon/.venv/bin/python tools/compare_arms.py \
+    src/train/train-applesilicon/.venv/bin/python src/scripts/compare_arms.py \
         --wake-word "<wake word>" --grid-key real-vtlp [--ledger PATH]
 
 Built for the corpus_axes sweeps: the sweep varies

@@ -57,7 +57,7 @@ Usage:
     python -m eval.check_model_alignment --model M --step 20 --max-gap 600
 
 Run it as a MODULE, from the repo root (`python -m eval.check_model_alignment`, from
-/app in the image). The plain-path form (`python eval/src/check_model_alignment.py`)
+/app in the image). The plain-path form (`python src/eval/src/check_model_alignment.py`)
 puts this directory on sys.path instead of the root; the try/except on the `paths`
 import below is what keeps it working.
 """
@@ -73,7 +73,7 @@ import scipy.io.wavfile
 try:
     from eval import paths
 except ImportError:
-    # Plain-path form (`python eval/src/check_model_alignment.py`): this directory
+    # Plain-path form (`python src/eval/src/check_model_alignment.py`): this directory
     # is on sys.path, the package is not.
     import paths
 

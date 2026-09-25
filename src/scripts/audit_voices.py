@@ -61,7 +61,7 @@ Usage:
     python audit_voices.py --wake-word "hey seeree" \
         --tts tcp://127.0.0.1:8898 --asr 192.168.2.14:10300
 
-The TTS server speaks the repo protocol (tts-service/) - the same per-engine
+The TTS server speaks the repo protocol (src/tts-service/) - the same per-engine
 servers the corpus runs against, so what this audits is exactly what the corpus
 gets. Speaker voices (piper-style) and plain voices (kokoro-style) are both
 handled; the server's catalog answer decides which.

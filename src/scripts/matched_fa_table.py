@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Read matched-false-accept per-speaker tables out of score_margins CSV dumps.
 
-The companion to tools/score_margins.py: that tool runs a model once and writes every
+The companion to src/scripts/score_margins.py: that tool runs a model once and writes every
 clip's peak; this reads those CSVs back and answers the question a comparison
 actually gets asked - at the threshold that admits N adversarial fires, what does
 EACH speaker score? One row per model, each read on its OWN curve; the pooled
 column (shown last) is not a verdict - pooling across speakers is how a voice
 that fails gets averaged away.
 
-    python3 tools/matched_fa_table.py /tmp/margins/*.csv [--budgets 6,12]
+    python3 src/scripts/matched_fa_table.py /tmp/margins/*.csv [--budgets 6,12]
 """
 import argparse
 import csv
@@ -32,7 +32,7 @@ import score_margins as sm  # noqa: E402
 # score_margins.py reaches it.)
 GRID = ev.SWEEP_GRID
 # The adversarial set the same way score_margins.py defines its FA axis
-# (ev.ADVERSARIAL at eval/src/eval_model.py:117). This file used to carry its
+# (ev.ADVERSARIAL at src/eval/src/eval_model.py:117). This file used to carry its
 # own tuple ("extend", "hey_other"); the two agreed, so they are one definition now.
 ADV = ev.ADVERSARIAL
 

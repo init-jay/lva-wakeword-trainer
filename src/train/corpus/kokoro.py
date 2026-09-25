@@ -16,7 +16,7 @@ wake word.
 TRANSPORT (since the tts-service split, 2026-09-08): this module no longer
 talks to any HTTP API itself. Both server families - Kokoro-FastAPI (Docker,
 cuda/cpu box) and kokoro-mlx (Apple Silicon, in-process MLX) - run a
-tts-protocol server (tts-service/) in front of the actual engine and speak
+tts-protocol server (src/tts-service/) in front of the actual engine and speak
 one small line-based protocol over a plain TCP port. This module is a thin
 TCP client over `tcp://` URLs, and it is the ONLY transport code left in the
 trainer: no `requests`, no OpenAI-compatible JSON, no engine-specific

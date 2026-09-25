@@ -3,9 +3,9 @@
 # Run a full training pass on the trainer host.
 #
 # Usage:
-#   ./scripts/run-oww-training.sh "hey seeree"
-#   ./scripts/run-oww-training.sh "hey seeree" --samples-per-voice 400 --training-steps 100000
-#   SKIP_CORPUS=1 ./scripts/run-oww-training.sh "hey seeree"
+#   ./src/scripts/run-oww-training.sh "hey seeree"
+#   ./src/scripts/run-oww-training.sh "hey seeree" --samples-per-voice 400 --training-steps 100000
+#   SKIP_CORPUS=1 ./src/scripts/run-oww-training.sh "hey seeree"
 #
 # Any extra arguments are passed through to train.py.
 #
@@ -157,7 +157,7 @@ elif [[ -n "${KOKORO_EXTERNAL:-}" ]]; then
     # host engine (the in-process mlx one on a Mac, say) is:
     #
     #     KOKORO_EXTERNAL=1 KOKORO_URL=tcp://host.docker.internal:8900 \
-    #         ./scripts/run-oww-training.sh "hey seeree"
+    #         ./src/scripts/run-oww-training.sh "hey seeree"
     if [[ -z "${KOKORO_URL:-}" ]]; then
         echo "ERROR: KOKORO_EXTERNAL=1 but KOKORO_URL is unset." >&2
         echo "       Nothing will be started, so there is nothing to fall back to." >&2
@@ -173,7 +173,7 @@ elif [[ -n "${KOKORO_EXTERNAL:-}" ]]; then
     # the corpus generator can use.
     docker compose run --rm --no-deps --entrypoint python3 oww-trainer -c "
 import sys
-sys.path.insert(0, '/app/tts-service/tts_protocol')
+sys.path.insert(0, '/app/src/tts-service/tts_protocol')
 from tts_protocol import TtsClient
 for spec in '${KOKORO_URL}'.split(','):
     c = TtsClient(spec)
@@ -359,7 +359,7 @@ cp "$MODEL" "$TAGGED"
 # The .tflite gets THE SAME TAG, from the same run. train.py converts it straight
 # after export, so it is derived from exactly this .onnx - and a tagged .onnx beside
 # an untagged .tflite is how a model and its conversion drift apart, the mix-up
-# eval/src/backends.py warns about when it says the two are not guaranteed to agree.
+# src/eval/src/backends.py warns about when it says the two are not guaranteed to agree.
 # Absent if the conversion failed; not fatal - the .onnx is the artifact everything
 # else works from.
 TFLITE="${MODEL%.onnx}.tflite"
@@ -379,5 +379,5 @@ echo "    $TAGGED  ($(du -h "$TAGGED" | cut -f1), md5 ${AFTER_SUM:0:8})"
 [[ -n "$DIRTY" ]] && echo "    NOTE: working tree was dirty - the code half of $TAG is not reproducible"
 echo
 echo "    scp to the eval machine, then:"
-echo "      cd eval && docker compose run --rm eval python -m eval.compare_models \\"
+echo "      cd src/eval && docker compose run --rm eval python -m eval.compare_models \\"
 echo "          --models <new> <previous-best>"

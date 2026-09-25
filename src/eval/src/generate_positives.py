@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate a synthetic positive corpus for wake-word evaluation, speaking the repo's
-TTS protocol (tts-service/tts_protocol) to whatever engine the URL points at.
+TTS protocol (src/tts-service/tts_protocol) to whatever engine the URL points at.
 
 Read the output carefully, because this corpus is not a generalisation test.
 `train.py` generates its positives from every English Kokoro voice at speeds 0.7-1.3,
@@ -73,7 +73,7 @@ from pathlib import Path
 import numpy as np
 from scipy.io import wavfile
 
-# Runnable as `python eval/src/generate_positives.py` as well as `python -m
+# Runnable as `python src/eval/src/generate_positives.py` as well as `python -m
 # eval.generate_positives`: the module form has the `eval` package importable,
 # the plain-path form only has this directory on sys.path, so try both.
 try:
@@ -82,7 +82,7 @@ except ImportError:
     import paths
 
 sys.path.insert(0, str(paths.REPO_ROOT / "src"))
-# The TTS protocol package lives at src/tts-service/tts_protocol/; the hyphens
+# The TTS protocol package lives at src/src/tts-service/tts_protocol/; the hyphens
 # in both directory names mean that string is not importable, so its parent
 # (src/) goes on sys.path. The engines are NOT here - they run as separate
 # servers that this script only speaks to over TCP.
@@ -176,7 +176,7 @@ def set_manifest(out, args, written, holdout):
     manifest = {
         "set": "voice-holdout synthetic ranking set (improvement.md P1.2)",
         "what_it_is": ("Positives rendered ONLY from the voices "
-                       "wordlists/voice_holdout.yaml holds out of every corpus "
+                       "src/wordlists/voice_holdout.yaml holds out of every corpus "
                        "build: voice-disjoint from training, every other axis "
                        "inside the training distribution (speeds 0.7-1.3, plain "
                        "phrase)."),
@@ -305,7 +305,7 @@ def render_jobs(jobs, args):
     tts_protocol/engine.py's batch()). An engine without word timestamps (Piper)
     renders per clip, in voice-outer order: its server serves one request at a
     time, so order is a correctness property, not a preference
-    (tts-service/engines/piper). Deduplication is by text, so a
+    (src/tts-service/engines/piper). Deduplication is by text, so a
     phrase rendered at 1.0 for the voices sweep is not rendered again for the
     level sweep.
     """
@@ -353,7 +353,7 @@ def main():
     p.add_argument("--voice-holdout", action="store_true",
                    help="Render the voice-HOLDOUT synthetic ranking set instead of "
                         "the training-distribution sanity corpus: every clip from "
-                        "the voices wordlists/voice_holdout.yaml reserves out of "
+                        "the voices src/wordlists/voice_holdout.yaml reserves out of "
                         "every corpus build (the catalog is checked live, and a "
                         "held-out voice it no longer offers is an error, not a "
                         "skip), at speeds inside the 0.7-1.3 training range. "

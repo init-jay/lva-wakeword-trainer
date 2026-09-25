@@ -16,10 +16,10 @@ categories'), and the threshold is chosen the way the ledger chooses it: the low
 grid threshold whose adversarial FA is within budget, read on the model's OWN curve
 ('Never compare models at a fixed threshold').
 
-    python3 tools/score_margins.py --model output/<word>/oww/<tag>.onnx \
+    python3 src/scripts/score_margins.py --model output/<word>/oww/<tag>.onnx \
         [--model output/<word>/mww/<tag>.json] [--adv-fa-budget N] [--csv out.csv]
 
-Runs on the eval env (host: eval/.venv; container: the eval image, module form).
+Runs on the eval env (host: src/eval/.venv; container: the eval image, module form).
 """
 import argparse
 import math

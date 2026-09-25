@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Prepare the HOST evaluation environment on Apple Silicon. Setup only - it
-# scores nothing; the `eval/.venv/bin/python eval/src/<tool>.py` invocations do.
+# scores nothing; the `src/eval/.venv/bin/python src/eval/src/<tool>.py` invocations do.
 #
 #     ./src/scripts/setup-eval-host.sh
 #
@@ -24,7 +24,7 @@ CLONE_DIR="$(pwd)/src/train/openwakeword"
 
 if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
     echo "ERROR: this is the Apple Silicon host path; you are on $(uname -s)/$(uname -m)." >&2
-    echo "       Everywhere else, use the container: cd eval && docker compose build" >&2
+    echo "       Everywhere else, use the container: cd src/eval && docker compose build" >&2
     exit 2
 fi
 

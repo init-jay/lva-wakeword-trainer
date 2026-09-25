@@ -13,8 +13,8 @@
 # against the linux/arm64 one - and anything else that differs between the two paths
 # contaminates the answer; the measurements are in SPEED.md.
 #
-#   ./scripts/setup-applesilicon-trainer.sh                      # once
-#   ./scripts/run-oww-training-applesilicon.sh "hey seeree" --skip-corpus
+#   ./src/scripts/setup-applesilicon-trainer.sh                      # once
+#   ./src/scripts/run-oww-training-applesilicon.sh "hey seeree" --skip-corpus
 #
 # --skip-corpus IS THE INTENDED WAY TO USE THIS. Generation needs TTS servers, and
 # this script starts nothing: the engines are the uv projects in
@@ -35,13 +35,13 @@
 # PIPER FLEET (the fast path for the corpus stage): one Piper instance is one
 # serial lane - the engine holds one model resident and takes every call under
 # one lock, so client threads queue instead of run (21.66 clips/s measured for
-# the single instance in tools/bench_tts.py, improvement.md P2.1). PIPER_URLS
+# the single instance in src/scripts/bench_tts.py, improvement.md P2.1). PIPER_URLS
 # takes the comma-joined list scripts/start-tts-fleet.sh N prints, and the
 # corpus shards the fleet BY VOICE - each model pinned to one instance for the
 # whole run (corpus/piper.py, PiperFleet):
 #
-#     PIPER_URLS="$(./scripts/start-tts-fleet.sh 4)" \
-#         ./scripts/run-oww-training-applesilicon.sh "hey seeree" --piper-fraction 0.3
+#     PIPER_URLS="$(./src/scripts/start-tts-fleet.sh 4)" \
+#         ./src/scripts/run-oww-training-applesilicon.sh "hey seeree" --piper-fraction 0.3
 #
 # SMOKE=1: a few-minute end-to-end check that a changed train/ tree still runs the
 # whole pipeline: corpus reuse, feature recompute, 200-step training, real tflite
@@ -50,7 +50,7 @@
 # output/<wake>/oww/smoke-<stamp>/ and the canonical model, the .last_run_tag and
 # the archive stay untouched (train/oww/train.py --smoke):
 #
-#     SMOKE=1 ./scripts/run-oww-training-applesilicon.sh "hey seeree"
+#     SMOKE=1 ./src/scripts/run-oww-training-applesilicon.sh "hey seeree"
 
 set -euo pipefail
 
@@ -74,11 +74,11 @@ fi
 shift
 
 if [[ ! -x "$ENV_DIR/.venv/bin/python" ]]; then
-    echo "ERROR: $ENV_DIR/.venv missing. Run ./scripts/setup-applesilicon-trainer.sh" >&2
+    echo "ERROR: $ENV_DIR/.venv missing. Run ./src/scripts/setup-applesilicon-trainer.sh" >&2
     exit 2
 fi
 if [[ ! -d src/train/openwakeword/openwakeword ]]; then
-    echo "ERROR: no openwakeword/ clone. Run ./scripts/setup-applesilicon-trainer.sh" >&2
+    echo "ERROR: no openwakeword/ clone. Run ./src/scripts/setup-applesilicon-trainer.sh" >&2
     exit 2
 fi
 
@@ -237,7 +237,7 @@ PYEOF
         echo "  first phrase-alone render, not now. Start the engine in another" >&2
         echo "  terminal:  uv run --project src/tts-service/engines/piper python -m piper_engine --port 8898"
         echo "  (it uses the voices under data/external/piper) or point PIPER_URL / --piper-url at an existing one." >&2
-        echo "  A fleet:  PIPER_URLS=\"\$(./scripts/start-tts-fleet.sh 4)\"" >&2
+        echo "  A fleet:  PIPER_URLS=\"\$(./src/scripts/start-tts-fleet.sh 4)\"" >&2
         exit 1
     fi
 fi
@@ -252,7 +252,7 @@ fi
 if ! grep -q 'if config.get("piper_sample_generator_path")' src/train/openwakeword/openwakeword/train.py; then
     echo "ERROR: the openWakeWord clone is missing its patches - the working tree was" >&2
     echo "       probably reset (e.g. a git checkout in openwakeword/). Re-run" >&2
-    echo "       ./scripts/setup-applesilicon-trainer.sh (idempotent) to re-apply" >&2
+    echo "       ./src/scripts/setup-applesilicon-trainer.sh (idempotent) to re-apply" >&2
     echo "       them, then start this run again." >&2
     exit 2
 fi

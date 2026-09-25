@@ -12,7 +12,7 @@ these two ONNX models - so this question was open, and improvement.md P2.3
 prescribes exactly this probe: the real models on the real batch shape, on
 this machine, and the result written down either way.
 
-    train-applesilicon/.venv/bin/python tools/coreml_probe.py
+    src/train/train-applesilicon/.venv/bin/python src/scripts/coreml_probe.py
 
 What it runs
 ------------

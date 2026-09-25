@@ -48,7 +48,7 @@ Usage, from the repo root:
 
     # the same, on the host env (scripts/setup-eval-host.sh) - plain-path form,
     # from the repo root: the `-m eval.X` module form is the image's mount
-    eval/.venv/bin/python eval/src/compare_models.py --models M M2
+    src/eval/.venv/bin/python src/eval/src/compare_models.py --models M M2
 
 POSITIVES MUST BE RECORDINGS THE MODEL HAS NOT TRAINED ON, which is why the defaults
 come from `eval/src/paths.py` rather than being spelled out here: the trainer globs
@@ -74,7 +74,7 @@ import numpy as np
 
 # Reuse the scoring path from eval_model.py so both tools agree exactly: same
 # streaming, same noise-floor padding, same per-clip RNG seed.
-# Runnable as `python eval/src/compare_models.py` as well as `python -m
+# Runnable as `python src/eval/src/compare_models.py` as well as `python -m
 # eval.compare_models` - the plain-path form is the host invocation
 # (scripts/setup-eval-host.sh). The try/except is the same guard the other
 # scripts here carry.

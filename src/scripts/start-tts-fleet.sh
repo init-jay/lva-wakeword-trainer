@@ -8,10 +8,10 @@
 # every engine call under one lock (src/tts-service/engines/piper's docstring,
 # tts_protocol/server.py), so client threads against one instance queue, they
 # do not run. Throughput scales with PROCESSES: the single instance measures
-# 21.66 clips/s in tools/bench_tts.py, and the mww corpus stage ran at ~16
+# 21.66 clips/s in src/scripts/bench_tts.py, and the mww corpus stage ran at ~16
 # clips/s aggregate against it (improvement.md, P2.1 - the corpus stage is
 # the serial wall of a Mac run). N instances should land near N x that, and
-# tools/bench_tts.py is the instrument to confirm it.
+# src/scripts/bench_tts.py is the instrument to confirm it.
 #
 # WHAT THE CONSUMER DOES WITH IT: the corpus layer (train/corpus/piper.py,
 # PiperFleet) shards the fleet BY VOICE - each model, all of its speakers,
@@ -20,8 +20,8 @@
 # round-robin would make every instance reload on most requests - more
 # reloads than the single instance would have done.
 #
-#     PIPER_URLS="$(./scripts/start-tts-fleet.sh 4)" \
-#         ./scripts/run-mww-training-applesilicon.sh "hey seeree"
+#     PIPER_URLS="$(./src/scripts/start-tts-fleet.sh 4)" \
+#         ./src/scripts/run-mww-training-applesilicon.sh "hey seeree"
 #
 # The run scripts take the list as PIPER_URLS (or --piper-url): only this
 # script's LAST line is on stdout - the comma-joined tcp:// URL list - and
@@ -46,7 +46,7 @@
 # non-piper engine - is refused, naming the port: the fleet is sharded by
 # voice, and a lane that does not serve piper's catalog cannot take a shard.
 #
-#   ./scripts/start-tts-fleet.sh 4            # start/refresh four, print the list
+#   ./src/scripts/start-tts-fleet.sh 4            # start/refresh four, print the list
 #
 # All instances must serve the SAME voices directory - the corpus probe
 # (PiperFleet.probe) refuses a fleet whose catalogs disagree, because a
@@ -73,7 +73,7 @@ WAIT_ROUNDS=120
 
 mkdir -p "$LOG_DIR"
 if [[ ! -d "$VOICES_DIR" ]] || ! ls "$VOICES_DIR"/*.onnx >/dev/null 2>&1; then
-    echo "ERROR: no Piper voices under $VOICES_DIR - run ./scripts/download-external-data.sh mww first." >&2
+    echo "ERROR: no Piper voices under $VOICES_DIR - run ./src/scripts/download-external-data.sh mww first." >&2
     exit 1
 fi
 
@@ -128,7 +128,7 @@ trap cleanup EXIT INT TERM
 for ((i = 0; i < N; i++)); do
     # 8898 DOWN (8898, 8897, ...), matching this header's "8898 .. 8897+N-1":
     # the Kokoro engines occupy the ports ABOVE 8898 on a co-located Mac
-    # (8899/8901 docker, 8900 in-process mlx - tts-service/README.md), so a
+    # (8899/8901 docker, 8900 in-process mlx - src/tts-service/README.md), so a
     # fleet that counted UP would collide with them on its second instance.
     PORT=$((BASE_PORT - i))
     URL="tcp://127.0.0.1:$PORT"

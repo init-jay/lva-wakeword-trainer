@@ -3,8 +3,8 @@
 # Run Piper TTS on the HOST, as a Wyoming server on port 10200.
 #
 # STATUS: this is now a DEBUGGING server, not a training or auditing one. Training
-# corpora are rendered by the in-process engine in tts-service/engines/piper (protocol
-# port 8898), and tools/audit_voices.py and bench_tts.py speak the protocol, not
+# corpora are rendered by the in-process engine in src/tts-service/engines/piper (protocol
+# port 8898), and src/scripts/audit_voices.py and bench_tts.py speak the protocol, not
 # Wyoming - to audit the piper engine, point them at that same 8898 server, since
 # it IS the engine. What this host process is for now is poking at the raw Wyoming
 # protocol directly (and any external consumer that needs one). Keep the pins in
@@ -19,7 +19,7 @@
 #     the port and points here if the server is missing.
 #
 # THE PINS MATCH EVERY OTHER PIPER IN THE REPO, AND THAT IS NOT COSMETIC.
-# piper-tts 1.7.0 is what tts-service/engines/piper (the Mac training engine)
+# piper-tts 1.7.0 is what src/tts-service/engines/piper (the Mac training engine)
 # pins and what docker/Dockerfile.piper pip-installs (checked 2026-09-07, when
 # it was still the rhasspy/wyoming-piper:2.4.3 image's /usr/src/.venv). A fresh
 # install today resolves 1.8.0 - a different G2P release - and the
@@ -27,9 +27,9 @@
 # were audited against this voice set and this G2P (piper.py header). Bump all
 # three together: this script, the engine's pyproject, and Dockerfile.piper.
 #
-#   ./scripts/start-piper-host.sh                  # run (foreground)
-#   ./scripts/start-piper-host.sh --venv-only      # (re)build the venv and stop
-#   PIPER_PORT=10300 ./scripts/start-piper-host.sh # a different port
+#   ./src/scripts/start-piper-host.sh                  # run (foreground)
+#   ./src/scripts/start-piper-host.sh --venv-only      # (re)build the venv and stop
+#   PIPER_PORT=10300 ./src/scripts/start-piper-host.sh # a different port
 #
 # The port defaults to 10200 (the historical Wyoming port; nothing in the repo
 # speaks to it by default any more). If the compose `piper` service is up on
@@ -52,7 +52,7 @@ PYTHON_VERSION="3.12"
 DEFAULT_VOICE="en_US-lessac-medium"
 PIPER_PORT="${PIPER_PORT:-10200}"
 
-# Match tts-service/engines/piper and Dockerfile.piper. Bump all three together.
+# Match src/tts-service/engines/piper and Dockerfile.piper. Bump all three together.
 PIP_VERSIONS=(wyoming-piper==2.4.3 piper-tts==1.7.0)
 
 if [[ ! -x "$VENV_PY" || "${1:-}" == "--venv-only" ]]; then

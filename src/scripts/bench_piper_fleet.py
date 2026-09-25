@@ -21,8 +21,8 @@ clips/s between sizes is the fleet, not the workload. The first clip of each
 model pays its ~0.6 s load (engine docstring); with 25 models that is real
 overhead the corpus also pays, and it is included, not warmed away.
 
-    PIPER_URLS="$(./scripts/start-tts-fleet.sh 4)" \
-        train-applesilicon/.venv/bin/python tools/bench_piper_fleet.py
+    PIPER_URLS="$(./src/scripts/start-tts-fleet.sh 4)" \
+        src/train/train-applesilicon/.venv/bin/python src/scripts/bench_piper_fleet.py
     # or: --urls tcp://127.0.0.1:8898,tcp://127.0.0.1:8897 --clips-per-pair 24
 
 --trials repeats the SAME workload back to back and reports min/max over trials

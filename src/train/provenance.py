@@ -16,7 +16,7 @@
             h: the resolved config (hyperparameters + seed)
 
 WHY THE COMMIT ALONE IS NOT ENOUGH. A git hash identifies the code and every file
-git tracks - including wordlists/, docker/requirements.txt and the patches. It says
+git tracks - including src/wordlists/, docker/requirements.txt and the patches. It says
 nothing about the two inputs this repo deliberately does NOT track, and those are
 precisely the ones that move: the real recordings, and the synthetic corpus generated
 from a TTS server. Two runs at the same commit, one with a third speaker recorded and
@@ -295,7 +295,7 @@ def main():
 
     if config is not None:
         print(f"  {'config':<12}{config_tag(config)}")
-    # Single-line f-string deliberately: eval/.venv is Python 3.11 (the eval
+    # Single-line f-string deliberately: src/eval/.venv is Python 3.11 (the eval
     # image's base) and multi-line f-strings are a 3.12 feature (PEP 701) -
     # scripts/sweep.py imports this module and runs under either venv.
     tag = run_tag(args.wake_word, target=args.target, config=config, fallback=args.fallback)

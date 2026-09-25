@@ -3,15 +3,15 @@
 # Kokoro-FastAPI on the HOST, for Apple Silicon. CPU by default - see below.
 #
 # STATUS: this is now a DEBUGGING server, not a training or auditing one. Training
-# corpora are rendered by the in-process kokoro-mlx engine in tts-service/engines/
-# kokoro_mlx (protocol port 8900), and tools/audit_voices.py and bench_tts.py speak
+# corpora are rendered by the in-process kokoro-mlx engine in src/tts-service/engines/
+# kokoro_mlx (protocol port 8900), and src/scripts/audit_voices.py and bench_tts.py speak
 # the protocol, not this OpenAI-compatible HTTP API - to audit or bench the
 # FastAPI engine itself, run the docker kokoro image, which wraps it (protocol
 # port 8899). What this host instance is for now is poking at the raw API
 # directly. The measurements below remain the reason the Mac's training engine is
 # MLX rather than this service. The historical finding
 #
-# Measured on an M1 Max with tools/bench_tts.py and a direct kokoro_tts_batch probe,
+# Measured on an M1 Max with src/scripts/bench_tts.py and a direct kokoro_tts_batch probe,
 # rendering "hey seeree" through Kokoro-FastAPI v0.8.1. BATCHED, because that is how
 # train/oww/train.py actually calls it (--tts-batch defaults to 16):
 #
@@ -46,9 +46,9 @@
 # kokoro and kokoro2 - do not carry that habit across.
 #
 # USAGE:
-#     ./scripts/start-kokoro-host.sh                # cpu, foreground, Ctrl-C to stop
-#     ./scripts/start-kokoro-host.sh --mps          # Metal, for run-on-heavy work
-#     ./scripts/start-kokoro-host.sh --port 8890    # if 8880 is taken by Docker
+#     ./src/scripts/start-kokoro-host.sh                # cpu, foreground, Ctrl-C to stop
+#     ./src/scripts/start-kokoro-host.sh --mps          # Metal, for run-on-heavy work
+#     ./src/scripts/start-kokoro-host.sh --port 8890    # if 8880 is taken by Docker
 #
 # HONEST EXPECTATION: 2.25x is real but does not close the gap to the training box,
 # whose Kokoro is CUDA-accelerated. This makes an oWW corpus on a Mac take about an

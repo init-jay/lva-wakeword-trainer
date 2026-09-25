@@ -14,8 +14,8 @@
 #      + collection: the three shipped files, commit-tagged, in output/<wake>/mww/
 #
 # Usage:
-#   ./scripts/run-mww-training.sh "hey seeree"
-#   ./scripts/run-mww-training.sh "hey seeree" --training-steps 20000
+#   ./src/scripts/run-mww-training.sh "hey seeree"
+#   ./src/scripts/run-mww-training.sh "hey seeree" --training-steps 20000
 #
 # Extra arguments are passed through to train.mww.train.
 #
@@ -93,7 +93,7 @@ for d in data/external/mww_ambient/*/; do
 done
 if [[ ${#AMBIENT[@]} -eq 0 ]]; then
     echo "ERROR: no ambient sets under data/external/mww_ambient/" >&2
-    echo "       ./scripts/download-external-data.sh mww" >&2
+    echo "       ./src/scripts/download-external-data.sh mww" >&2
     exit 1
 fi
 HAVE_EVAL=""
@@ -238,7 +238,7 @@ fi
 # --- collection ------------------------------------------------------------------
 #
 # The three shipped files, commit-tagged, directly under output/<wake>/mww/ - the
-# same shape run-oww-training.sh produces for the .onnx, and what eval/src/paths.py
+# same shape run-oww-training.sh produces for the .onnx, and what src/eval/src/paths.py
 # documents as the collected form. The per-run directory stays where it is; this is
 # a copy, not a move, because model_train_eval owns that directory's layout.
 #
@@ -274,5 +274,5 @@ echo "    $TAGGED_MODEL  ($(du -h "$TAGGED_MODEL" | cut -f1))"
 echo
 echo "    Confirm the cutoff against held-out recordings before deploying it - the"
 echo "    ROC is scored on ambient sets, not on this repo's adversarial negatives:"
-echo "      cd eval && docker compose run --rm eval python -m eval.compare_models \\"
+echo "      cd src/eval && docker compose run --rm eval python -m eval.compare_models \\"
 echo "          --models $TAGGED_MANIFEST"

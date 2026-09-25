@@ -54,7 +54,7 @@ its own, and a history you can edit is not a history.
 
 PREREQUISITES: this is a HOST-SIDE loop for the Apple Silicon route and it
 starts NOTHING. The TTS engines the corpus stage speaks to (Piper on 8898,
-Kokoro on 8900 - tts-service/README.md) must already be running when the
+Kokoro on 8900 - src/tts-service/README.md) must already be running when the
 corpus is built, and no Docker is involved anywhere. The trainer
 subprocesses default to the Apple Silicon venvs (train-mww-applesilicon /
 train-applesilicon; override with `python:`). The eval subprocess defaults
@@ -88,7 +88,7 @@ YAML SHAPE
       python: <path>           # optional; the interpreter with the eval stack
       compare_against: <tag>   # optional; a previously filed run tag
       voice-holdout-set: <path>  # optional; the synthetic voice-holdout set
-                                # (wordlists/voice_holdout.yaml); passed to eval
+                                # (src/wordlists/voice_holdout.yaml); passed to eval
                                 # as --voice-holdout-set so the filed eval block
                                 # carries the arm-ranking number
 """
@@ -562,14 +562,14 @@ def eval_cmd(eval_python, artifact, json_path, voice_holdout_set=None):
     Plain-path invocation, not `python -m eval.eval_model`: the module form
     exists only in the Docker image, where the mount makes the package name
     `eval` with eval_model.py at its top level. On the host the sources live
-    in eval/src/ (a namespace package at eval/), so the module path does not
+    in src/eval/src/ (a namespace package at src/eval/), so the module path does not
     resolve - the same lesson as generate_negatives.py (CLAUDE.md "Verify
     before asserting"). One builder for both targets: the oww and mww loops
     share this single call site, so a flag added here reaches both. With
     `voice_holdout_set` set, --voice-holdout-set is passed through and
     eval_model.py writes the voice_holdout_set block into the JSON, which the
     ledger stores verbatim (the synthetic arm-ranking number, low-variance
-    versus the real holdout - wordlists/voice_holdout.yaml).
+    versus the real holdout - src/wordlists/voice_holdout.yaml).
     """
     cmd = [str(eval_python), str(REPO_ROOT / "src" / "eval" / "src" / "eval_model.py"),
            "--model", str(artifact), "--json", str(json_path)]

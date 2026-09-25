@@ -22,10 +22,10 @@ sufficient.
 PyAudio needs PortAudio:  brew install portaudio && uv sync --extra pyaudio
 
 Usage:
-    cd record
+    cd src/record
     uv run record_samples.py --list-devices
     uv run record_samples.py --wake-word "hey seeree"
-    uv run record_samples.py --wake-word "hey seeree" --output-dir ../data/recordings/samples/speaker1
+    uv run record_samples.py --wake-word "hey seeree" --output-dir ../../data/recordings/samples/speaker1
 """
 import argparse
 import re

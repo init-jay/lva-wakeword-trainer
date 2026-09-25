@@ -62,7 +62,7 @@ so a real run-on recording among the positives would be scored as the phrase alo
 
 Usage, from the repo root:
     python -m eval.eval_model --model output/hey_seeree/oww/hey_seeree_705c23b.onnx   # the eval image
-    eval/.venv/bin/python eval/src/eval_model.py --model output/hey_seeree/oww/hey_seeree_705c23b.onnx   # the host env
+    src/eval/.venv/bin/python src/eval/src/eval_model.py --model output/hey_seeree/oww/hey_seeree_705c23b.onnx   # the host env
     python -m eval.eval_model --model M --positives data/recordings/holdout/speaker1
     python -m eval.eval_model --model M --threshold 0.7 --verbose
 
@@ -86,7 +86,7 @@ from pathlib import Path
 import numpy as np
 import scipy.io.wavfile
 
-# Runnable as `python eval/src/eval_model.py` as well as `python -m
+# Runnable as `python src/eval/src/eval_model.py` as well as `python -m
 # eval.eval_model`. The module form is the eval image's: src/ is mounted as the
 # `eval` package, so the package is importable. The plain-path form - the host
 # invocation, scripts/setup-eval-host.sh - only has this directory on
@@ -643,7 +643,7 @@ def main():
         print("=" * 70)
         print("VOICE-HOLDOUT SYNTHETIC RANKING SET (NOT A GATE)")
         print(f"  {vdir}  ({len(vclips)} clips)")
-        print("  Every clip is a voice wordlists/voice_holdout.yaml holds out of every")
+        print("  Every clip is a voice src/wordlists/voice_holdout.yaml holds out of every")
         print("  corpus build, at speeds inside the 0.7-1.3 training range: voice-"
               "disjoint from training, in-distribution everywhere else. A synthetic")
         print("  voice is not a person - this is a low-variance ranking signal for")

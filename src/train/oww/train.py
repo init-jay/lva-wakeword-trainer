@@ -856,7 +856,7 @@ def main():
                              "Kokoro process is single-threaded and saturates one "
                              "core, so more PROCESSES scale where more client "
                              "threads do not. Each URL is a tts-protocol server "
-                             "(tts-service/), which fronts the actual engine - "
+                             "(src/tts-service/), which fronts the actual engine - "
                              "kokoro-mlx on a Mac, Kokoro-FastAPI in Docker. "
                              "The old http:// and mlx:// forms are rejected: they "
                              "used to mean different backends with different "
@@ -1219,7 +1219,7 @@ def main():
             print("ERROR: every available voice is excluded!")
             sys.exit(1)
 
-    # THE VOICE HOLDOUT (improvement.md P1.2): the voices wordlists/
+    # THE VOICE HOLDOUT (improvement.md P1.2): the voices src/wordlists/
     # voice_holdout.yaml reserves for the synthetic ranking set are excluded
     # from every corpus build, so that set stays voice-disjoint from
     # training. The live catalog is the source of truth: an entry it no
@@ -1519,7 +1519,7 @@ def main():
         # The training half of the recordings. data/recordings/holdout/ is a SIBLING
         # and is never read here - copy_real_samples globs this tree recursively, so
         # a holdout nested inside it would be trained on and every eval number after
-        # would measure memorisation. eval/src/paths.py enforces the pair.
+        # would measure memorisation. src/eval/src/paths.py enforces the pair.
         real_samples_dir = WORK_DIR / "data" / "recordings" / "samples"
         real_overrides = _parse_real_copies_override(args.real_copies_override)
         real_vtlp = _parse_real_copies_override(args.real_vtlp, flag="--real-vtlp")

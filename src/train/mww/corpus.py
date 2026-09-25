@@ -61,8 +61,8 @@ DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
    voices get the same exclusions the oWW corpus applies (MISPRONOUNCING_VOICES and
    the v0 legacy set, corpus/negatives.py) and the shared speed grid, so the two
    engines differ in timbre, not in speed or text. Both URLs are tcp://
-   tts-protocol servers (tts-service/): on a Mac that is the in-process
-   kokoro-mlx engine (`uv run --project tts-service/engines/kokoro_mlx
+   tts-protocol servers (src/tts-service/): on a Mac that is the in-process
+   kokoro-mlx engine (`uv run --project src/tts-service/engines/kokoro_mlx
    python -m kokoro_mlx_engine`), in Docker the wrapped Kokoro-FastAPI service.
 
 3. NO RUN-ON POSITIVES YET. Their cut point comes from Kokoro's word timestamps, and
@@ -583,8 +583,8 @@ def main():
           "features/positives, which the next step creates.")
     print(f'  python -m train.mww.features --wake-word "{args.wake_word}"')
     print("\nOr let a wrapper chain all four stages:")
-    print(f'  ./scripts/run-mww-training.sh "{args.wake_word}"   (Docker)')
-    print(f'  ./scripts/run-mww-training-applesilicon.sh "{args.wake_word}"   (host, Apple Silicon)')
+    print(f'  ./src/scripts/run-mww-training.sh "{args.wake_word}"   (Docker)')
+    print(f'  ./src/scripts/run-mww-training-applesilicon.sh "{args.wake_word}"   (host, Apple Silicon)')
 
 
 if __name__ == "__main__":

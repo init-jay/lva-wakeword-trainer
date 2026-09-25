@@ -53,7 +53,7 @@ linearly with client threads, requests are queueing behind a serialised stage an
 more clients will never help. Whether more INSTANCES help is the second question,
 and --instances answers it.
 
-The tool speaks the TTS protocol (tts-service/), so it benches the servers the
+The tool speaks the TTS protocol (src/tts-service/), so it benches the servers the
 corpus actually uses - the per-engine protocol servers on 8898 (piper) and
 8899/8901 (the two docker kokoro instances; the Mac's in-process mlx one
 defaults to 8900) - and it can batch, because that is how the corpus renders.

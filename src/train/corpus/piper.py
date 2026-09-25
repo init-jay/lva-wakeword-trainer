@@ -7,21 +7,21 @@ directory - so both trainers can consume either engine's output, or both at once
 
 SPLIT, 2026-09-08: the transport (the Wyoming framing, and since this same date
 the in-process variant - see below) moved out of this package. This module speaks
-the repo's TTS PROTOCOL (tts-service/tts_protocol/) as a TCP client: it points at
+the repo's TTS PROTOCOL (src/tts-service/tts_protocol/) as a TCP client: it points at
 a `tcp://` URL (the protocol port a Piper engine publishes) and does not care
 what the server runs behind it. What stays here is wake-word TRAINING POLICY:
 the exclusion tables, the sex table, voice selection, and the corpus generator.
 A new engine does not get these tables; a new wake word does.
 
 TWO MACHINES, ONE ENGINE: on a Mac it is the `uv` project
-(`uv run --project tts-service/engines/piper python -m piper_engine`, piper-tts
+(`uv run --project src/tts-service/engines/piper python -m piper_engine`, piper-tts
 1.7.0 loaded directly, no Wyoming at all); on the CUDA box the Docker image
 (docker/Dockerfile.piper) bakes in that SAME project - one code path, one G2P
 pin, both machines render from it. Both speak the identical protocol, so the
 code in this file is the same on both machines - only the URL differs. The
 protocol's own justifications (THE SPEED PROBLEM - why speed is WSOLA, not
 resampling; PIPER IS STOCHASTIC; the one-server-one-request constraint) live in
-that engine's docstring (tts-service/engines/piper), because the code they
+that engine's docstring (src/tts-service/engines/piper), because the code they
 explain lives there.
 
 FLEETS, 2026-09-21: the `tcp://` URL above is also a COMMA-SEPARATED list of
@@ -145,9 +145,9 @@ class PiperFleet:
                 print(f"  ERROR: could not reach the Piper protocol server at {url}: {e}")
                 if multi:
                     print("         A fleet is a comma-separated --piper-url; every URL in it "
-                          "must answer. The fleet script (scripts/start-tts-fleet.sh N) "
+                          "must answer. The fleet script (src/scripts/start-tts-fleet.sh N) "
                           "reports which of its instances died.")
-                print("         Mac:  `uv run --project tts-service/engines/piper "
+                print("         Mac:  `uv run --project src/tts-service/engines/piper "
                       "python -m piper_engine --port 8898`")
                 print("         Docker: `docker compose up -d piper` (publishes 8898),")
                 print("         then point --piper-url at tcp://127.0.0.1:8898.")
@@ -299,7 +299,7 @@ MISPRONOUNCING_PIPER_VOICES: dict[str, list[str]] = {
 # / 106 pairs capped - the same 106 the compose-era run saw, so the English selection
 # set has not moved since the audit era's known exposure. The growth is voices in
 # other languages, which the languages filter already excludes. Widening
-# --piper-languages is a new unaudited set until tools/audit_voices.py has
+# --piper-languages is a new unaudited set until src/scripts/audit_voices.py has
 # run against the instance that generates the corpus.
 #
 # TO RECLAIM THEM: audit these ten against the instance that generates the corpus,

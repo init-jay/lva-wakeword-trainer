@@ -13,8 +13,8 @@ corpus' TTS F0 distribution and what fraction of the corpus lies within +/-2 sem
 of the speaker's median. F0 is a proxy for timbre, not timbre itself: a covered pitch
 range does not prove the voice is learnable, it only removes the cheapest explanation.
 
-    python3 tools/f0_coverage.py                     # every corpus, all speakers
-    python3 tools/f0_coverage.py --clips 200
+    python3 src/scripts/f0_coverage.py                     # every corpus, all speakers
+    python3 src/scripts/f0_coverage.py --clips 200
 
 Names: piper/kokoro clips carry the voice in the filename (piper_pf_en_GB-aru-medium_03_<uuid>.wav,
 vtlp1.20_piper_...), and the real clips carry the speaker (real_N_<speaker>_<file>.wav on
