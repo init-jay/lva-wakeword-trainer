@@ -41,9 +41,13 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 # pre-reorg names, so what was added to sys.path at the git root is now src/.
 SRC_ROOT = REPO_ROOT / "src"
 
-# The openWakeWord clone. It moved with the trainer, under src/train/ - the
-# container mounts shadow the image's own clone at the same point.
-OWW_CLONE = SRC_ROOT / "train" / "openwakeword"
+# The openWakeWord clone. On the host it sits under src/train/, where
+# setup-applesilicon-trainer.sh makes it. In the container it cannot: the
+# ./src/train bind mount would hide an image clone there, leaving nothing on a box
+# with no host clone and a Mac-patched one on a Mac that ran the host setup. So
+# the images clone to /opt/openwakeword, as the mww images do /opt/micro-wake-word,
+# and docker-compose.yml names it here through OWW_CLONE.
+OWW_CLONE = Path(os.environ.get("OWW_CLONE", SRC_ROOT / "train" / "openwakeword"))
 
 # The plain-path form (`python src/train/oww/train.py`) puts src/train/oww/ on
 # sys.path, not the import root.

@@ -169,8 +169,8 @@ RUN pip install --no-cache-dir --no-deps \
         onnx2tf==1.29.24 \
         onnxsim-prebuilt==0.4.39.post2
 
-RUN mkdir -p src/train && git clone https://github.com/dscripka/openWakeWord src/train/openwakeword \
-    && pip install --no-cache-dir -e ./src/train/openwakeword
+RUN git clone https://github.com/dscripka/openWakeWord /opt/openwakeword \
+    && pip install --no-cache-dir -e /opt/openwakeword
 
 # NO onnxruntime-gpu SWAP HERE, unlike the CUDA image. onnxruntime-gpu publishes no
 # macOS or linux/arm64 wheel, and there is no GPU to reach in any case, so the CPU
@@ -187,30 +187,30 @@ assert 'CPUExecutionProvider' in onnxruntime.get_available_providers()"
 # SEVEN OF THE EIGHT, and the omission is the point. See src/train/patches/ for each.
 
 COPY src/train/patches/skip-piper-import.py /tmp/skip-piper-import.py
-RUN python3 /tmp/skip-piper-import.py src/train/openwakeword/openwakeword/train.py
+RUN python3 /tmp/skip-piper-import.py /opt/openwakeword/openwakeword/train.py
 
 COPY src/train/patches/honour-augmentation-rounds.py /tmp/honour-augmentation-rounds.py
-RUN python3 /tmp/honour-augmentation-rounds.py src/train/openwakeword/openwakeword/train.py
+RUN python3 /tmp/honour-augmentation-rounds.py /opt/openwakeword/openwakeword/train.py
 
 # Still needed on CPU, and arguably more. Upstream picks the device from torch and
 # sets ncpu=1 whenever torch reports CUDA; here torch reports no CUDA, so upstream
 # would take the multi-threaded branch by luck rather than by decision. The patch
 # makes it a decision, and keeps the two images behaving identically.
 COPY src/train/patches/feature-device-selection.py /tmp/feature-device-selection.py
-RUN python3 /tmp/feature-device-selection.py src/train/openwakeword/openwakeword/train.py
+RUN python3 /tmp/feature-device-selection.py /opt/openwakeword/openwakeword/train.py
 
 COPY src/train/patches/configurable-corpus-dir.py /tmp/configurable-corpus-dir.py
-RUN python3 /tmp/configurable-corpus-dir.py src/train/openwakeword/openwakeword/train.py
+RUN python3 /tmp/configurable-corpus-dir.py /opt/openwakeword/openwakeword/train.py
 
 # Seed every RNG from config["seed"], so a sweep point measures the hyperparameter,
 # not the draw. See src/train/patches/seed-augment.py.
 COPY src/train/patches/seed-augment.py /tmp/seed-augment.py
-RUN python3 /tmp/seed-augment.py src/train/openwakeword/openwakeword/train.py
+RUN python3 /tmp/seed-augment.py /opt/openwakeword/openwakeword/train.py
 
 # The base learning rate from config["lr"] (default = upstream's 0.0001), so
 # a sweep can move it from the CLI. See src/train/patches/configurable-lr.py.
 COPY src/train/patches/configurable-lr.py /tmp/configurable-lr.py
-RUN python3 /tmp/configurable-lr.py src/train/openwakeword/openwakeword/train.py
+RUN python3 /tmp/configurable-lr.py /opt/openwakeword/openwakeword/train.py
 
 # Make auto_train's two hidden decisions visible: the per-sequence negative
 # weight (its doubling can turn a requested 2000 into an effective 8000, and
@@ -220,7 +220,7 @@ RUN python3 /tmp/configurable-lr.py src/train/openwakeword/openwakeword/train.py
 # the int16 val_steps trap at --training-steps above ~327k.
 # See src/train/patches/log-weight-and-merge.py.
 COPY src/train/patches/log-weight-and-merge.py /tmp/log-weight-and-merge.py
-RUN python3 /tmp/log-weight-and-merge.py src/train/openwakeword/openwakeword/train.py
+RUN python3 /tmp/log-weight-and-merge.py /opt/openwakeword/openwakeword/train.py
 
 # ANOTHER PATCH THIS IMAGE NEEDS AND THE CUDA ONE DOES NOT, and it patches an
 # installed dependency rather than the openWakeWord clone.
@@ -231,7 +231,7 @@ RUN python3 /tmp/log-weight-and-merge.py src/train/openwakeword/openwakeword/tra
 # This image is Python 3.12 and torchaudio <1 has no cp312 wheel, so that escape does
 # not exist and no pin can create it. See the patch for the full account.
 #
-# It runs AFTER `pip install -e ./openwakeword` above deliberately: that install is
+# It runs AFTER `pip install -e /opt/openwakeword` above deliberately: that install is
 # the last thing that can move torchaudio or torch-audiomentations, and patching a
 # file pip may still replace would silently undo it.
 #
@@ -263,10 +263,10 @@ RUN TA_IO="$(python3 -c 'import glob, site; \
 # escape, on a machine that has the RAM but did not give it to Docker. Raise
 # Settings > Resources > Memory before blaming the CPU for a slow run.
 
-RUN mkdir -p src/train/openwakeword/openwakeword/resources/models \
-    && curl -L -o src/train/openwakeword/resources/models/embedding_model.onnx \
+RUN mkdir -p /opt/openwakeword/openwakeword/resources/models \
+    && curl -L -o /opt/openwakeword/openwakeword/resources/models/embedding_model.onnx \
         'https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/embedding_model.onnx' \
-    && curl -L -o src/train/openwakeword/resources/models/melspectrogram.onnx \
+    && curl -L -o /opt/openwakeword/openwakeword/resources/models/melspectrogram.onnx \
         'https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/melspectrogram.onnx'
 
 # The onnx -> tflite toolchain, checked at BUILD time for the reason the CUDA image

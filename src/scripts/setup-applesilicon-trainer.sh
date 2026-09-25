@@ -38,15 +38,15 @@ fi
 
 # --- the openWakeWord clone -------------------------------------------------------
 #
-# UNDER src/train/, NOT at the repo root or inside src/train/train-applesilicon/, and
-# not by preference: src/train/oww/train.py resolves it as
-# OWW_CLONE (src/train/openwakeword). Putting it anywhere else means patching
-# train.py, which would then differ between the host and container paths - and the
-# whole point is that they do not.
+# UNDER src/train/, NOT at the repo root or inside src/train/train-applesilicon/:
+# src/train/oww/train.py resolves OWW_CLONE to src/train/openwakeword when the
+# OWW_CLONE environment variable is unset, as it is on the host. The container sets
+# it to /opt/openwakeword, the image's own clone - it cannot share this location,
+# because the ./src/train bind mount would hide an image clone there.
 #
 # .gitignore and .dockerignore both exclude it: it must never be committed, and never
-# enter a build context, where it would shadow the clone the image makes for itself
-# (patched for a different device).
+# enter a build context - the images make their own clone, patched for a different
+# device, and must not carry this one.
 if [[ ! -d "$CLONE_DIR/.git" ]]; then
     echo "==> cloning openWakeWord into $CLONE_DIR/"
     mkdir -p "$CLONE_DIR/.."

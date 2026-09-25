@@ -1,8 +1,8 @@
 # Piper TTS behind the repo's TTS protocol port (8898). CPU, on every architecture.
 #
 # SAME ENGINE AS THE MAC, NOT A WYOMING CLIENT. The trainer no longer speaks
-# Wyoming: it speaks the TTS protocol (tts-service/tts_protocol/), and both the
-# Docker image and the Mac's engine project (tts-service/engines/piper) run the
+# Wyoming: it speaks the TTS protocol (src/tts-service/tts_protocol/), and both the
+# Docker image and the Mac's engine project (src/tts-service/engines/piper) run the
 # SAME in-process piper-tts code behind it. One implementation to audit, one
 # G2P to pin, and the measured behaviour transfers across machines.
 #

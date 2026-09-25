@@ -69,7 +69,7 @@ def get_kokoro_voices(kokoro_url: str) -> list:
     except Exception as e:
         print(f"ERROR: Cannot connect to Kokoro at {kokoro_url}: {e}")
         print("Make sure the Kokoro-FastAPI process it fronts is up - the host uv")
-        print("venv (scripts/start-kokoro-host.sh) or the in-image server (docker)")
+        print("venv (src/scripts/start-kokoro-host.sh) or the in-image server (docker)")
         print("- and that this wrapper was pointed at it with --url.")
         sys.exit(1)
 

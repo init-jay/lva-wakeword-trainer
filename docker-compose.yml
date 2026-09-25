@@ -27,7 +27,7 @@ services:
       - "8881:8880"
       # Same wrapper, second process. The published protocol port must dodge
       # both 8899 (kokoro's) and 8900 - the Mac's in-process mlx engine's
-      # default (tts-service/engines/kokoro_mlx), which is THE Kokoro on a
+      # default (src/tts-service/engines/kokoro_mlx), which is THE Kokoro on a
       # Mac and takes precedence: a Mac that runs compose at all does not
       # run docker kokoro, and publishing 8900 only collided with it
       # (2026-09-17 review). 8901 is unused elsewhere in this repo.
@@ -110,6 +110,10 @@ services:
     environment:
       # Import root, same as the mww service above.
       - PYTHONPATH=/app/src
+      # The image's patched openWakeWord clone. Outside /app/src/train on purpose:
+      # the mount above would hide a clone there. src/train/oww/train.py falls back
+      # to src/train/openwakeword, the host clone, when this is unset.
+      - OWW_CLONE=/opt/openwakeword
       # Both instances; each is a separate single-threaded process. The
       # protocol port, not the raw API port: the trainer no longer speaks
       # OpenAI-compatible HTTP.

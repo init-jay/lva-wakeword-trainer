@@ -28,7 +28,7 @@ services:
   # NEITHER TTS SERVICE NEEDS AN OVERRIDE, and both used to look like they might.
   #
   # Piper is multi-arch because its image is a plain multi-arch base running the
-  # same in-process engine as the Mac (tts-service/engines/piper), not an
+  # same in-process engine as the Mac (src/tts-service/engines/piper), not an
   # architecture-specific runtime.
   #
   # Kokoro is multi-arch already: ghcr.io/remsky/kokoro-fastapi-cpu:v0.8.1 publishes

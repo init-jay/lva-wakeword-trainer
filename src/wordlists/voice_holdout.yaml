@@ -5,7 +5,7 @@
 # on VOICE: every entry below is excluded from every corpus build
 # (train/oww/train.py and train/mww/corpus.py remove it from the live catalog
 # and exit when an entry the catalog no longer offers), and
-# eval/src/generate_positives.py --voice-holdout renders the synthetic eval
+# src/eval/src/generate_positives.py --voice-holdout renders the synthetic eval
 # positives from these voices ONLY, into its own output directory.
 #
 # WHAT THE RESULTING SET IS, in one line for whoever renders it next: a

@@ -82,7 +82,7 @@ except ImportError:
     import paths
 
 sys.path.insert(0, str(paths.REPO_ROOT / "src"))
-# The TTS protocol package lives at src/src/tts-service/tts_protocol/; the hyphens
+# The TTS protocol package lives at src/tts-service/tts_protocol/; the hyphens
 # in both directory names mean that string is not importable, so its parent
 # (src/) goes on sys.path. The engines are NOT here - they run as separate
 # servers that this script only speaks to over TCP.
