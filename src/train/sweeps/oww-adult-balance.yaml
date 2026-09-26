@@ -1,0 +1,46 @@
+# oww, per-speaker copy balance: the adults' presence in the positive class made
+# automatic instead of carried by hand (2026-09-24).
+#
+# WHAT IS BEING BALANCED. --real-copies is one weight for every speaker, so a voice's
+# share of the positive rows is an accident of how much happened to get recorded:
+# jay 160 clips, jen 93, ryan 78. At the flat 10x default that is 1600 / 930 / 780 rows
+# = 48.3% / 28.1% / 23.6% of the real rows. --balance-real-copies jay,jen derives each
+# named speaker's multiplier from the clip counts at build time (equalise UP to the
+# richest named speaker): jen 93 -> 18x, jay unchanged at 10x. Recording more jen later
+# shrinks her lift on its own; the flag says "parity", not "18".
+#
+# WHY ADULTS ONLY, AND WHAT IT COSTS. `jay,jen` was the ask. With ryan left at the base
+# weight his SHARE falls (780 rows of 4054 = 19.2%, from 23.6%) even though his absolute
+# rows do not move - `all` would put all three at ~40/41/41. That tradeoff is visible
+# here rather than assumed: ryan is the weakest speaker at every measured point (1-2 of
+# 6 holdout clips at the matched-FA budget) and no hyperparameter has ever moved him, so
+# if his numbers drop alongside the adults' this arm is the reason.
+#
+# WHAT THIS IS NOT EXPECTED TO FIX, stated before the run. At FA<2% the openWakeWord
+# adults read jay 30,28 / jen 10,10 of 35,10 (corpus c19a7898, seeds 3000/3001,
+# tools/score_margins.py at 6 fires of 298 extend+hey_other = 2.01%). jen is at ceiling;
+# jay is 34-35 at any threshold below 0.45 but the six near-homophone blockers
+# (hey series / serious / cereal / searing pain / seaweed / Selma-Seth, peaks 0.64-0.95)
+# hold the bar up. Balance adds jen's rows, not jay's, and does nothing to the
+# negatives - so the honest prediction is: jen steady, jay inside the 10-point repeat
+# spread, ryan down. If it isn't, that is the surprise worth having.
+#
+# CONFIG-IDENTICAL APART FROM THE CORPUS. Both points rebuild (corpus_axes): the new
+# shaping key is not in the c19a7898 manifest, so even point 0 rebuilds - which is why
+# the baseline is back IN this grid. Each arm therefore carries its own TTS redraw, and
+# the within-arm repeats are what separate the lever from the redraw.
+#
+# ~41 min per point: corpus 13 + 2 x (features 9 + train 4 + eval 1) on this Mac.
+wake_word: "hey seeree"
+target: oww
+base:
+  training-steps: 25000
+grid:
+  balance-real-copies: ["", "jay,jen"]
+corpus_axes: [balance-real-copies]
+repeats: 2
+base_seed: 7000
+eval:
+  enabled: true
+  python: eval/.venv/bin/python
+  voice-holdout-set: data/corpus/eval/voice_holdout_tts

@@ -1,0 +1,73 @@
+# oww, per-batch class balance: the one oww lever the repo's own help text says
+# nobody has touched ("the per-batch class balance is a major lever nobody in this
+# repo has touched" - train/oww/train.py, --batch-n-per-class).
+#
+# WHY THIS GRID (2026-09-24, tools/score_margins.py). On the clean-corpus baseline
+# arm the two adults are 3-5 clips from the 97% gate, and the constraint is not
+# their scores: at the matched-FA budget (6 of 298 extend+hey_other) the threshold
+# sits at 0.45, while jay's and jen's misses sit at 0.36-0.42 and six
+# near-homophone negatives sit at 0.72-0.95. Two ways to move that, and they are
+# the two draws this trainer balances per step: 50 positives and 50 adversarial
+# negatives against 1024 ACAV100M clips.
+#
+#   positive 50 -> 150      lift the positive margin so the adults cross the bar
+#   adversarial_negative 50 -> 150   sharpen the near-miss boundary so the blockers
+#                          fall and the bar itself can come down
+#
+# CONFIG ONLY: the corpus is frozen and the feature arrays are shared, so each point
+# costs a feature recompute (the sidecar keys on seed) plus ~4 min of training. The
+# baseline point is IN the grid, on the same corpus, because cross-day totals are
+# directional only (SPEED.md) - the comparison has to be same-run.
+#
+# CORPUS: this sweep BUILDS the clean baseline (the tree on disk is a90706a, the
+# ryan=60 VTLP arm, a measured net-negative for jay - 88.6% -> 62.9%). Point 0
+# repeat 0 runs in the trainer's auto mode and rebuilds it from defaults: 300
+# samples/voice, 15 post-reservation Kokoro voices, 10x real copies, no VTLP,
+# 0.4 run-on, child-fraction default. The old corpus is rmtree'd - approved 2026-09-24.
+#
+# THE BASELINE IS NOT IN THIS GRID. It ran first (set=null, seeds 3000/3001) and is
+# filed in the ledger against the corpus this sweep reuses - c19a7898, det@FA<=2.7%
+# 83.3% [80.4-86.3], the same reading the old clean corpus's none-arm gave. Re-listing
+# it would re-train it: the oww tag is only knowable after a run, so an oww point
+# already in the ledger is recognised late and the minutes are already spent.
+#
+# EACH --set VALUE RESTATES THE WHOLE DICT. train/oww/train.py's --set assigns,
+# it does not merge, so 'batch_n_per_class={"positive": 150}' silently drops
+# ACAV100M_sample and adversarial_negative - which the first attempt at this spec did,
+# producing a model that fires on 100% of every negative category (filed as
+# f2865bc-dirty-c19a7898-ha47ec92; the ledger is history, not a cache). train.py now
+# prints a WARNING naming the dropped keys.
+wake_word: "hey seeree"
+target: oww
+base:
+  training-steps: 25000
+grid:
+  set:
+    - 'batch_n_per_class={"ACAV100M_sample": 1024, "adversarial_negative": 50, "positive": 150}'
+    - 'batch_n_per_class={"ACAV100M_sample": 1024, "adversarial_negative": 150, "positive": 50}'
+repeats: 2
+base_seed: 6000
+eval:
+  enabled: true
+  python: eval/.venv/bin/python
+  voice-holdout-set: data/corpus/eval/voice_holdout_tts
+
+# RESULT, 2026-09-24 (6 runs on the clean baseline corpus 19a7898, read per speaker at
+# MATCHED false accepts with tools/score_margins.py + tools/matched_fa_table.py):
+#
+#   arm                      adv FA <= 6/298            adv FA <= 12/298
+#                    jay       jen      ryan    pooled   jay  jen  ryan  pooled
+#   baseline       30,28     10,10     1,2      41,40    33,34 10,10 2,3   45,47
+#   positive 150   34,29      9,9      1,1      44,39    35,32  9,9  4,3   48,44
+#   adversarial 150 29,26     9,9      1,1      39,36    31,33 10,10 2,3   43,46
+#
+# No arm is a win: every gap sits inside the 10-point repeat spread, and tripling the
+# per-batch ADVERSARIAL draw did not shave the blockers (they are the same six clips as
+# ever - hey series / cereal / searing pain / seaweed / Selma / Seth at 0.72-0.95 -
+# which is the strongest evidence so far that the boundary on those is not a sampling
+# problem). What the grid DID establish, at a budget nobody had read the adults at:
+# with the FA budget opened to 16/298 (5.4%, still inside the gate's <6%) the
+# positive-150 arm reads jay 35/35, jen 10/10, ryan 4-5/6, pooled 49-50/51 in BOTH
+# repeats against the baseline's 33-34 / 10 / 45-47. So the adults' ceiling is not the
+# training config - it is where the extend tail sits, and the operating point chosen
+# above it.

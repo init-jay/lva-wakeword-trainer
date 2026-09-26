@@ -1,0 +1,57 @@
+# mww probe: is jen's failure PRESENCE? If it is, raw real copies lift her - and
+# then the group-aware split becomes worth building.
+#
+# THE MEASUREMENT SO FAR (2026-09-24). On the ce1500f5 corpus jen reads 4/10 on the
+# holdout and 37/93 on her OWN training clips; on the fresh c6bb4cca corpus, 3/10 with
+# five clips at the int8 floor. oWW, whose corpus carries her at 10 copies (930 rows,
+# 7% of positives) against mWW's 1 copy (93 rows, 1.4%), reads her 8-10/10 from the
+# same recordings. jay - whose timbre the Piper voices approximate - is at 32-34/35 on
+# both engines. That is the presence hypothesis, and this sweep is the cheap test of it.
+#
+# WHY THIS IS A PROBE AND NOT A RECIPE. mWW splits its features PER FILE
+# (microwakeword/audio/clips.py:140-156, an HF random train_test_split), so N raw
+# copies of one recording scatter across train/validation/test: validation leak, and
+# mWW selects checkpoints on `average_viable_recall` - the metric the leak inflates.
+# train/corpus/real.py's NOTE is why `--real-copies` was never ported here and only
+# `--real-vtlp` was. So a PASS from this run does not mean "ship 10x copies"; it means
+# "presence is the lever, now build the split that keeps copies of one recording in one
+# split and re-measure properly". The HOLDOUT numbers are unaffected by the leak either
+# way - that is what makes this probe worth 20 minutes.
+#
+# ARMS: none here - one config (the current default: negative_class_weight 20,
+# 10k steps), two seeds. The comparison is against negative-class-weight=20 on
+# c6bb4cca (f2865bc-dirty-c6bb4cca-{hcbfb214,hdf27524}), which is CROSS-CORPUS and
+# therefore directional; the effect this probe looks for is 50+ points on one speaker,
+# far outside both the 10-point noise floor and the redraw caveat.
+wake_word: "hey seeree"
+target: mww
+corpus:
+  samples-per-voice: 60
+  negatives-per-voice: 12
+  kokoro-fraction: 0.3
+  piper-speakers: 12
+  real-copies: 10
+base:
+  training-steps: 10000
+  negative-class-weight: 20
+grid: {}
+repeats: 2
+base_seed: 700
+eval:
+  enabled: true
+  python: eval/.venv/bin/python
+  voice-holdout-set: data/corpus/eval/voice_holdout_tts
+
+# RESULT, 2026-09-24 (2 runs, corpus 574e978): PRESENCE IS THE LEVER. At threshold 0.5
+# the 10x runs read pooled 86% and 80% with 2.3% / 2.0% adversarial FA - jay 34/35 and
+# 33/35, JEN 8/10 and 7/10, ryan 2/6 and 1/6 - against the 1x corpus beside them (65-76%
+# pooled, jen 2-5/10, ryan 0-1/6). Read at matched FA (6 fires of 298) jen goes 2/10 ->
+# 5-7/10 and pooled 33/51 -> 37-41/51. Both repeats move, and the direction is the one
+# the presence arithmetic predicted.
+#
+# WHAT THE CAVEAT COST: with the leak in place these numbers came from a model whose
+# validation set contained twins of its own training clips. Re-running without it
+# (sweeps/mww-real-copies-leakfree*.yaml) initially swung and destabilised the result
+# (pooled 59-90%, one all-fire collapse at ROC AUC 0.17) - see the note in
+# train/mww/features.py's group_partition for the row-budget-vs-recording-budget
+# diagnosis that explains why, and which the 1000/1001 pair is the test of.

@@ -62,8 +62,15 @@ __pycache__/
 *.zip
 .claude/settings.json
 
-# training logs - one per run, written by the run-*.sh scripts into src/logs/
-logs/
+# training logs - one per run, written by the run-*.sh scripts into logs/
+# `logs/*` rather than `logs/` so the score curves can be re-included: git does not
+# descend into an excluded directory, so a negation under `logs/` would do nothing.
+# THIS BRANCH ONLY: main ignores all of logs/, because main carries no records.
+logs/*
+# The curve CSVs are the evidence every deploy/scorecards.jsonl row cites (`curve`).
+# Ignored, they make a row checkable only on the machine that wrote it - and the row is
+# the published number. `score_margins.py --csv` writes them; they are text and small.
+!logs/scorecurves/
 *.log
 
 # deployment staging dir: the RECORD is tracked, the blobs are not.
