@@ -43,7 +43,7 @@ class Engine:
     #   "serial"  - one render per clip, in the caller's order; piper needs this
     #               because its server holds exactly one voice loaded at a time,
     #               so order is a correctness property, not a preference
-    #               (train/corpus/piper.py: "VOICE IS THE OUTER LOOP ON PURPOSE").
+    #               (src/train/corpus/piper.py: "VOICE IS THE OUTER LOOP ON PURPOSE").
     batch_mode = "serial"
 
     def available(self):

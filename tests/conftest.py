@@ -3,7 +3,7 @@
 The modules under test bootstrap `sys.path` themselves in various shapes -
 src/train/corpus/__init__.py inserts src/tts-service/tts_protocol/ for the protocol
 client, src/train/corpus/manifest.py inserts the root for `from train.provenance
-import ...`, and the eval tools are invoked from an image where eval/src is
+import ...`, and the eval tools are invoked from an image where src/eval/src is
 mounted AS the `eval` package - but a bare `import train.mww.config`,
 `import wordlists` or `import eval.*` still needs the repo ROOT on the path,
 and pytest does not add the rootdir for you. Each test file repeats the

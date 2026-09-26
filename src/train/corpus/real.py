@@ -200,7 +200,7 @@ def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10
     train/validation/test partition was per FILE, so N copies of one recording scattered
     that speaker into all three splits, and mWW selects the weights it ships on
     validation average_viable_recall - a leak in the selection path, not just in a
-    number. train/mww/features.py now splits by recording identity (group_partition), so
+    number. src/train/mww/features.py now splits by recording identity (group_partition), so
     copies and their shifted variants always land together, and the port is safe: a
     thin voice moved in the expected direction on the holdout, the same direction
     the higher global weight measured here.
@@ -209,7 +209,7 @@ def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10
     mww's sampling weights are one number per FEATURE SET, and synthetic and real clips
     share the positives directory, so it cannot aim at one speaker. Per-speaker diversity
     is what --real-vtlp consumes here (vocal-tract-shifted copies are distinct clips by
-    construction). See the NOTE at the copy call in train/mww/corpus.py.
+    construction). See the NOTE at the copy call in src/train/mww/corpus.py.
     """
     real_samples_dir = Path(real_samples_dir)
     if not real_samples_dir.exists():

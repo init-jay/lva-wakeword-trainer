@@ -26,9 +26,9 @@ import eval_model as ev   # noqa: E402
 import score_margins as sm  # noqa: E402
 
 # The ONE grid definition, imported from the sweep that records it
-# (eval/src/eval_model.py:205): a local copy could drift and then this table
+# (src/eval/src/eval_model.py:205): a local copy could drift and then this table
 # would read thresholds the eval sweep never recorded - a number that does not
-# exist. (eval/src is not a package, hence the sys.path insert, the same way
+# exist. (src/eval/src is not a package, hence the sys.path insert, the same way
 # score_margins.py reaches it.)
 GRID = ev.SWEEP_GRID
 # The adversarial set the same way score_margins.py defines its FA axis

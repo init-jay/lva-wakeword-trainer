@@ -8,7 +8,7 @@
 # on ports inside a network that does not exist here. Threading a host mode through
 # it would leave both paths harder to read than two short scripts.
 #
-# WHAT IT SHARES: the same train/oww/train.py, the same patches, the same pinned torch
+# WHAT IT SHARES: the same src/train/oww/train.py, the same patches, the same pinned torch
 # 2.5.1. That is deliberate. This exists to measure ONE variable - the macOS wheel
 # against the linux/arm64 one - and anything else that differs between the two paths
 # contaminates the answer; the measurements are in SPEED.md.
@@ -36,19 +36,19 @@
 # serial lane - the engine holds one model resident and takes every call under
 # one lock, so client threads queue instead of run (21.66 clips/s measured for
 # the single instance in src/scripts/bench_tts.py, improvement.md P2.1). PIPER_URLS
-# takes the comma-joined list scripts/start-tts-fleet.sh N prints, and the
+# takes the comma-joined list src/scripts/start-tts-fleet.sh N prints, and the
 # corpus shards the fleet BY VOICE - each model pinned to one instance for the
 # whole run (corpus/piper.py, PiperFleet):
 #
 #     PIPER_URLS="$(./src/scripts/start-tts-fleet.sh 4)" \
 #         ./src/scripts/run-oww-training-applesilicon.sh "hey seeree" --piper-fraction 0.3
 #
-# SMOKE=1: a few-minute end-to-end check that a changed train/ tree still runs the
+# SMOKE=1: a few-minute end-to-end check that a changed src/train/ tree still runs the
 # whole pipeline: corpus reuse, feature recompute, 200-step training, real tflite
 # conversion. No TTS server - the corpus is the held-fixed input and the engines'
 # health is probed at the start of a normal run anyway. The model lands in
 # output/<wake>/oww/smoke-<stamp>/ and the canonical model, the .last_run_tag and
-# the archive stay untouched (train/oww/train.py --smoke):
+# the archive stay untouched (src/train/oww/train.py --smoke):
 #
 #     SMOKE=1 ./src/scripts/run-oww-training-applesilicon.sh "hey seeree"
 
@@ -135,7 +135,7 @@ unset KOKORO_EXTERNAL
 
 # PIPER_URL
 #
-# Same contract as KOKORO_URL: train/oww/train.py's --piper-url defaults to
+# Same contract as KOKORO_URL: src/train/oww/train.py's --piper-url defaults to
 # ${PIPER_URL}, so the script exports it only when it has an opinion, and an
 # explicit --piper-url on the command line always wins over both.
 #
@@ -275,7 +275,7 @@ fi
 [[ -n "$SMOKE_OUTPUT" ]] && MODEL="$SMOKE_OUTPUT/${SAFE_NAME}.onnx"
 
 # THE CONTAINER MAY OWN THESE FILES. Both paths write data/corpus/ and output/, and
-# the trainer images run as root - train/ownership.py hands output/ back afterwards,
+# the trainer images run as root - src/train/ownership.py hands output/ back afterwards,
 # but data/corpus/ is left as root wrote it. A host run then fails on permissions
 # somewhere unhelpful, so check here where the fix is obvious.
 for d in "data/corpus/${SAFE_NAME}/oww" "output/${SAFE_NAME}/oww"; do

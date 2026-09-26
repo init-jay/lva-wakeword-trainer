@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Prepare the HOST microWakeWord trainer on Apple Silicon. Setup only - it
-# trains nothing; scripts/run-mww-training-applesilicon.sh does that.
+# trains nothing; src/scripts/run-mww-training-applesilicon.sh does that.
 #
 
 #

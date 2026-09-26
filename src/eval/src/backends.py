@@ -96,7 +96,7 @@ class Backend:
     #
     # `start` + `feed` are how the runtime is actually driven; `_stream` below is
     # just those two in a loop over a fixed clip. Split out so that LIVE detection
-    # (preflight/test_model.py, microphone, no end) and OFFLINE scoring (eval, whole
+    # (src/preflight/test_model.py, microphone, no end) and OFFLINE scoring (eval, whole
     # clips) go through one implementation rather than two. That matters more here
     # than it usually would: an earlier version of this file reimplemented the
     # runtime and got it subtly wrong, and a preflight that streams differently from
@@ -255,12 +255,12 @@ class OpenWakeWordOnnxBackend(Backend):
 
     # predict_clip() wants a whole clip, so this backend has no incremental form.
     # No loss for preflight: a live check exists to exercise what the device runs,
-    # and this path deliberately is not that. Convert with train/oww/onnx2tflite.py
+    # and this path deliberately is not that. Convert with src/train/oww/onnx2tflite.py
     # and preflight the .tflite instead.
     def start(self):
         raise NotImplementedError(
             "the .onnx path scores whole clips and cannot stream live. It is also "
-            "not the deployment runtime - convert with train/oww/onnx2tflite.py "
+            "not the deployment runtime - convert with src/train/oww/onnx2tflite.py "
             ".tflite, which is what the device would run.")
 
     def feed(self, pcm_bytes):

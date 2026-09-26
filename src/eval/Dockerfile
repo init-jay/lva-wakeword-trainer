@@ -44,7 +44,7 @@ RUN pip install --no-cache-dir \
 # It is here because every ship candidate so far is a .onnx and pyopen-wakeword
 # is TFLite-only, so without this there is nothing to compare a microWakeWord model
 # against. Numbers from it are comparable with the notebook's seventeen runs and are
-# not a deployment measurement; eval/backends.py labels them that way in every report.
+# not a deployment measurement; src/eval/src/backends.py labels them that way in every report.
 #
 # --no-deps: openWakeWord's setup.py requires tflite-runtime on Linux, which has no
 # aarch64 wheel and which nothing here needs - the ONNX path uses onnxruntime, and

@@ -50,7 +50,7 @@ import numpy as np
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MODELS = os.path.join(REPO, "src/train/openwakeword/openwakeword/resources/models")
 
-# The real feature-stage shapes (train/oww/train.py defaults):
+# The real feature-stage shapes (src/train/oww/train.py defaults):
 BATCH = 16                 # augmentation_batch_size
 SAMPLES = 16000 * 6 // 5   # total_length 1.2 s at 16 kHz = 19,200
 NCPU = max(1, (os.cpu_count() or 2) // 2)   # train.py: os.cpu_count()//2

@@ -46,7 +46,7 @@ them many times, which is the wrong shape for the number that picks the weights.
 partition is a stable hash (hashlib, not `hash()` - that one is salted per process, which
 would make the split move between runs of identical input) over those identities, with no
 seed input at all, so the same corpus gives the same split every run and no RNG state is
-consumed by the corpus order the way Clips' shuffle did. See train/mww/split.py for why
+consumed by the corpus order the way Clips' shuffle did. See src/train/mww/split.py for why
 "no seed" is the point rather than an omission.
 
     python -m train.mww.features --wake-word "hey seeree"
@@ -72,7 +72,7 @@ from microwakeword.audio.spectrograms import SpectrogramGeneration  # noqa: E402
 
 from train.mww import config as mww_config  # noqa: E402
 # The partition rules live in their own dependency-free module so they can be
-# tested without microwakeword; see train/mww/split.py.
+# tested without microwakeword; see src/train/mww/split.py.
 from train.mww.split import (  # noqa: E402, F401
     group_partition, partition_indices, recording_identity)
 
@@ -118,7 +118,7 @@ def build_split(clips_dir: Path, out_root: Path, name: str, impulse, background,
         raise SystemExit(
             f"ERROR: Clips split {clips_dir} itself - upstream no longer leaves "
             "split_clips unset when random_split_seed is None, so the per-FILE split "
-            "train/mww/split.py exists to replace is back. Re-pin the clone or move the "
+            "src/train/mww/split.py exists to replace is back. Re-pin the clone or move the "
             "partition to where upstream now expects it.")
     if len(paths) != len(clips.clips):
         raise SystemExit(
@@ -191,7 +191,7 @@ def main():
                         "jitter) for the spectrogram pass (default: %(default)s = "
                         "unseeded). The train/validation/test partition takes no "
                         "seed at all - it is a hash of the recording identities "
-                        "(train/mww/split.py) so that it cannot move when this one "
+                        "(src/train/mww/split.py) so that it cannot move when this one "
                         "does; this covers the augmentation, which was the one "
                         "unseeded draw between the corpus and the model.")
     p.add_argument("--clean", action="store_true",

@@ -13,7 +13,7 @@
 # the serial wall of a Mac run). N instances should land near N x that, and
 # src/scripts/bench_tts.py is the instrument to confirm it.
 #
-# WHAT THE CONSUMER DOES WITH IT: the corpus layer (train/corpus/piper.py,
+# WHAT THE CONSUMER DOES WITH IT: the corpus layer (src/train/corpus/piper.py,
 # PiperFleet) shards the fleet BY VOICE - each model, all of its speakers,
 # pinned to one instance for the whole run. Never round-robin: a request
 # naming a model the instance does not hold costs a 0.6 s reload, and

@@ -2,7 +2,7 @@
 """Where the evaluation tools look for held-out recordings, corpora and models.
 
 One module rather than a default string per tool, because the samples/holdout
-split is a SAFETY PROPERTY and not a naming convention. `train/corpus/real.py`
+split is a SAFETY PROPERTY and not a naming convention. `src/train/corpus/real.py`
 globs the samples tree RECURSIVELY for positives, so a holdout nested anywhere
 inside it is trained on, and every number this harness reports silently becomes
 training accuracy - it overstated detection by ~10 points during the tuning
@@ -73,8 +73,8 @@ HOLDOUT_DIR = RECORDINGS_DIR / "holdout"
 # .tflite it names have to be moved as a pair - `"model"` in the JSON is a bare
 # sibling filename, so a manifest separated from its model is a broken model.
 #
-# Both trainers write here now: train/oww/train.py exports to output/<w>/oww/, and
-# train/mww/ trains into output/<w>/mww/<run-tag>/, one directory per run because
+# Both trainers write here now: src/train/oww/train.py exports to output/<w>/oww/, and
+# src/train/mww/ trains into output/<w>/mww/<run-tag>/, one directory per run because
 # microWakeWord refuses to train into an existing one. The commit-tagged files listed
 # above are the collected form - run-oww-training.sh produces them for the .onnx.
 #

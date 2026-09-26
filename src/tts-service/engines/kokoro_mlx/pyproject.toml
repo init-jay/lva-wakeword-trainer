@@ -13,7 +13,7 @@ dependencies = [
     "kokoro-mlx",
     # misaki's G2P loads this spacy model at first render, and the fork's own
     # downloader installs it into whatever venv `uv` happens to pick rather
-    # than this one (measured: it landed in preflight/.venv), so the first clip
+    # than this one (measured: it landed in src/preflight/.venv), so the first clip
     # of a run fails with an opaque [E050]. Declaring it here puts it in THIS
     # venv. 3.8.0 is what the fork's downloader fetches.
     "en-core-web-sm==3.8.0",

@@ -13,7 +13,7 @@
 #
 # Measured on an M1 Max with src/scripts/bench_tts.py and a direct kokoro_tts_batch probe,
 # rendering "hey seeree" through Kokoro-FastAPI v0.8.1. BATCHED, because that is how
-# train/oww/train.py actually calls it (--tts-batch defaults to 16):
+# src/train/oww/train.py actually calls it (--tts-batch defaults to 16):
 #
 #     host,   cpu,  batched      88 ms/clip   11.4 clips/s   <- best, and the default
 #     host,   mps,  UNbatched   110 ms/clip    9.1 clips/s

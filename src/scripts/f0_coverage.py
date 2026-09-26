@@ -34,7 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src" / "scripts"))
 from measure_voice_f0 import estimate_f0  # noqa: E402
 
-# The targets the pipeline produces - the same pair train/provenance.py:TARGETS names,
+# The targets the pipeline produces - the same pair src/train/provenance.py:TARGETS names,
 # spelled out here so this tool stays importable without the repo root on sys.path.
 # Ad-hoc copies a session leaves beside them (a probe corpus, a pre-fix backup) are not
 # corpora to profile by default; --corpus still reaches any of them explicitly.

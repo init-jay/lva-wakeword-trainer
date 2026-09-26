@@ -10,7 +10,7 @@ threshold_for_fa's contract is exact-count, and the bootstrap is what
 gates the "best model" line on real evidence instead of a coin flip
 (compare_models main()).
 
-IMPORT: on the host, eval/ has no __init__.py - the eval IMAGE mounts
+IMPORT: on the host, src/eval/ has no __init__.py - the eval IMAGE mounts
 src/eval/src as the package `eval` (src/eval/docker-compose.yml), and both
 compare_models.py and eval_model.py do `from eval import backends, ...`,
 which only resolves in that layout. We replicate it here: register a bare

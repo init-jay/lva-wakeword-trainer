@@ -4,13 +4,13 @@ version = "0.1.0"
 description = "Step 2 on the host, for Apple Silicon - the trainer the CUDA images cannot be"
 requires-python = ">=3.11,<3.13"
 
-# THE THIRD HOST ENVIRONMENT, after record/ and preflight/, and for a different
+# THE THIRD HOST ENVIRONMENT, after src/record/ and src/preflight/, and for a different
 # reason than either of those. They run on the host because they need a MICROPHONE.
 # This one runs on the host because Docker Desktop does not pass the Metal device
 # through, so a containerised "MPS" build silently gets CPU; the Metal question is
 # closed, not pending - SPEED.md says why.
 #
-# WHY IT IS NOT AT train/host/. `COPY train/ ./train/` in both trainer Dockerfiles
+# WHY IT IS NOT AT src/train/host/. `COPY src/train/ ./src/train/` in both trainer Dockerfiles
 # would sweep a .venv into the images, and a macOS torch install is several GB. The
 # .dockerignore keeps it out of the build context too, so the mistake needs two
 # errors rather than one.
@@ -40,7 +40,7 @@ dependencies = [
     "tqdm",
     "pyyaml",
 
-    # The TTS PROTOCOL client: train/corpus/kokoro.py and piper.py speak it over
+    # The TTS PROTOCOL client: src/train/corpus/kokoro.py and piper.py speak it over
     # raw TCP sockets. Deliberately NO engine dependency here - the engines run
     # in their own uv projects (src/tts-service/engines/), which is exactly the split
     # the Docker images make. (requests is gone for the same reason: the client

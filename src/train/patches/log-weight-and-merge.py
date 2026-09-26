@@ -24,7 +24,7 @@ CLAUDE.md). This patch prints one line per merged checkpoint plus a summary:
     # MERGE_AUDIT merged step=<training_step_ndx> seq=<n>
     # MERGE_AUDIT cleared=<k>/<total> percentile=90 steps=<comma-list>
 
-The wrapper (train/oww/train.py) parses these from the subprocess stdout and
+The wrapper (src/train/oww/train.py) parses these from the subprocess stdout and
 files them in <tag>.config.json as effective_max_negative_weight (the
 per-sequence list) and merged_checkpoints (the steps list) - appended AFTER
 the run tag is computed, because they are recorded outcomes of the run, not
@@ -82,7 +82,7 @@ edits = [
      "        val_steps = np.linspace(steps-int(steps*0.25), steps, 20).astype(np.int64)\n",
      "        # PATCHED: audit the negative-weight schedule (improvement.md P1.3):\n"
      "        # sequence 1 uses the requested weight as-is; sequences 2 and 3 may\n"
-     "        # double it (below). Machine-readable so train/oww/train.py can file\n"
+     "        # double it (below). Machine-readable so src/train/oww/train.py can file\n"
      "        # it in <tag>.config.json. Print only - no RNG draw, no flow change.\n"
      '        print(f"# WEIGHT_AUDIT sequence=1 requested={max_negative_weight} "\n'
      '              f"doubled=false effective={max_negative_weight}", flush=True)\n'

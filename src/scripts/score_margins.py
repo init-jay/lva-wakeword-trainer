@@ -33,7 +33,7 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src" / "eval" / "src"))
 
-import backends                      # noqa: E402  (eval/src is the module home on a host)
+import backends                      # noqa: E402  (src/eval/src is the module home on a host)
 import eval_model as ev              # noqa: E402
 import paths                         # noqa: E402
 

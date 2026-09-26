@@ -148,7 +148,7 @@ COPY src/tts-service/ ./src/tts-service/
 #                 Dockerfile.eval already calls out.
 
 # Fail the build rather than a training run if the package does not import.
-# train.corpus.kokoro is what pulls in the protocol client (train/corpus/__init__.py
+# train.corpus.kokoro is what pulls in the protocol client (src/train/corpus/__init__.py
 # adds it to sys.path), so this single line checks that copy too.
 RUN python3 -c "import sys; sys.path.insert(0, '/app/src'); import train.corpus.augment, train.corpus.negatives, \
                        train.corpus.real, train.corpus.piper, \
