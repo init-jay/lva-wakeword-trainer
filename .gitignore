@@ -69,11 +69,16 @@ __pycache__/
 .claude/settings.json
 
 # training logs - one per run, written by the run-*.sh scripts into logs/
-# (the top-level dir is the only one: a split into src/logs/ went unnoticed for
-# months while the bare pattern matched at any depth; the contents-only form
-# below also keeps the .gitkeep tracked, as above)
+# `logs/*` rather than `logs/` so files can be re-included: git does not descend
+# into an excluded directory, so a negation under `logs/` would do nothing.
+# The .gitkeep is re-included on every branch; the score curves are THIS BRANCH
+# ONLY - main carries no records, so its negation list is shorter.
 logs/*
 !logs/.gitkeep
+# The curve CSVs are the evidence every deploy/scorecards.jsonl row cites (`curve`).
+# Ignored, they make a row checkable only on the machine that wrote it - and the row is
+# the published number. `score_margins.py --csv` writes them; they are text and small.
+!logs/scorecurves/
 *.log
 
 # deployment staging dir: the RECORD is tracked, the blobs are not.

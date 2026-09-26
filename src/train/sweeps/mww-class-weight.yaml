@@ -1,0 +1,56 @@
+# mww, class weights: does the negative pressure cost the adults their detections?
+#
+# WHY THIS GRID (2026-09-24, margin analysis in tools/score_margins.py). On the
+# ce1500f5 corpus the mWW model reads jay 34/35 and jen 4/10 at the matched-FA
+# threshold 0.60 (adv FA 6/298) - and jen sits at 37/93 on her OWN training clips
+# with a median peak of 0.327. Five of her ten holdout clips peak at 0.14, which is
+# the int8 floor: the model does not fire on her voice at all, so no cutoff choice
+# recovers them. The config's negative_class_weight is 20 against
+# positive_class_weight 1 - a 20:1 penalty on false accepts, and the one knob in
+# this trainer that trades detection for precision without touching the corpus.
+#
+# CONFIG ONLY, so the corpus is frozen (ce1500f5 reused, no TTS) and every point is
+# a warm ~7-minute train. The point being tested: if 20:1 is what suppresses the
+# weak timbres, halving it lifts them; if it is presence, the curve moves at neither
+# point and the answer is the corpus arm (real-vtlp for jen).
+# The `corpus:` block MUST restate the shaping of the corpus it freezes: the sweep's
+# --skip verification diffs the manifest against these flags and refuses on a
+# mismatch, which is the point.
+#
+# THIS SWEEP BUILDS ITS OWN CORPUS (found the hard way, 2026-09-24). The ce1500f5
+# corpus on disk pre-dates the mww --real-vtlp port (3853775), so its manifest has no
+# shaping.real_vtlp key, and the strict reuse check refused it:
+#   "requested real_vtlp={}, corpus manifest has no shaping.real_vtlp - rebuild it".
+# Semantically {} and 'absent' are the same corpus, but the check is deliberately
+# literal, so ce1500f5 moved to data/corpus/hey_seeree/mww.old-ce1500f5 and point 0
+# renders a fresh one. Consequence to remember: the new corpus gets a new id, so the
+# 42f8982 readings are NOT comparable to these - the baseline point in this grid, on
+# the same audio, is the reference (CLAUDE.md: two runs are comparable at all only if
+# they share a corpus id).
+# Engines must be reachable for the probe (Piper 8898, Kokoro 8900).
+wake_word: "hey seeree"
+target: mww
+corpus:
+  samples-per-voice: 60
+  negatives-per-voice: 12
+  kokoro-fraction: 0.3
+  piper-speakers: 12
+base:
+  training-steps: 10000
+grid:
+  negative-class-weight: ["20", "8"]
+repeats: 2
+base_seed: 300
+eval:
+  enabled: true
+  python: eval/.venv/bin/python
+  voice-holdout-set: data/corpus/eval/voice_holdout_tts
+
+# RESULT, 2026-09-24 (4 runs, corpus 6bb4cca): NOT a win. At the arms' own
+# matched-FA budget, negative-class-weight 20 reads det 72.5% [68.6-76.5] and 8 reads
+# 66.7%; jay 88.6% -> 92.9% and ryan 16.7% -> 8.3% are both inside the 10-point repeat
+# spread, and JEN IS IDENTICAL - 7/20 (35.0%) in both arms. A lever that leaves the
+# failing speaker untouched across two repeats has not touched her: the class weight
+# moves the precision/recall trade, and her problem is that the model does not fire on
+# her voice at all (5 of 10 holdout clips at the int8 floor, 37/93 on her own training
+# clips). That is presence, which is the next file's question.

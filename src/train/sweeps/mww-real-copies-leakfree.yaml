@@ -1,0 +1,78 @@
+# mww, 10x real clips WITH THE IDENTITY-AWARE SPLIT: the same corpus and the same
+# config as sweeps/mww-real-copies-probe.yaml, so the only thing that differs between
+# the two specs is who decided the split.
+#
+# WHY THIS RUN EXISTS. The probe measured jen 3/10 -> 8/10, ryan 0/6 -> 2/6, jay held at
+# 34/35, pooled 86% at threshold 0.5 with 2.3% adversarial FA (corpus 574e978, seeds
+# 700/701) - but it did it WITH the validation leak: N raw copies of one recording,
+# scattered per file by Clips' shuffle, so some of a training clip's twins sat in
+# validation, and mWW picks the weights it ships on validation average_viable_recall.
+# A number from that run is still a real holdout number (the holdout is outside the
+# corpus entirely), but it comes from a model whose selection was partly aimed at leaked
+# data. train/mww/features.py's group_partition now keeps every copy and every
+# vocal-tract variant of a recording in one split - verified on this corpus: 3,310 real
+# rows -> 331 recordings, 0 straddling - and this spec re-runs on top of it.
+#
+# New base_seed on purpose: the run tag names commit + corpus + config, and none of the
+# three changed (the split policy is not in the config, and the change is uncommitted,
+# so both runs read f2865bc-dirty). Reusing 700/701 would hit the ledger's skip and file
+# nothing; 800/801 are the same two configurations under a different identity. That also
+# means the ONLY durable record of which split policy produced a tag is the seed and this
+# file - so the split change wants committing before either tag is quoted.
+#
+# WHAT DECIDES IT: if the leak-free runs land within the 10-point repeat spread of the
+# probe, presence is the lever and the leak was not doing the work - 10x real copies
+# becomes the mww recipe and the note in train/corpus/real.py that forbade the port
+# retires. If they land materially worse, the probe's gain was partly
+# selection-on-leaked-data, and the honest fix for jen is more recordings, not copies.
+wake_word: "hey seeree"
+target: mww
+corpus:
+  samples-per-voice: 60
+  negatives-per-voice: 12
+  kokoro-fraction: 0.3
+  piper-speakers: 12
+  real-copies: 10
+base:
+  training-steps: 10000
+  negative-class-weight: 20
+grid: {}
+repeats: 2
+base_seed: 900
+eval:
+  enabled: true
+  python: eval/.venv/bin/python
+  voice-holdout-set: data/corpus/eval/voice_holdout_tts
+
+# RESULT, 2026-09-24 - and the answer so far is "mWW training is the noisy part, not the
+# split". Six runs of one 10x configuration, two split policies:
+#
+#   seeds  split           pooled@0.5   adv FA@0.5   jay      jen     ryan
+#   700    per-file (leak)   86%          2.3%       34/35    8/10    2/6
+#   701    per-file (leak)   80%          2.0%       33/35    7/10    1/6
+#   800    identity (rows)  ALL-FIRE     100.0%        -        -      -     ROC AUC 0.17
+#   801    identity (rows)   90%          8.4%       35/35    9/10    2/6
+#   900    identity (rows)   71%          2.0%       30/35    6/10    0/6
+#   901    identity (rows)   59%          1.0%       26/35    4/10    0/6
+#   1000   identity (recs)   90%          7.0%       35/35    8/10    3/6
+#   1001   identity (recs)   75%          8.1%       34/35    4/10    0/6
+#
+# (the "identity (rows)" pair 800/801 is sweeps/mww-real-copies-leakfree.yaml at
+#  base_seed 800, the 900/901 pair is this file's -b copy, and 1000/1001 is the -c copy
+#  after group_partition moved its budget from rows to recordings; all three files are
+#  the same spec apart from the seed, kept as run here because the ledger names runs by
+#  seed and the split policy is NOT in the run tag - see the note above.)
+#
+# WHAT HOLDS UP: jen moves. Every 10x run except the collapsed one reads her 4-9/10
+# against 1x's 2-5/10, and jay 26-35/35 against 1x's 30-34/35 - pooled 59-90% against
+# the 1x corpus's 65-76%. Presence is the lever, on both split policies.
+# WHAT DOES NOT HOLD UP: the level. The spread across eight 10x runs is 31 points of
+# pooled detection, one run selected an all-fire model, and the identity-split runs'
+# false-accept tails sit higher at matched FA (two of four never reach 6 fires of 298
+# anywhere on the threshold grid). At 1x the same instability shows up in the
+# negative-class-weight sweep beside this one (one of its four runs read 9.7% FA at 0.5).
+# So the honest next measurement is not a new knob: it is n=4 repeats of 1x-vs-10x under
+# ONE split policy, read per speaker at matched FA, which is the only way to say whether
+# the split policy matters at all or whether both arms are drawing from the same wide
+# distribution. Until then this file is a probe with a direction, not a recipe, and
+# train/mww/corpus.py's --real-copies default stays 1.
