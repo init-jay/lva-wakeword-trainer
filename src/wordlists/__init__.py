@@ -39,14 +39,15 @@ Both trainers and the eval harness read this, so it imports nothing from either.
 
 * THE TRAINING CORPORA AND THE SYNTHETIC EVAL POSITIVES MUST NOT SHARE A VOICE.
   The phrase rule above keeps the two corpora from memorising each other's TEXT;
-  `voice_holdout.yaml` (the second file in this directory) keeps them from
+  `voice_holdout:` section keeps them from
   sharing TIMBRE. The training corpora build from every usable engine voice, so
   an eval positive rendered from one of those voices is inside the training
   distribution no matter how novel its phrasing - and the only axis left to
-  generalise on, cheaply and with a real n, is the voice. The holdout list is
-  a tracked file beside the wordlists because a list that lives only in a
-  comment drifts: the trainers exclude it from the live catalog and fail when
-  an entry the catalog no longer offers, which is what pins it.
+  generalise on, cheaply and with a real n, is the voice. The holdout section
+  is a tracked part of the wordlist, one configuration per wake word, because
+  a list that lives only in a comment drifts: the trainers exclude it from the
+  live catalog and fail when an entry the catalog no longer offers, which is
+  what pins it.
 """
 
 from pathlib import Path
@@ -194,6 +195,7 @@ def validate(data):
     problems.extend(_disjointness_problems(data, seen))
     problems.extend(_train_problems(data))
     problems.extend(_voice_problems(data))
+    problems.extend(_voice_holdout_problems(data))
     return problems
 
 
@@ -291,54 +293,71 @@ def _voice_problems(data):
 # Voice holdout (improvement.md P1.2)
 # ---------------------------------------------------------------------------
 
-# One file for the whole REPO, not one per wake word: a voice is an engine
-# property, not a property of the phrase it renders, and the same reserved
-# voice set serves every wake word this machine trains.
-VOICE_HOLDOUT_NAME = "voice_holdout.yaml"
+# A SECTION of the per-wake-word wordlist, not a second file: one configuration
+# per wake word, and a voice reservation belongs to the word that measured it.
+# A wordlist that does not carry the section is a no-op - the same way an empty
+# entry in the per-wake-word mispronunciation tables is - deliberately not an
+# error, because a fresh word before its first holdout reservation must still
+# train. The trainers print that they ran with no holdout.
+VOICE_HOLDOUT_ENGINES = ("kokoro", "piper")
 
 
-def voice_holdout_path():
-    """wordlists/voice_holdout.yaml - the tracked voice-holdout list."""
-    return WORDLIST_DIR / VOICE_HOLDOUT_NAME
+def voice_holdout(data):
+    """The voices the wordlist reserves OUT of every corpus build for this word.
 
-
-def load_voice_holdout(path=None):
-    """The voices reserved OUT OF every corpus build.
-
-    Returns {"kokoro": [voice, ...], "piper": [(voice, speaker-or-None), ...]}.
+    `data` is a loaded wordlist. Returns
+    {"kokoro": [voice, ...], "piper": [(voice, speaker-or-None), ...]} -
+    both lists empty when the wordlist does not carry the section, which is
+    the no-op: call sites check the lists, never the section's presence.
     """
-    if path is None:
-        path = voice_holdout_path()
-    path = Path(path)
-    if not path.is_file():
-        # No tracked file: the exclusion is a no-op, the same way an empty
-        # entry in the per-wake-word mispronunciation tables is. Deliberately
-        # not an error - a checkout of a fresh wake word predating this file
-        # must still train. The trainers print that they ran with no holdout.
-        return {}
-    data = yaml.safe_load(path.read_text()) or {}
-    kokoro = [str(v).strip() for v in (data.get("kokoro") or []) if str(v).strip()]
+    section = data.get("voice_holdout") or {}
+    if not isinstance(section, dict):
+        raise WordlistError(f"{data.get('_path')}: `voice_holdout:` must be a "
+                            f"mapping of engine -> voice list")
+    kokoro = [str(v).strip() for v in (section.get("kokoro") or []) if str(v).strip()]
     piper = []
-    for entry in data.get("piper") or []:
+    for entry in section.get("piper") or []:
         entry = str(entry).strip()
         if not entry:
             continue
         # The "voice:speaker" spelling of the exclusion tables in
-        # train/corpus/piper.py: a bare name is a single-speaker model.
+        # src/train/corpus/piper.py: a bare name is a single-speaker model.
         voice, _sep, speaker = entry.partition(":")
         piper.append((voice.strip(), speaker.strip() or None))
     return {"kokoro": kokoro, "piper": piper}
+
+
+def _voice_holdout_problems(data):
+    """The optional voice-holdout section: checked for shape when present."""
+    section = data.get("voice_holdout")
+    if section is None:
+        return []
+    if not isinstance(section, dict):
+        return ["`voice_holdout:` must be a mapping of engine -> voice list"]
+    unknown = set(section) - set(VOICE_HOLDOUT_ENGINES)
+    if unknown:
+        return [f"unknown voice-holdout engines {sorted(unknown)}; the trainers and "
+                f"the ranking-set renderer only read {list(VOICE_HOLDOUT_ENGINES)}"]
+    problems = []
+    for engine in VOICE_HOLDOUT_ENGINES:
+        entries = section.get(engine)
+        if entries is None:
+            continue
+        if not isinstance(entries, list) or any(not str(e).strip() for e in entries):
+            problems.append(f"voice_holdout.{engine} must be a list of non-empty "
+                            f"voice names (piper: 'voice:speaker' pairs)")
+    return problems
 
 
 def exclude_voice_holdout(engine, catalog, holdout=None):
     """Drop the holdout entries from a live engine catalog -> (kept, missing).
 
     `engine` is "kokoro" (catalog = voice strings) or "piper" (catalog =
-    (voice, speaker-or-None) pairs); `holdout` is a load_voice_holdout()
-    result (loaded from the tracked file when not given).
+    (voice, speaker-or-None) pairs); `holdout` is a voice_holdout() result,
+    both lists empty when the wordlist carries no section (the no-op).
 
     `missing` is the failure to read: a holdout entry the catalog does not
-    offer means the tracked list has drifted from the engine, and the caller
+    offer means the section has drifted from the engine, and the caller
     must exit. The catalog is the source of truth - a stale list is an error,
     not a silent skip, because the silent outcome is the bad one: the
     exclusion ends up empty and the corpus quietly trains on a voice that is
@@ -350,14 +369,14 @@ def exclude_voice_holdout(engine, catalog, holdout=None):
     train/corpus/piper.py; a "voice:speaker" entry removes just that pair.
     """
     if holdout is None:
-        holdout = load_voice_holdout()
+        holdout = {}
     entries = holdout.get(engine) or []
     catalog = list(catalog)
     if not entries:
         return catalog, []
 
     # Normalise both sides to (voice, speaker-or-None) pairs: piper entries
-    # arrive as tuples from load_voice_holdout, kokoro as bare strings.
+    # arrive as tuples from voice_holdout, kokoro as bare strings.
     pairs = [v if isinstance(v, tuple) else (v, None) for v in catalog]
     norm = [e if isinstance(e, tuple) else (e, None) for e in entries]
     missing = []

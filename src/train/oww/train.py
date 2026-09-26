@@ -76,9 +76,8 @@ from train.corpus.real import (  # noqa: E402
 )
 from train import ownership, provenance  # noqa: E402
 from train.corpus import manifest as corpus_manifest  # noqa: E402
-from wordlists import (exclude_voice_holdout, load_voice_holdout,  # noqa: E402
-                       voice_exclusions)
-from wordlists import voice_holdout_path  # noqa: E402
+from wordlists import (exclude_voice_holdout, voice_exclusions,  # noqa: E402
+                       voice_holdout)
 
 warnings.filterwarnings("ignore", message="Reached EOF prematurely")
 
@@ -1230,36 +1229,36 @@ def main():
             print("ERROR: every available voice is excluded!")
             sys.exit(1)
 
-    # THE VOICE HOLDOUT (improvement.md P1.2): the voices src/wordlists/
-    # voice_holdout.yaml reserves for the synthetic ranking set are excluded
-    # from every corpus build, so that set stays voice-disjoint from
+    # THE VOICE HOLDOUT (improvement.md P1.2): the voices the wordlist's
+    # `voice_holdout:` section reserves for the synthetic ranking set are
+    # excluded from every corpus build, so that set stays voice-disjoint from
     # training. The live catalog is the source of truth: an entry it no
-    # longer offers means the tracked list has drifted from the engine, and
+    # longer offers means the section has drifted from the engine, and
     # that is an error - the silent outcome is the exclusion ending up empty
     # and the corpus quietly training on a held-out voice.
-    # No tracked file (a checkout predating it) is a no-op, and says so.
+    # A wordlist without the section is a no-op, and says so.
     # Runs BEFORE the corpus-mode decision because the exclusion is part of
     # what the reuse check validates: the cf9c065b reuse, 2026-09-22, was a
     # run whose effective voice set differed from the corpus on exactly this
     # line and nothing else.
-    holdout = load_voice_holdout()
+    holdout = voice_holdout(wordlist)
     holdout_kokoro = holdout.get("kokoro") or []
     if holdout_kokoro:
         n_before = len(kokoro_voices)
         kokoro_voices, holdout_missing = exclude_voice_holdout(
             "kokoro", kokoro_voices, holdout)
         if holdout_missing:
-            sys.exit(f"ERROR: the voice holdout ({voice_holdout_path()}) names "
+            sys.exit(f"ERROR: the voice holdout ({wordlist['_path']}) names "
                      f"Kokoro voice(s) the live catalog does not offer: "
                      f"{holdout_missing}. The catalog is the source of "
                      f"truth - update or delete the stale entries in the "
-                     f"tracked list rather than rebuilding a corpus whose "
-                     f"holdout cannot be enforced.")
+                     f"wordlist's `voice_holdout:` section rather than "
+                     f"rebuilding a corpus whose holdout cannot be enforced.")
         print(f"  Excluding {n_before - len(kokoro_voices)} voice-holdout "
               f"voice(s) reserved for the synthetic ranking set: "
               f"{', '.join(holdout_kokoro)}")
     else:
-        print(f"  NOTE: no voice holdout at {voice_holdout_path()} - the "
+        print(f"  NOTE: no voice-holdout section in {wordlist['_path']} - the "
               f"synthetic ranking set has no reserved voices")
 
     # The Piper half, resolved here for the same reason (and only when it is
@@ -1281,11 +1280,11 @@ def main():
             piper_voices, holdout_missing = exclude_voice_holdout(
                 "piper", piper_voices, holdout)
             if holdout_missing:
-                sys.exit(f"ERROR: the voice holdout ({voice_holdout_path()}) "
+                sys.exit(f"ERROR: the voice holdout ({wordlist['_path']}) "
                          f"names Piper (voice, speaker) pair(s) the live "
                          f"audited selection does not carry: {holdout_missing}. "
-                         f"Update the tracked list to match the catalog this "
-                         f"corpus is built from.")
+                         f"Update the wordlist's `voice_holdout:` section to "
+                         f"match the catalog this corpus is built from.")
 
     # === CORPUS MODE: reuse the frozen corpus or rebuild it =====================
     # P0.3: during a sweep the corpus is a HELD-FIXED INDEPENDENT VARIABLE. The
