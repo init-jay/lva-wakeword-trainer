@@ -28,8 +28,8 @@
 #
 # Neither is a claim that this is as fast as a 3090. It is a claim about which of
 # the 3090's advantages were real. Measure before believing either way; the run
-# scripts print wall time; the CUDA figures to beat are in SPEED.md (oww 28m59s,
-# mww 28m02s).
+# scripts print wall time; the CUDA figures to beat are in SPEED.md on branch
+# train/hey_seeree.
 #
 FROM python:3.12-slim
 

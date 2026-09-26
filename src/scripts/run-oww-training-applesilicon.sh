@@ -11,7 +11,7 @@
 # WHAT IT SHARES: the same train/oww/train.py, the same patches, the same pinned torch
 # 2.5.1. That is deliberate. This exists to measure ONE variable - the macOS wheel
 # against the linux/arm64 one - and anything else that differs between the two paths
-# contaminates the answer; the measurements are in SPEED.md.
+# contaminates the answer; the measurements are in SPEED.md on branch train/hey_seeree.
 #
 #   ./src/scripts/setup-applesilicon-trainer.sh                      # once
 #   ./src/scripts/run-oww-training-applesilicon.sh "hey seeree" --skip-corpus
@@ -244,7 +244,7 @@ fi
 
 # THE CLONE'S PATCHES ARE WORKING-TREE EDITS, and only setup-applesilicon-trainer.sh
 # applies them (it runs the scripts in patches/). A working-tree reset in the clone -
-# a bare `git checkout .` did exactly this on 2026-09-07 - silently undoes them, and
+# a bare `git checkout .` did exactly this once - silently undoes them, and
 # the failure then surfaces two stages in, after the corpus is already generated. So
 # verify here, before the spend: this is read-only, and the remedy is to re-run
 # setup, which is idempotent and re-applies the same patches. Nothing in this script
