@@ -1,0 +1,6 @@
+ci:
+  # This repository has no CI provider or workflows. The no-mistakes gate
+  # treats a declaration here on the default branch as "all checks passed"
+  # for a zero-check repository; without it the gate's CI monitor waits
+  # for checks that can never register.
+  no_ci: true
