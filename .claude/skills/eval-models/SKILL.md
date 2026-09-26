@@ -241,7 +241,10 @@ quiet. Real run-on recordings are scored separately, by `compare_models.py`.
 **It comes from the measurement, not from a default.** Training writes
 `tflite_streaming_roc_<commit>.txt` next to the model — false rejection rate and false
 accepts per hour at every cutoff. Picking a number without reading it is the same
-mistake as comparing models at 0.5.
+mistake as comparing models at 0.5. It resets the streaming model per clip, as
+deployment does, only for runs trained with `src/train/patches/per-clip-stream-reset.py`
+applied (from 2026-09-26); an older ROC streamed without resets and can hide a model
+that fires on every cold start, so it is not comparable with a newer one.
 
 The current `hey_seeree_705c23b.json` ships `probability_cutoff: 0.5`, and **0.5 does
 not appear anywhere in that ROC** — the lowest row is 0.55. It was not derived from

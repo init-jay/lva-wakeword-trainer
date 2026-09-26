@@ -136,6 +136,21 @@ if [[ "$(git -C "$CLONE_DIR" rev-parse HEAD)" != "$MWW_COMMIT" ]]; then
     exit 2
 fi
 
+# The pin above does NOT cover the patch. per-clip-stream-reset.py is a
+# working-tree edit at the pinned commit, so the same `git checkout .` in the
+# clone that moved nothing at HEAD undoes it - and the in-run streaming ROC
+# then silently measures the persistent-stream condition again (the blind
+# condition data/lva-mww-cause/report.md documents), a failure that surfaces
+# only at the gate. The oww run script guards its patches this way; do the
+# same. Read-only; the repair is the setup script, which re-applies.
+if ! grep -q 'model = Model(model_path, stride=stride)' "$CLONE_DIR/microwakeword/test.py"; then
+    echo "ERROR: the microWakeWord clone is missing its per-clip-stream-reset patch -" >&2
+    echo "       the working tree was probably reset (e.g. a git checkout in $CLONE/)." >&2
+    echo "       Re-run ./src/scripts/setup-mww-applesilicon-trainer.sh (idempotent)" >&2
+    echo "       to re-apply it, then start this run again." >&2
+    exit 2
+fi
+
 # KOKORO_FRACTION: the share of the PHRASE-ALONE budget Kokoro renders instead
 # of Piper (see the header). It is consumed HERE, not passed to the training
 # stage, because the corpus and train stages are separate processes and only

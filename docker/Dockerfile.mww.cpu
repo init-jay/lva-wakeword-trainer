@@ -55,6 +55,19 @@ RUN git clone https://github.com/OHF-Voice/micro-wake-word /opt/micro-wake-word 
     && git rev-parse HEAD > /opt/mww-commit.txt \
     && pip install --no-cache-dir -e .
 
+# THE IN-RUN STREAMING TEST MUST MEASURE THE DEPLOYMENT CONDITION. The unpatched
+# tflite_streaming_model_roc streams every clip through one Model with persistent
+# state, so the fresh-session cold start happens once per whole stream, while the
+# deployment runtime (pymicro_wakeword) and this repo's eval harness reset per clip.
+# data/lva-mww-cause/report.md: ~1 in 5 of the existing models fires on every cold
+# start yet scored near-chance in-run. Same patch as
+# src/scripts/setup-mww-applesilicon-trainer.sh applies to the host clone - the
+# patch prints a warning and exits 0 if this image's checkout (MWW_REF) has moved
+# the anchor, so a rebuild after a microWakeWord main move is safe but the build
+# log is worth reading.
+COPY src/train/patches/per-clip-stream-reset.py /tmp/per-clip-stream-reset.py
+RUN python3 /tmp/per-clip-stream-reset.py /opt/micro-wake-word/microwakeword/test.py
+
 # PIN datasets BELOW 4.0, WITH ITS AUDIO EXTRAS - datasets 4.x moved audio decoding
 # to torchcodec, and microWakeWord loads clips through `datasets.Audio()`.
 #

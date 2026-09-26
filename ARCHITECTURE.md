@@ -90,7 +90,7 @@ far.
 │       ├── train.py
 │       └── manifest.py
 │   ├── sweeps/                   sweep YAMLs for src/scripts/sweep.py
-│   ├── patches/                  openWakeWord patches, applied by setup + Dockerfiles
+│   ├── patches/                  openWakeWord + microWakeWord patches, applied by setup + Dockerfiles
 │   └── train-applesilicon/ + train-mww-applesilicon/   host uv envs (below the tree)
 ├── src/tts-service/                  the TTS protocol and the engines that speak it:
 │                                 tts_protocol/ (the client + shared audio code, what
