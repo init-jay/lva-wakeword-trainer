@@ -323,8 +323,8 @@ five points has told you nothing. Say which single variable moved, and re-run.
 ## The voice-holdout ranking set (improvement.md P1.2)
 
 A third corpus at `data/corpus/eval/voice_holdout_tts/`, rendered by
-`make render-voice-holdout` (Kokoro on 8900): positives from the voices
-`src/wordlists/voice_holdout.yaml` **holds out of every corpus build** (oww and
+`make render-voice-holdout` (Kokoro on 8900): positives from the voices the
+wordlist's `voice_holdout:` section **holds out of every corpus build** (oww and
 mww trainers enforce the exclusion; the live TTS catalog is the source of
 truth, so a stale list is an error, not a skip), at speeds inside the
 0.7-1.3 training range. The held-out axis is therefore the voice alone:

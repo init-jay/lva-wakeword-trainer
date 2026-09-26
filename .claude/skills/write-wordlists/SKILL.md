@@ -95,31 +95,38 @@ write "hey serious" for eval, write "hey Serena" for training.
 
 ## The training side
 
-Same method, different destination. The trainer's lists currently live as Python
-constants in `src/train/corpus/negatives.py`, keyed by wake word:
+Same method, and now the same file: `train.confusable` in `src/wordlists/<word>.yaml`,
+sitting beside the eval phrases it must not overlap.
 
-- **`CONFUSABLE_NEGATIVES`** — the same three adversarial shapes as above. This is the
+- **`train.confusable`** — the same three adversarial shapes as above. This is the
   single biggest measured cause of false accepts: a model trained without them scored
   0/8 on other assistants and 0/36 on general speech, but **13/20** on the phrase
-  continuing into another word. Aim for ~35, split roughly 20 / 12 / 4 across the three
+  continuing into another word. Aim for ~30, split roughly 20 / 8 / 4 across the three
   shapes, and include bare `"hey"` — that is what teaches the second syllable is
-  required rather than optional.
-- **`TRAINING_COMMANDS`** — ordinary commands, used twice over: appended to the wake
-  word to build run-on positives, and rendered alone as negatives. Both halves are
-  needed. Without the negatives the model can learn "speech after ≈ wake word", because
-  in training every clip with trailing speech would otherwise be positive. Aim for 12,
-  and keep them disjoint from the eval `command` list.
+  required rather than optional. The example word carries 29: it was written with 38,
+  and nine of them turned out to be eval phrases too, so they were dropped from this
+  side rather than from the measurement.
+- **`TRAINING_COMMANDS`** stays in `src/train/corpus/negatives.py`. Ordinary commands
+  are the same whatever the wake word is, so they are not per-word data. They are used
+  twice over: appended to the wake word to build run-on positives, and rendered alone as
+  negatives. Both halves are needed. Without the negatives the model can learn "speech
+  after ≈ wake word", because in training every clip with trailing speech would
+  otherwise be positive. Aim for 12, and keep them disjoint from the eval `command`
+  list.
 
-`src/wordlists/__init__.py` already validates a `train:` section against `eval:`, so those
-constants can move into the YAML whenever the trainer is migrated — the check is
-waiting for them.
+`wordlists.validate()` enforces the disjointness rule on the way in, so a phrase in both
+sections is a hard error rather than a silently optimistic false-accept rate.
 
 ## One thing you cannot generate
 
-`MISPRONOUNCING_VOICES` in `src/train/corpus/negatives.py` is per wake word and **must be
-found by listening**, not written. Some TTS voices guess the wake word's pronunciation
+`voices.<engine>.mispronouncing` in the same YAML is per wake word and **must be found
+by listening**, not written. Some TTS voices guess the wake word's pronunciation
 wrong, and every clip such a voice produces is a mislabelled positive — six voices out
 of 42 was ~14% of the corpus. Duration is not a usable proxy: `bm_fable` sits at exactly
-the median length and is wrong. `src/scripts/audit_voices.py` narrows the field; it does not
-replace the listening. Tell the user this is a manual step rather than producing a list
-that looks authoritative.
+the median length and is wrong. `src/scripts/audit_voices.py` narrows the field and
+prints the YAML block to paste in; it does not replace the listening. Tell the user this
+is a manual step rather than producing a list that looks authoritative.
+
+A word with no `voices:` section at all is read as unaudited: the corpus build warns
+loudly that it excluded nothing, and carries on. That is deliberate — an unaudited word
+is still trainable, and refusing would push people into inventing a list.

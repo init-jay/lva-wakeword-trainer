@@ -53,6 +53,11 @@ from tts_protocol.audio import SR  # noqa: E402  (re-exported name, now defined 
 from tts_protocol.client import TtsClient
 from .kokoro import run_jobs  # noqa: E402  (the shared thread-pool runner; kokoro imports no piper, no cycle)
 
+# The per-word voice exclusions this module reads. Importable because both trainers
+# put src/ on sys.path before importing the corpus package; the wordlists package
+# imports nothing from here, so there is no cycle.
+import wordlists  # noqa: E402
+
 # SR = 16000 lives in tts_protocol.audio; the name stays public from this module.
 
 # One TtsClient per tcp:// URL, shared across calls (the client caches the
@@ -222,106 +227,15 @@ def _piper_render(piper_url, voice, speaker, text, speed=1.0):
     return audio
 
 
-# Voices that mispronounce the wake word, per wake word. THE PIPER EQUIVALENT OF
-# MISPRONOUNCING_VOICES in corpus/negatives.py, AND IT IS NOT OPTIONAL.
-#
-# Six of Kokoro's 42 voices say something other than "hey seeree" - ~14% of that
-# corpus mislabelled as positives, undetected for eleven runs.
-#
-# THE EXCLUSION UNIT IS THE SPEAKER, NOT THE MODEL. The expectation was the opposite:
-# espeak-ng phonemises per model, so every speaker inside one voice gets the same
-# phoneme string and seemed bound to pronounce it the same. The audit says
-# otherwise - en_US-l2arctic-medium ranges from :ASI at 0% to :PNV at 100%: identical
-# phonemes, different acoustic models. Keys are therefore "voice:speaker" wherever
-# the audit scored a speaker.
-#
-# Below is the 2026-09-02 audit of 96 voices against ASR consensus, everything under
-# 83% agreement. The transcripts make the distinction: excluded voices produce a
-# CONSISTENTLY different phrase ("his theory", four renderings running), while the
-# ones kept produce "hey siri" with an occasional slip - VITS sampling durations per
-# call, not a pronunciation problem.
-#
-# en_US-l2arctic-medium is a non-native-speaker corpus and 7 of its 12 audited
-# speakers land here. Not automatically disqualifying - accented renderings of the
-# CORRECT phrase are good training data, since real users have accents. Disqualified
-# here because the benefit cannot be measured: there is no accented speaker in
-# data/recordings/holdout/, so the contamination is measurable and the upside is not.
-# Revisit if an accented speaker is ever recorded.
-#
-# WHAT THIS METHOD CANNOT SEE: the score is agreement with the consensus ACROSS
-# voices, so an error every voice shares is invisible. Every good voice here
-# transcribes as "Hey Siri"; if espeak-ng renders "seeree" as /'sIri/ rather than
-# /si:'ri:/, all 96 are uniformly wrong and all score 100%. Check that by ear against
-# a real recording, once, per wake word - not from this table.
-MISPRONOUNCING_PIPER_VOICES: dict[str, list[str]] = {
-    "hey_seeree": [
-        # < 50% - consistently a different phrase
-        "en_US-l2arctic-medium:ASI",            # 0%   "Here's your week" / "Peace, Yuri"
-        "en_GB-southern_english_female-low",    # 17%  "Hey, Sirius" / "Paisiru"
-        "en_US-l2arctic-medium:BWC",            # 17%  "His theory" x4
-        "en_US-l2arctic-medium:YBAA",           # 17%  "He's silly" / "History"
-        "en_US-l2arctic-medium:LXC",            # 33%  "his theory" x3
-        "en_US-l2arctic-medium:YKWK",           # 33%  "K-series" / "Here's theory"
-        # 50-67% - right more often than not, still ~1 bad clip in 3
-        "en_US-arctic-medium:slp",              # 50%  "He's a re" / "Hesiery"
-        "en_US-l2arctic-medium:HQTV",           # 50%  "History" / "Peace, Siri"
-        "en_US-l2arctic-medium:SVBI",           # 50%  "He's sorry" / "He's silly"
-        "en_US-arctic-medium:aup",              # 67%
-        "en_US-danny-low",                      # 67%
-        "en_US-l2arctic-medium:HKK",            # 67%  "STAE" / "A-Siri"
-        "en_US-l2arctic-medium:SKA",            # 67%  "Case Theory"
-        "en_US-l2arctic-medium:TXHC",           # 67%  "Hey, see you, Rhi!"
-    ],
-}
-
-# Voices excluded because they were NEVER AUDITED, not because they are wrong.
-#
-# Kept separate from MISPRONOUNCING_PIPER_VOICES deliberately: everything in that
-# list was measured and failed; everything here is simply unknown, and merging the
-# two would destroy the only record of which is which - i.e. that these are cheap to
-# reclaim.
-#
-# HOW THEY GOT HERE. The 2026-09-02 audit ran against one Piper instance and covered
-# 96 voices. Corpus generation later ran against the compose `piper` service, which
-# exposes 106. The extra ten arrived unaudited and unmapped, and contributed 600 of
-# 5520 synthetic positives - 10.9% of the Piper corpus, from voices whose
-# pronunciation had never been checked. The Kokoro equivalent was ~14% and went
-# unnoticed for eleven runs, so this is the same failure caught earlier.
-#
-# THE REAL LESSON IS THE MISMATCH: audit and generation must talk to the SAME Piper
-# service. An audit of a different instance is only accidentally relevant.
-#
-# THE CATALOG GROWS, IN BOTH UNITS AT ONCE. Measured 2026-09-07 against the 2.4.3
-# wheel (identical in the Docker image and the host venv, src/scripts/start-piper-host.sh):
-# 163 voices in the bundled catalog, against 96 at audit time and the 106 the compose
-# service exposed. With units: 96 and 163 are VOICE counts; 106 was a PAIR count. The
-# default selection (en_US/en_GB, 12-speaker cap) measures 37 voices / 2005 pairs raw
-# / 106 pairs capped - the same 106 the compose-era run saw, so the English selection
-# set has not moved since the audit era's known exposure. The growth is voices in
-# other languages, which the languages filter already excludes. Widening
-# --piper-languages is a new unaudited set until src/scripts/audit_voices.py has
-# run against the instance that generates the corpus.
-#
-# TO RECLAIM THEM: audit these ten against the instance that generates the corpus,
-# then move them into MISPRONOUNCING_PIPER_VOICES or delete them, and add their F0 to
-# PIPER_VOICE_SEX. Note cori and ljspeech appear at two qualities each, so this is
-# eight distinct voices, and quality variants share a phonemisation but not an
-# acoustic model - l2arctic ranged 0-100% across speakers on identical phonemes, so
-# do not assume -high and -medium agree.
-UNAUDITED_PIPER_VOICES: dict[str, list[str]] = {
-    "hey_seeree": [
-        "en_GB-cori-high",
-        "en_GB-cori-medium",
-        "en_US-bryce-medium",
-        "en_US-john-medium",
-        "en_US-kristin-medium",
-        "en_US-ljspeech-high",
-        "en_US-ljspeech-medium",
-        "en_US-norman-medium",
-        "en_US-reza_ibrahim-medium",
-        "en_US-sam-medium",
-    ],
-}
+# The per-word Piper exclusions - voices that render the wake word wrong, and
+# voices nobody has audited - live in src/wordlists/<word>.yaml under
+# `voices.piper.{mispronouncing,unaudited}`, read through
+# wordlists.voice_exclusions(). They were dicts keyed by wake word here, which put
+# one word's audit results in a module every word shares; the measurements that
+# justify each entry (agreement percentages, what the voices actually said, why the
+# exclusion unit is the speaker rather than the model) moved into that file beside
+# the entries. PIPER_VOICE_SEX below stays here: F0 is a property of the voice, not
+# of the phrase it renders, so it is the same table for every wake word.
 
 # Voice sex, for the child-range lever (corpus/augment.py). Keys are the voice name,
 # or "voice:speaker" for a multi-speaker model.
@@ -597,25 +511,37 @@ def select_piper_voices(piper_url: str, wake_word: str, languages=("en_US", "en_
     see PiperFleet.probe), drop the ones that say the wrong thing, report
     cover.
 
-    The exclusion step is the whole point. Six of 42 Kokoro voices mispronounce
-    "hey seeree" and that was ~14% of the synthetic corpus mislabelled as positives
-    for eleven runs before anyone noticed. Piper is not exempt, and with 84 voices
-    available an unaudited list is a bigger exposure, not a smaller one.
+    The exclusion step is the whole point, and it is per wake word: the lists come
+    from `voices.piper` in src/wordlists/<word>.yaml. On the example word, six of
+    42 Kokoro voices mispronounced the phrase and that was ~14% of the synthetic
+    corpus mislabelled as positives for eleven runs before anyone noticed. Piper is
+    not exempt, and with a larger catalog an unaudited list is a bigger exposure,
+    not a smaller one.
     """
-    safe_name = wake_word.replace(" ", "_").lower()
     found = PiperFleet(piper_url).probe(languages=languages,
                                         max_speakers=max_speakers)
 
-    bad = set(MISPRONOUNCING_PIPER_VOICES.get(safe_name, []))
-    unaudited = set(UNAUDITED_PIPER_VOICES.get(safe_name, []))
+    # A word with no wordlist cannot build a corpus that means anything, so this is
+    # the same hard stop build_negative_phrases makes rather than a traceback.
+    try:
+        data = wordlists.load(wake_word)
+    except wordlists.WordlistError as exc:
+        print(f"ERROR: {exc}")
+        sys.exit(1)
+    exclusions = wordlists.voice_exclusions(data, "piper")
+    wordlist_name = Path(data["_path"]).name
+    bad = set(exclusions["mispronouncing"])
+    unaudited = set(exclusions["unaudited"])
     excluded = bad | unaudited
     if not bad:
-        print(f"  WARNING: no MISPRONOUNCING_PIPER_VOICES entry for '{safe_name}'.")
+        print(f"  WARNING: {wordlist_name} has no voices.piper.mispronouncing entry.")
         print("           Nothing has been excluded, so any voice whose espeak-ng")
         print("           g2p guesses the wake word wrong is contributing")
         print("           MISLABELLED POSITIVES. Six of 42 Kokoro voices did exactly")
-        print("           that (~14% of that corpus). Run audit_voices.py --tts",)
-        print("           tcp://<that instance>, listen to the shortlist, and fill the list in.")
+        print("           that on the example word (~14% of that corpus). Run")
+        print("           src/scripts/audit_voices.py --tts tcp://<that instance>,")
+        print("           listen to the shortlist, and paste what it prints into")
+        print(f"           {wordlist_name}.")
 
     # Match both forms. The audit scores SPEAKERS - en_US-l2arctic-medium ran from
     # :ASI at 0% to :PNV at 100% on identical phonemes - so most entries are
@@ -632,9 +558,9 @@ def select_piper_voices(piper_url: str, wake_word: str, languages=("en_US", "en_
           f"({n_bad} mispronouncing, {n_unaudited} unaudited)")
 
     # A voice the service offers that appears in NEITHER list has never been checked
-    # and is not being excluded - which is the exact hole the ten unaudited voices
-    # fell through. Say so loudly rather than letting it show up later as a
-    # child-range coverage number.
+    # and is not being excluded - which is the exact hole the example word's audit
+    # found ten voices in, contributing 600 of 5520 synthetic positives. Say so
+    # loudly rather than letting it show up later as a child-range coverage number.
     unknown = sum(1 for v, s in kept if voice_sex(v, s) == "u")
     if unknown:
         names = sorted({v if s is None else f"{v}:{s}"
@@ -644,5 +570,5 @@ def select_piper_voices(piper_url: str, wake_word: str, languages=("en_US", "en_
         print("           mislabelled positives and get no child-range copy:")
         print(f"           {', '.join(names[:8])}{' ...' if len(names) > 8 else ''}")
         print("           Audit them against THIS Piper instance, or add them to")
-        print("           UNAUDITED_PIPER_VOICES in corpus/piper.py.")
+        print(f"           voices.piper.unaudited in {wordlist_name}.")
     return kept

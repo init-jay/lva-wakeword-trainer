@@ -96,8 +96,8 @@ corpus-mww:
 	    --kokoro-url tcp://127.0.0.1:8900 --kokoro-fraction 0.3
 
 # The voice-holdout synthetic ranking set (improvement.md P1.2): its own output
-# directory (data/corpus/eval/voice_holdout_tts) from the voices
-# src/wordlists/voice_holdout.yaml holds out of every corpus build, at speeds
+# directory (data/corpus/eval/voice_holdout_tts) from the voices the wordlist's
+# `voice_holdout:` section holds out of every corpus build, at speeds
 # inside the 0.7-1.3 training range. The live Kokoro catalog is probed and a
 # stale list fails loudly; the existing eval corpora are not touched.
 render-voice-holdout:

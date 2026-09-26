@@ -58,8 +58,9 @@ DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
    mirroring the 30% its oWW sibling already runs. Negatives stay Piper-only on
    purpose: that is where the per-category signal (extend, hey_other) lives, and a
    second engine would blur attribution of a false accept to an engine. The Kokoro
-   voices get the same exclusions the oWW corpus applies (MISPRONOUNCING_VOICES and
-   the v0 legacy set, corpus/negatives.py) and the shared speed grid, so the two
+   voices get the same exclusions the oWW corpus applies (the wordlist's
+   voices.kokoro.mispronouncing and the v0 legacy set) and the shared speed grid, so
+   the two
    engines differ in timbre, not in speed or text. Both URLs are tcp://
    tts-protocol servers (src/tts-service/): on a Mac that is the in-process
    kokoro-mlx engine (`uv run --project src/tts-service/engines/kokoro_mlx
@@ -129,7 +130,8 @@ from train.corpus.augment import (CHILD_STRETCH_FRACTION,  # noqa: E402
 from train.corpus.kokoro import (KokoroPool,  # noqa: E402
                                  generate_kokoro_samples, probe_kokoro_servers)
 from train.corpus.negatives import (LEGACY_VOICE_MARKER,  # noqa: E402
-                                    MISPRONOUNCING_VOICES, build_negative_phrases)
+                                    build_negative_phrases,
+                                    load_wordlist_or_exit)
 from train.corpus.piper import (generate_piper_samples,  # noqa: E402
                                 select_piper_voices)
 from train.corpus.positives import (PLAIN_SPEED_GRID,  # noqa: E402
@@ -139,8 +141,8 @@ from train.corpus.real import (  # noqa: E402
     speaker_clip_counts,
 )
 from train.corpus import manifest as corpus_manifest  # noqa: E402
-from wordlists import exclude_voice_holdout, load_voice_holdout  # noqa: E402
-from wordlists import path_for, voice_holdout_path  # noqa: E402
+from wordlists import (exclude_voice_holdout, path_for,  # noqa: E402
+                       voice_exclusions, voice_holdout)
 
 
 def _parse_real_vtlp(spec: str, samples_dir, flag: str = "--real-vtlp") -> dict:
@@ -315,12 +317,16 @@ def main():
     # a --skip run no longer works with the engines down, because an
     # unverifiable catalog is exactly the reuse the check exists to refuse.
 
-    # The voice holdout (improvement.md P1.2): loaded once here, enforced below
-    # against whichever engine is actually in play - the live catalog is the
-    # source of truth, so a list that drifted from it fails loudly instead of
-    # silently excluding nothing. No tracked file (a checkout predating it) is
-    # a no-op, and says so.
-    holdout = load_voice_holdout()
+    # The voice holdout (improvement.md P1.2): a section of the wordlist (one
+    # configuration per wake word). Loaded HERE, before either engine branch and
+    # before the corpus-mode decision: both branches consume it, the piper
+    # branch runs first, and a --skip run still needs the wordlist read to be
+    # the same read a build would do. Enforced against whichever engine is
+    # actually in play - the live catalog is the source of truth, so a list
+    # that drifted from it fails loudly instead of silently excluding nothing.
+    # A wordlist without the section is a no-op, and says so.
+    wordlist = load_wordlist_or_exit(args.wake_word)
+    holdout = voice_holdout(wordlist)
     voices = []
     if args.kokoro_fraction < 1.0:
         print(f"[Piper] {args.piper_url}")
@@ -338,15 +344,15 @@ def main():
             n_before = len(voices)
             voices, holdout_missing = exclude_voice_holdout("piper", voices, holdout)
             if holdout_missing:
-                sys.exit(f"  ERROR: the voice holdout ({voice_holdout_path()}) names "
+                sys.exit(f"  ERROR: the voice holdout ({wordlist['_path']}) names "
                          f"Piper (voice, speaker) pair(s) the live audited "
                          f"selection does not carry: {holdout_missing}. Update the "
-                         f"tracked list to match the catalog this corpus is "
+                         f"wordlist's `voice_holdout:` section to match the catalog this corpus is "
                          f"built from.")
             print(f"  Excluding {n_before - len(voices)} voice-holdout (voice, speaker) "
                   f"pair(s) reserved for the synthetic ranking set")
         else:
-            print(f"  NOTE: no voice holdout at {voice_holdout_path()} - the "
+            print(f"  NOTE: the wordlist carries no `voice_holdout:` section - the "
                   f"synthetic ranking set has no reserved voices")
 
     # KOKORO SUPPLEMENTS THE PHRASE-ALONE BUDGET (see the module docstring):
@@ -360,9 +366,11 @@ def main():
         # reason: a voice that says something other than the wake word is a
         # mislabelled positive regardless of engine, and the v0 legacy set is
         # older renderings of speakers already in the set. Six of 42 Kokoro
-        # voices did exactly this for "hey seeree" and went unnoticed for
-        # eleven runs - this list is not optional.
-        excluded = set(MISPRONOUNCING_VOICES.get(safe, []))
+        # voices did exactly this on the example word and went unnoticed for
+        # eleven runs - this list is not optional. It is per-word data, read
+        # from the wordlist loaded above: how a voice renders one phrase says
+        # nothing about another.
+        excluded = set(voice_exclusions(wordlist, "kokoro")["mispronouncing"])
         legacy = sorted(v for v in kokoro_voices if LEGACY_VOICE_MARKER in v)
         if legacy:
             excluded.update(legacy)
@@ -379,9 +387,9 @@ def main():
             kokoro_voices, holdout_missing = exclude_voice_holdout(
                 "kokoro", kokoro_voices, holdout)
             if holdout_missing:
-                sys.exit(f"  ERROR: the voice holdout ({voice_holdout_path()}) names "
+                sys.exit(f"  ERROR: the voice holdout ({wordlist['_path']}) names "
                          f"Kokoro voice(s) the live catalog does not offer: "
-                         f"{holdout_missing}. Update the tracked list.")
+                         f"{holdout_missing}. Update the wordlist's `voice_holdout:` section.")
             print(f"  Excluding {n_before - len(kokoro_voices)} voice-holdout "
                   f"voice(s) reserved for the synthetic ranking set: "
                   f"{', '.join(holdout.get('kokoro') or [])}")

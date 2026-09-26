@@ -643,7 +643,7 @@ def main():
         print("=" * 70)
         print("VOICE-HOLDOUT SYNTHETIC RANKING SET (NOT A GATE)")
         print(f"  {vdir}  ({len(vclips)} clips)")
-        print("  Every clip is a voice src/wordlists/voice_holdout.yaml holds out of every")
+        print("  Every clip is a voice the wordlist's `voice_holdout:` section holds out")
         print("  corpus build, at speeds inside the 0.7-1.3 training range: voice-"
               "disjoint from training, in-distribution everywhere else. A synthetic")
         print("  voice is not a person - this is a low-variance ranking signal for")

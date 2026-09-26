@@ -402,9 +402,248 @@ eval:
     - I need to renew my passport before we travel.
     - The lecture covered far more material than expected.
 
-# A `train:` section belongs here too - the confusable negatives and run-on commands
-# that train/corpus/negatives.py still holds as Python constants. It is deliberately
-# absent rather than duplicated: two sources of truth for the same phrases is worse
-# than one in the wrong place. wordlists/__init__.py already validates that a
-# `train:` section shares no phrase with `eval:` above, so the move is safe whenever
-# the trainer is migrated.
+# ---------------------------------------------------------------------------
+# TRAINING negatives for this wake word
+# ---------------------------------------------------------------------------
+#
+# MIGRATED OUT OF CODE. This was CONFUSABLE_NEGATIVES in
+# src/train/corpus/negatives.py: a dict keyed by wake word, sitting in a module
+# every wake word shares. Training a different phrase meant editing corpus code,
+# and not editing it failed quietly - the builder printed a warning and carried on
+# with no confusables at all, which is the single biggest measured cause of false
+# accepts.
+#
+# WHAT STAYS IN CODE: BASE_NEGATIVES and TRAINING_COMMANDS (ordinary openers, other
+# assistants' wake words, and the commands the run-on positives are built from) are
+# word-agnostic, so they are not per-word data and are not repeated here.
+#
+train:
+  # Phrases adjacent to THIS wake word, rendered as training negatives. Built out of
+  # the phrase's own consonants and vowels - the `write-wordlists` skill is how a
+  # new set gets written. Three shapes matter, and all three want those sounds:
+  #   - the phrase, continuing into a different word ("hey Serena", "hey season")
+  #   - "hey" attached to some other name ("hey Sienna", "hey Cynthia")
+  #   - the same sounds inside running speech, with no "hey" at all
+  # Bare "hey" belongs here too: it is what teaches that the second syllable is
+  # required rather than optional.
+  #
+  # MUST BE DISJOINT FROM `eval:` ABOVE. wordlists.validate() enforces that now,
+  # instead of the module comment in negatives.py asking the reader to check by
+  # hand. Nine phrases that were in BOTH lists are dropped from here:
+  #   eval.extend     hey season, hey sedan, hey seizure, hey serene, hey severe
+  #   eval.hey_other  hey Cynthia, hey Serena, hey Sienna, hey Simon
+  # A phrase in both is trained on and then measured, which turns a generalisation
+  # number into a memorisation one - and moves it in the direction that looks like
+  # success. The eval side stayed put on purpose: it is the measurement instrument,
+  # so changing it would make every false-accept rate already recorded
+  # incomparable with the next one.
+  confusable:
+    - "hey serenade"
+    - "hey Syria"
+    - "hey syringe"
+    - "hey sincere"
+    - "hey sincerely"
+    - "hey seasoning"
+    - "hey ceases"
+    - "hey scenery"
+    - "hey scenario"
+    - "hey CEO"
+    - "hey seatbelt"
+    - "hey ceremony"
+    - "hey sequin"
+    - "hey search for it"
+    - "hey Selena"
+    - "hey Sirena"
+    - "hey Cerys"
+    - "hey Sabrina"
+    - "hey Sylvia"
+    - "hey Sadie"
+    - "hey Cecil"
+    - "hey"
+    - "hey, come here a minute"
+    - "The scenery on the coast road is worth the detour."
+    - "She was sincere about wanting to see the city again."
+    - "Season the sauce properly before you serve it."
+    - "Serena said she would meet us down by the seafront."
+    - "The ceremony starts at three and runs for about an hour."
+    - "It has been a severe winter by any measure."
+#
+# ---------------------------------------------------------------------------
+# Voice exclusions for this wake word
+# ---------------------------------------------------------------------------
+#
+# PER WORD, NOT PER ENGINE. How a voice renders "seeree" says nothing about how it
+# renders another phrase, so a global blocklist would be wrong for the next model.
+# A voice that gets the phrase wrong produces audio LABELLED as the phrase: every
+# clip it renders is a mislabelled positive, and nothing downstream can see it.
+#
+# A word with no `voices:` section is read as "nobody has audited this word yet",
+# not as "every voice is fine" - the corpus builders print that loudly.
+#
+# HOW TO BUILD ONE: src/scripts/audit_voices.py renders the phrase through the
+# engine and prints the YAML to paste here. It screens; it does not replace
+# listening. Duration is not a usable proxy - bm_fable sits at exactly the median
+# length (1121 ms, 1.00x) and is wrong, while af_v0sky is 16% below median and is
+# fine. The same proxy also cleared "HEY SEEREE" as merely emphatic when it was
+# spelled out.
+#
+voices:
+  kokoro:
+    # Kokoro voice ids. Six of the 42 English voices say something that is not "hey
+    # seeree", judged by ear over all of them rendering the phrase once. Each is
+    # ~2.4% of the Kokoro corpus mislabelled as positives, ~14% for the six
+    # together - across plain AND run-on, since both draw from this list. It went
+    # unnoticed for eleven runs.
+    #
+    # Excluded from the negatives too, not just the positives. A mispronunciation is
+    # arguably a useful near-miss, but it is much closer to the real phrase than the
+    # confusables above are, and teaching the model to REJECT something that close
+    # risks costing detection on genuine variants. Untested either way.
+    mispronouncing:
+      - "af_alloy"
+      - "am_echo"
+      - "bf_alice"
+      - "bf_lily"
+      - "bm_daniel"
+      - "bm_fable"
+  piper:
+    # THE EXCLUSION UNIT IS THE SPEAKER, NOT THE MODEL, so an entry is
+    # "voice:speaker" wherever the audit scored a speaker; a bare voice name still
+    # excludes every speaker of that model. The expectation was the opposite:
+    # espeak-ng phonemises per model, so every speaker inside one voice gets the same
+    # phoneme string and seemed bound to pronounce it the same way. The audit says
+    # otherwise - en_US-l2arctic-medium ranges from :ASI at 0% to :PNV at 100%:
+    # identical phonemes, different acoustic models.
+    #
+    # From the 2026-09-02 audit of 96 voices against ASR consensus: everything under
+    # 83% agreement. The transcripts make the distinction - excluded voices produce
+    # a CONSISTENTLY different phrase, while the kept ones produce "hey siri" with an
+    # occasional slip, which is VITS sampling durations per call rather than a
+    # pronunciation problem.
+    #
+    # en_US-l2arctic-medium is a non-native-speaker corpus and 7 of its 12 audited
+    # speakers land here. Not automatically disqualifying: accented renderings of the
+    # CORRECT phrase are good training data, since real users have accents.
+    # Disqualified here because the benefit cannot be measured - there is no accented
+    # speaker in data/recordings/holdout/, so the contamination is measurable and the
+    # upside is not. Revisit if an accented speaker is ever recorded.
+    #
+    # WHAT THIS METHOD CANNOT SEE: the score is agreement with the consensus ACROSS
+    # voices, so an error every voice shares is invisible. Every good voice here
+    # transcribes as "Hey Siri"; if espeak-ng renders "seeree" as /'sIri/ rather
+    # than /si:'ri:/, all 96 are uniformly wrong and all score 100%. Check that by
+    # ear against a real recording, once, per wake word - not from this list.
+    mispronouncing:
+      # < 50% agreement - consistently a different phrase
+      - "en_US-l2arctic-medium:ASI"             # 0%   "Here's your week" / "Peace, Yuri"
+      - "en_GB-southern_english_female-low"     # 17%  "Hey, Sirius" / "Paisiru"
+      - "en_US-l2arctic-medium:BWC"             # 17%  "His theory" x4
+      - "en_US-l2arctic-medium:YBAA"            # 17%  "He's silly" / "History"
+      - "en_US-l2arctic-medium:LXC"             # 33%  "his theory" x3
+      - "en_US-l2arctic-medium:YKWK"            # 33%  "K-series" / "Here's theory"
+      # 50-67% - right more often than not, still ~1 bad clip in 3
+      - "en_US-arctic-medium:slp"               # 50%  "He's a re" / "Hesiery"
+      - "en_US-l2arctic-medium:HQTV"            # 50%  "History" / "Peace, Siri"
+      - "en_US-l2arctic-medium:SVBI"            # 50%  "He's sorry" / "He's silly"
+      - "en_US-arctic-medium:aup"               # 67%
+      - "en_US-danny-low"                       # 67%
+      - "en_US-l2arctic-medium:HKK"             # 67%  "STAE" / "A-Siri"
+      - "en_US-l2arctic-medium:SKA"             # 67%  "Case Theory"
+      - "en_US-l2arctic-medium:TXHC"            # 67%  "Hey, see you, Rhi!"
+    # NEVER AUDITED, not known-bad - kept separate from `mispronouncing` on purpose,
+    # because merging the two would destroy the only record of which is which, i.e.
+    # that these are cheap to reclaim.
+    #
+    # The 2026-09-02 audit ran against one Piper instance and covered 96 voices.
+    # Corpus generation later ran against the compose `piper` service, which exposes
+    # 106. The extra ten arrived unaudited and unmapped, and contributed 600 of 5520
+    # synthetic positives - 10.9% of the Piper corpus, from voices whose
+    # pronunciation had never been checked. The Kokoro equivalent was ~14% and went
+    # unnoticed for eleven runs, so this is the same failure caught earlier. THE REAL
+    # LESSON IS THE MISMATCH: audit and generation must talk to the SAME Piper
+    # service, because an audit of a different instance is only accidentally
+    # relevant.
+    #
+    # TO RECLAIM THEM: audit these ten against the instance that generates the
+    # corpus, then move each into `mispronouncing` or delete it, and add its F0 to
+    # PIPER_VOICE_SEX in src/train/corpus/piper.py. cori and ljspeech appear at two
+    # qualities each, so this is eight distinct voices - and quality variants share a
+    # phonemisation but not an acoustic model (l2arctic ranged 0-100% across speakers
+    # on identical phonemes), so do not assume -high and -medium agree.
+    #
+    # THE CATALOG GROWS, IN BOTH UNITS AT ONCE. Measured 2026-09-07 against the 2.4.3
+    # wheel (identical in the Docker image and the host venv,
+    # src/scripts/start-piper-host.sh): 163 voices in the bundled catalog, against 96
+    # at audit time and the 106 the compose service exposed. With units: 96 and 163
+    # are VOICE counts, 106 was a PAIR count. The default selection (en_US/en_GB,
+    # 12-speaker cap) measures 37 voices / 2005 pairs raw / 106 pairs capped - the
+    # same 106 the compose-era run saw, so the English selection set has not moved
+    # since the audit era's known exposure. The growth is voices in other languages,
+    # which the languages filter already excludes. Widening --piper-languages is a
+    # new unaudited set until src/scripts/audit_voices.py has run against the
+    # instance that generates the corpus.
+    unaudited:
+      - "en_GB-cori-high"
+      - "en_GB-cori-medium"
+      - "en_US-bryce-medium"
+      - "en_US-john-medium"
+      - "en_US-kristin-medium"
+      - "en_US-ljspeech-high"
+      - "en_US-ljspeech-medium"
+      - "en_US-norman-medium"
+      - "en_US-reza_ibrahim-medium"
+      - "en_US-sam-medium"
+
+# THE VOICE HOLDOUT (improvement.md P1.2), a section of this wordlist: one
+# configuration per wake word, and a voice reservation belongs to the word that
+# measured it. The wordlist above keeps the eval and training corpora disjoint
+# on PHRASE; this section keeps them disjoint on VOICE. Every entry below is
+# excluded from every corpus build (src/train/oww/train.py and
+# src/train/mww/corpus.py remove it from the live catalog and exit when an
+# entry the catalog no longer offers), and
+# src/eval/src/generate_positives.py --voice-holdout renders the synthetic eval
+# positives from these voices ONLY, into its own output directory.
+#
+# WHAT THE RESULTING SET IS, in one line for whoever renders it next: a
+# low-variance RANKING SIGNAL for sweep points - voice disjoint from training,
+# every other axis inside the training distribution, a synthetic voice with a
+# real n. A synthetic voice is not a person, so it never stands in for the
+# real-speaker gates on data/recordings/holdout/; the top two or three of the
+# twenty sweep points go there, on real recordings.
+#
+# Kokoro - N = 7, chosen from the 22 usable voices of the kokoro-mlx catalog
+# (the 28 it offers minus the v0-legacy set and the 6 the voices.kokoro.
+# mispronouncing table above excludes): four American women, two
+# American men (am_santa is the catalog's baritone; am_fenrir the deepest),
+# one British woman - the same accent/pitch spread generate_positives.py
+# justifies for its own VOICES list. Deliberately none of them appear in that
+# list, so this set COMPLEMENTS the regular eval positives instead of
+# overlapping them: the regular set is the training-distribution sanity check,
+# this one holds the voice axis out.
+#
+# Piper - M = 2 (voice, speaker) pairs, the same "voice:speaker" spelling as
+# the exclusion tables in src/train/corpus/piper.py. Both are audited
+# single-speaker models (speaker None: one British man, one American man) from
+# the English set select_piper_voices serves, and neither appears in the
+# voices.piper exclusion tables above for hey seeree. Rendered 2026-09-22 with
+# the tts-service Piper engine on 8898
+# (generate_positives.py --voice-holdout --tts piper) into the same labelled
+# directory as the Kokoro clips - distinct voice_speaker filename tags keep
+# the two halves from colliding; the enforcement above still applies and will
+# fail loudly if this instance's catalog has moved.
+#
+# A wordlist without this section is a no-op, not an error: a fresh word
+# before its first holdout reservation must still build, and the trainers
+# print that they ran with no holdout.
+voice_holdout:
+  kokoro:
+    - af_aoede
+    - af_jessica
+    - af_kore
+    - af_river
+    - am_fenrir
+    - am_santa
+    - bf_isabella
+  piper:
+    - en_GB-alan-medium
+    - en_US-lessac-medium
