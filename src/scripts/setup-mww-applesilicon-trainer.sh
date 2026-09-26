@@ -56,6 +56,29 @@ if [[ "$(git -C "$CLONE_DIR" rev-parse HEAD 2>/dev/null)" != "$MWW_COMMIT" ]]; t
     git -C "$CLONE_DIR" checkout "$MWW_COMMIT"
 fi
 
+# --- patches ----------------------------------------------------------------------
+#
+# One for now - the mww setup script previously applied none. Same mechanism
+# the oww setup uses (setup-applesilicon-trainer.sh): a self-contained
+# python3 script per patch, idempotent, printing "WARNING: patch target
+# not found" and exiting 0 if upstream has moved, so a re-run after a
+# microWakeWord update is safe but the output is worth reading.
+#
+# per-clip-stream-reset.py: the in-run streaming ROC must measure the same
+# condition deployment runs in. The unpatched function streams every clip
+# through one Model with persistent state, so the fresh-session cold start
+# happens once per whole stream; deployment (pymicro_wakeword, LVA) and
+# this repo's eval harness reset per clip. data/lva-mww-cause/report.md:
+# ~1 in 5 of the existing models fires on every cold start yet scored
+# near-chance in-run (failed run 2e907ac: in-run AUC 0.177 vs 292/298
+# adversarial at the 0.5 gate). Applied here (host clone) and in
+# docker/Dockerfile.mww.{cpu,cuda} (image clone): the run script checks
+# the pin, and the clone is shared mutable state, so both routes must
+# carry the same patch or a CPU/Mac comparison silently diverges.
+for p in per-clip-stream-reset; do
+    python3 "src/train/patches/$p.py" "$CLONE_DIR/microwakeword/test.py"
+done
+
 # --- the environment ---------------------------------------------------------------
 #
 # VIRTUAL_ENV pinned on both uv invocations, for the exact reason documented in
