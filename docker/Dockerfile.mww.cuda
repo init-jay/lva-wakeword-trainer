@@ -35,6 +35,19 @@ RUN git clone https://github.com/OHF-Voice/micro-wake-word /opt/micro-wake-word 
     && git rev-parse HEAD > /opt/mww-commit.txt \
     && pip install --no-cache-dir -e .
 
+# THE IN-RUN STREAMING TEST MUST MEASURE THE DEPLOYMENT CONDITION. The unpatched
+# tflite_streaming_model_roc streams every clip through one Model with persistent
+# state, so the fresh-session cold start happens once per whole stream, while the
+# deployment runtime (pymicro_wakeword) and this repo's eval harness reset per clip.
+# data/lva-mww-cause/report.md: ~1 in 5 of the existing models fires on every cold
+# start yet scored near-chance in-run (failed run 2e907ac: in-run AUC 0.177 vs
+# 292/298 adversarial at the 0.5 gate). Same patch the host route applies
+# (src/scripts/setup-mww-applesilicon-trainer.sh): it prints a warning and exits 0
+# if the MWW_REF checkout moved the anchor, so a rebuild after a microWakeWord
+# main move is safe but the build log is worth reading.
+COPY src/train/patches/per-clip-stream-reset.py /tmp/per-clip-stream-reset.py
+RUN python3 /tmp/per-clip-stream-reset.py /opt/micro-wake-word/microwakeword/test.py
+
 # THE CUDA LIBRARIES, WHICH THE -gpu IMAGE DOES NOT ACTUALLY CONTAIN.
 # WHETHER IT IS FASTER IS UNMEASURED. The CPU baseline is ~46 s per 500 steps on a
 # 25,537-parameter model - about 15 minutes for a 10,000-step run. A model this small
