@@ -86,7 +86,7 @@ check exists:
   piper patch. This matters twice: the augmentation stage **re-invokes the same
   file** (`openwakeword/train.py --augment_clips`) as a subprocess, and a run
   on a de-patched clone dies there with `KeyError: 'piper_sample_generator_path'`
-  after the corpus was already built (measured 2026-09-07). If the guard fires,
+  after the corpus was already built (measured on a real run). If the guard fires,
   do not hand-patch — re-run `./src/scripts/setup-applesilicon-trainer.sh`; nothing
   in the run script ever writes to the clone.
 
@@ -105,8 +105,8 @@ failure.
 ## The tflite conversion (the one thing that aborts on the host)
 
 At the end of a run, `train.py`'s built-in "Converting to tflite" step can
-**abort the whole process** on macOS arm64 (measured 2026-09-07, the
-12:43 run — training itself had just completed):
+**abort the whole process** on macOS arm64 (measured: it hit with the training
+itself having just completed):
 
 ```
 libc++abi: terminating due to uncaught exception of type
@@ -115,7 +115,7 @@ libc++abi: terminating due to uncaught exception of type
 
 That is a C++ thread-state failure after a long torch/OpenMP run, not a model
 problem; do not try to fix it inside the trainer venv. The `.onnx` is already
-written at this point. Since 2026-09-21 this repo's wrapper runs the converter
+written at this point. This repo's wrapper runs the converter
 in a SUBPROCESS (`src/train/oww/train.py: convert_to_tflite`), so the SIGABRT dies
 with the child and the run still exits 0 with a WARNING — but the converter
 still cannot succeed in this venv (the onnx2tf stack aborts even on a cold

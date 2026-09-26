@@ -45,7 +45,7 @@ ls data/corpus/eval/negatives_tts/    # the adversarial corpus
 ```
 
 If the negatives are missing, `eval_model.py` and `compare_models.py` both exit before
-scoring anything — 366 clips across 6 categories for this corpus, so it is not a long run.
+scoring anything — the adversarial set is large, but scoring it is not the long part.
 
 Generation is self-contained — it speaks the TTS protocol to whichever Kokoro
 engine you point it at. On a Mac that is the mlx engine (a uv project, not
@@ -160,8 +160,8 @@ under `data/recordings/holdout/`, with the `_runon` ones kept separate.
 
 **1 · Never compare two models at a fixed threshold.** What varies between training
 runs is largely where the score distribution sits, not how well the model separates
-the classes. Two runs of an *identical* configuration measured 77% and 67% at
-threshold 0.5, and both reached 95% at matched false accepts. `compare_models.py`
+the classes. Two runs of an *identical* configuration measured very different
+detection at threshold 0.5, and the same at matched false accepts. `compare_models.py`
 prints the 0.5 row labelled "do NOT compare on this" — it is there as a reference
 point, and it is the row that has produced the most wrong conclusions in this project.
 Read the matched table.
@@ -189,7 +189,7 @@ false-accept points, not at one.
 Every pooled number is an average over speakers, and an average is exactly what hides
 the person the model does not work for. This is not hypothetical: the run that
 motivated the child-range shifting in `src/train/corpus/augment.py` measured a 4-year-old
-at **24% while the adult read 97%**, and the pooled figure looked healthy throughout.
+far below the adult, and the pooled figure looked healthy throughout.
 
 So `eval_model.py` always prints a per-speaker table when there is more than one
 speaker, and applies the positive-detection gate to the **weakest** speaker as well as
@@ -219,10 +219,10 @@ one reads as a spread rather than as slightly-worse-overall.
 ## The gates
 
 ```
-extend + hey_other false accepts at 0.5    < 2/32   (6%)
-clean positive detection at 0.5            >= 55/56 (98%)
-the same, for the weakest speaker          >= 55/56 (98%)
-detection with a command immediately after >= 27/30 (90%)
+extend + hey_other false accepts at 0.5    a small fraction (< 6%)
+clean positive detection at 0.5            >= 97%
+the same, for the weakest speaker          >= 97%
+detection with a command immediately after >= 90%
 median latency from end of speech          < 120 ms
 ```
 
@@ -243,25 +243,23 @@ quiet. Real run-on recordings are scored separately, by `compare_models.py`.
 accepts per hour at every cutoff. Picking a number without reading it is the same
 mistake as comparing models at 0.5.
 
-The current `hey_seeree_705c23b.json` ships `probability_cutoff: 0.5`, and **0.5 does
-not appear anywhere in that ROC** — the lowest row is 0.55. It was not derived from
-this measurement. Worth fixing before it ships.
+**The shipped cutoff must appear in that ROC.** A manifest can carry a
+`probability_cutoff` that appears nowhere in its own ROC — one did, with the lowest
+measured row above it: the value had not been derived from this measurement. Read
+the file before trusting the shipped value.
 
-Two traps in that file, both visible in the one committed here:
+Two traps in that file, both visible in any ROC:
 
 ```
 Cutoff 1.00: frr=1.0000; faph=0.000     <- NOT an operating point
-Cutoff 0.98: frr=0.1111; faph=0.187
-Cutoff 0.91: frr=0.0672; faph=0.562
 ```
 
 The `frr=1.0000` row is a **synthetic terminator** that microWakeWord appends to close
 the curve when no measured cutoff reaches the faph floor. It is a model that rejects
 everything, and it is the only row satisfying the default `--max-faph 0.0` — which is
 how a manifest once shipped with `probability_cutoff: 1.0`, a model that could not
-fire. `choose_cutoff` now discards `frr == 1.0` rows and errors instead. For this ROC
-that means `--max-faph 0.0` is unachievable and you must state a real budget, e.g.
-`--max-faph 0.2` → cutoff 0.98.
+fire. `choose_cutoff` now discards `frr == 1.0` rows and errors instead, when the
+requested budget is unreachable; state a real `--max-faph` then.
 
 Second, **the ROC is a guide, not the measurement**: it is scored on ambient evaluation
 sets, not on this repo's adversarial negatives, so `extend` false accepts are not in it
@@ -279,8 +277,8 @@ with PyYAML; the system `python3` works too) prints each `(target, setting)` gro
 false-accept and detection rates as mean [min–max] across repeats, grouped by corpus
 ID. If both models you are about to compare are already in the ledger, the answer is
 in the file — read it instead of re-measuring. And remember what the min–max column
-is: two runs of an *identical* config measured 77% and 67%, so the spread on a line is
-the resolution of the measurement, not noise to average away. A candidate whose mean
+is: two runs of an *identical* config measured very different rates, so the spread
+on a line is the resolution of the measurement, not noise to average away. A candidate whose mean
 lands inside the spread of an earlier config is inside the noise floor, and
 "replacing the candidate in `deploy/` requires a measured win" holds across sessions,
 not just within one.
@@ -300,8 +298,8 @@ from both.
 ## When a model is not better
 
 The pipeline is the loop, and the rule is **change ONE thing**. Two runs of an
-identical config differ by ~10 points, so a run that changed three things and moved
-five points has told you nothing. Say which single variable moved, and re-run.
+identical config differ by a visible margin, so a run that changed several things
+and moved a little has told you nothing. Say which single variable moved, and re-run.
 
 ## Known gaps — check before promising output
 
@@ -313,10 +311,10 @@ five points has told you nothing. Say which single variable moved, and re-run.
   it yet (`run-oww-training.sh` does the equivalent for the openWakeWord `.onnx` only).
 - `check_model_alignment.py` on a `.tflite` needs `ai-edge-litert`, which neither
   the eval image nor the host env carries. Use the `.onnx`, or the trainer image.
-- The comments refer to "the tuning log" and "tuning run N" — seventeen runs of this
-  pipeline whose write-up is not published with the repo. The gate values above are
-  the part that matters; treat a run number as provenance for a measurement, not as
-  something you can go and read.
+- The comments refer to "the tuning log" and "tuning run N" — a long series of
+  tuning runs of this pipeline whose write-up is not published with the repo.
+  The gate values above are the part that matters; treat a run number as
+  provenance for a measurement, not as something you can go and read.
 - `pymicro_wakeword/microwakeword.py:158` has an upstream `print(config)`, so every
   mWW run dumps the manifest dict to stdout. Not this repo's bug; ignore the line.
 
