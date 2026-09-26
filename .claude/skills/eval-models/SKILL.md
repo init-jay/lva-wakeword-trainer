@@ -107,7 +107,7 @@ otherwise, and the two render the same voices, so the corpora are interchangeabl
 docker compose -f docker-compose.yml -f docker-compose.cuda.yml up -d kokoro
 ```
 
-`--dry-run` prints the wordlists without calling the server; use it to check the
+`--dry-run` prints the recipe without calling the server; use it to check the
 phrases are right for the wake word first. The lists are tuned for a "hey siri"-like
 phrase — `EXTEND`, `RUNNING` and `HEY_OTHER` carry nearly all the signal and need
 retargeting for a different one.
@@ -324,7 +324,7 @@ five points has told you nothing. Say which single variable moved, and re-run.
 
 A third corpus at `data/corpus/eval/voice_holdout_tts/`, rendered by
 `make render-voice-holdout` (Kokoro on 8900): positives from the voices the
-wordlist's `voice_holdout:` section **holds out of every corpus build** (oww and
+recipe's `voice_holdout:` section **holds out of every corpus build** (oww and
 mww trainers enforce the exclusion; the live TTS catalog is the source of
 truth, so a stale list is an error, not a skip), at speeds inside the
 0.7-1.3 training range. The held-out axis is therefore the voice alone:

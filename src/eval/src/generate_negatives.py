@@ -21,14 +21,14 @@ Categories:
     other_ww    other assistants' wake words
     general     ordinary conversation, for a baseline false-accept rate
 
-THE PHRASES ARE NOT IN THIS FILE. They live in src/wordlists/<wake_word>.yaml, because
+THE PHRASES ARE NOT IN THIS FILE. They live in recipes/<wake_word>.yaml, because
 they are the one part of this pipeline that does not transfer between wake words:
 "hey serious" probes the boundary of "hey seeree" and says nothing about "okay
 jarvis". Hardcoding them here made the repo look general while being about one
-phrase. Write a new one with the `write-wordlists` skill.
+phrase. Write a new one with the `write-recipes` skill.
 
 A copy of this script also lives in the openWakeWord repo (`scripts/`). It has now
-diverged: that copy keeps its phrases inline and has no wordlists package.
+diverged: that copy keeps its phrases inline and has no recipe package.
 
 Examples
 --------
@@ -46,7 +46,7 @@ Examples
     # see what would be produced without calling the server
     python -m eval.generate_negatives --dry-run
 
-    # top up one category after editing its wordlist
+    # top up one category after editing its recipe
     python -m eval.generate_negatives --categories extend
 
 `--url` accepts ONLY the `tcp://` protocol form: the old `http://...` server URL
@@ -76,7 +76,7 @@ from scipy.io import wavfile
 # Runnable as `python src/eval/src/generate_negatives.py` as well as `python -m
 # eval.generate_negatives`. The module form has the `eval` package importable;
 # the plain-path form only has this directory on sys.path, so try both. Then put
-# the repo root on sys.path for `wordlists` - paths.py finds the root.
+# the repo root on sys.path for `recipe` - paths.py finds the root.
 try:
     from eval import paths
 except ImportError:
@@ -94,12 +94,12 @@ if paths is not None:
     # (src/) goes on sys.path. The engines are NOT here -
     # they run as separate servers that this script only speaks to over TCP.
     sys.path.insert(0, str(paths.REPO_ROOT / "src" / "tts-service" / "tts_protocol"))
-    import wordlists  # noqa: E402
+    import recipe  # noqa: E402
     from tts_protocol import TtsClient  # noqa: E402
     from train.corpus.piper import select_piper_voices  # noqa: E402
     DEFAULT_OUT = str(paths.NEGATIVES_DIR)
 else:
-    wordlists = None  # type: ignore
+    recipe = None  # type: ignore
     TtsClient = None  # type: ignore
     select_piper_voices = None
     DEFAULT_OUT = "negatives_tts"
@@ -195,11 +195,11 @@ def main():
                    help="output directory for the WAVs (default: %(default)s, where "
                         "the eval tools look for them)")
     p.add_argument("--wake-word", default="hey seeree",
-                   help="picks src/wordlists/<wake_word>.yaml (default: %(default)s)")
-    p.add_argument("--wordlist", default=None,
-                   help="explicit path to a wordlist YAML, instead of --wake-word")
-    p.add_argument("--categories", nargs="+", default=list(wordlists.EVAL_CATEGORIES),
-                   choices=list(wordlists.EVAL_CATEGORIES),
+                   help="picks recipes/<wake_word>.yaml (default: %(default)s)")
+    p.add_argument("--recipe", default=None,
+                   help="explicit path to a recipe YAML, instead of --wake-word")
+    p.add_argument("--categories", nargs="+", default=list(recipe.EVAL_CATEGORIES),
+                   choices=list(recipe.EVAL_CATEGORIES),
                    help="which categories to generate")
     p.add_argument("--workers", type=int, default=4,
                    help="parallel requests; keep modest, the server is doing the work")
@@ -214,11 +214,11 @@ def main():
     args = p.parse_args()
 
     try:
-        data = wordlists.load(args.wake_word, path=args.wordlist)
-    except wordlists.WordlistError as exc:
+        data = recipe.load(args.wake_word, path=args.recipe)
+    except recipe.RecipeError as exc:
         sys.exit(f"ERROR: {exc}")
-    phrases = wordlists.eval_categories(data, args.categories)
-    print(f"wordlist {data['_path']} for {data['wake_word']!r}: "
+    phrases = recipe.eval_categories(data, args.categories)
+    print(f"recipe {data['_path']} for {data['wake_word']!r}: "
           + ", ".join(f"{k} {len(v)}" for k, v in phrases.items()))
 
     corpus = build_corpus(args.categories, phrases)
@@ -230,7 +230,7 @@ def main():
               f"(nothing written; drop --dry-run to generate)")
         return
 
-    if wordlists is None or TtsClient is None:
+    if recipe is None or TtsClient is None:
         sys.exit("ERROR: this copy of the script has no repo layout to import the "
                  "TTS layer from - run it from the lva-wakeword-trainer checkout")
 

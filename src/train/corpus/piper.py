@@ -54,9 +54,9 @@ from tts_protocol.client import TtsClient
 from .kokoro import run_jobs  # noqa: E402  (the shared thread-pool runner; kokoro imports no piper, no cycle)
 
 # The per-word voice exclusions this module reads. Importable because both trainers
-# put src/ on sys.path before importing the corpus package; the wordlists package
+# put src/ on sys.path before importing the corpus package; the recipe package
 # imports nothing from here, so there is no cycle.
-import wordlists  # noqa: E402
+import recipe  # noqa: E402
 
 # SR = 16000 lives in tts_protocol.audio; the name stays public from this module.
 
@@ -228,9 +228,9 @@ def _piper_render(piper_url, voice, speaker, text, speed=1.0):
 
 
 # The per-word Piper exclusions - voices that render the wake word wrong, and
-# voices nobody has audited - live in src/wordlists/<word>.yaml under
+# voices nobody has audited - live in recipes/<word>.yaml under
 # `voices.piper.{mispronouncing,unaudited}`, read through
-# wordlists.voice_exclusions(). They were dicts keyed by wake word here, which put
+# recipe.voice_exclusions(). They were dicts keyed by wake word here, which put
 # one word's audit results in a module every word shares; the measurements that
 # justify each entry (agreement percentages, what the voices actually said, why the
 # exclusion unit is the speaker rather than the model) moved into that file beside
@@ -512,7 +512,7 @@ def select_piper_voices(piper_url: str, wake_word: str, languages=("en_US", "en_
     cover.
 
     The exclusion step is the whole point, and it is per wake word: the lists come
-    from `voices.piper` in src/wordlists/<word>.yaml. On the example word, six of
+    from `voices.piper` in recipes/<word>.yaml. On the example word, six of
     42 Kokoro voices mispronounced the phrase and that was ~14% of the synthetic
     corpus mislabelled as positives for eleven runs before anyone noticed. Piper is
     not exempt, and with a larger catalog an unaudited list is a bigger exposure,
@@ -521,27 +521,27 @@ def select_piper_voices(piper_url: str, wake_word: str, languages=("en_US", "en_
     found = PiperFleet(piper_url).probe(languages=languages,
                                         max_speakers=max_speakers)
 
-    # A word with no wordlist cannot build a corpus that means anything, so this is
+    # A word with no recipe cannot build a corpus that means anything, so this is
     # the same hard stop build_negative_phrases makes rather than a traceback.
     try:
-        data = wordlists.load(wake_word)
-    except wordlists.WordlistError as exc:
+        data = recipe.load(wake_word)
+    except recipe.RecipeError as exc:
         print(f"ERROR: {exc}")
         sys.exit(1)
-    exclusions = wordlists.voice_exclusions(data, "piper")
-    wordlist_name = Path(data["_path"]).name
+    exclusions = recipe.voice_exclusions(data, "piper")
+    recipe_name = Path(data["_path"]).name
     bad = set(exclusions["mispronouncing"])
     unaudited = set(exclusions["unaudited"])
     excluded = bad | unaudited
     if not bad:
-        print(f"  WARNING: {wordlist_name} has no voices.piper.mispronouncing entry.")
+        print(f"  WARNING: {recipe_name} has no voices.piper.mispronouncing entry.")
         print("           Nothing has been excluded, so any voice whose espeak-ng")
         print("           g2p guesses the wake word wrong is contributing")
         print("           MISLABELLED POSITIVES. Six of 42 Kokoro voices did exactly")
         print("           that on the example word (~14% of that corpus). Run")
         print("           src/scripts/audit_voices.py --tts tcp://<that instance>,")
         print("           listen to the shortlist, and paste what it prints into")
-        print(f"           {wordlist_name}.")
+        print(f"           {recipe_name}.")
 
     # Match both forms. The audit scores SPEAKERS - en_US-l2arctic-medium ran from
     # :ASI at 0% to :PNV at 100% on identical phonemes - so most entries are
@@ -570,5 +570,5 @@ def select_piper_voices(piper_url: str, wake_word: str, languages=("en_US", "en_
         print("           mislabelled positives and get no child-range copy:")
         print(f"           {', '.join(names[:8])}{' ...' if len(names) > 8 else ''}")
         print("           Audit them against THIS Piper instance, or add them to")
-        print(f"           voices.piper.unaudited in {wordlist_name}.")
+        print(f"           voices.piper.unaudited in {recipe_name}.")
     return kept

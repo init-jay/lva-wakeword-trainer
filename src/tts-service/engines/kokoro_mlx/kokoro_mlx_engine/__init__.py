@@ -38,7 +38,7 @@ TWO THINGS TO KNOW BEFORE USING THIS FOR A REAL CORPUS.
   * ITS AUDIO IS NOT THE SERVER'S. bf16 weights from mlx-community/Kokoro-82M-bf16
     and misaki G2P, against the server's own stack. Timing agrees; pronunciation is
     unverified, and this repo already excludes voices that mispronounce the wake word
-    (src/wordlists/<word>.yaml, voices.kokoro.mispronouncing), so G2P differences are
+    (recipes/<word>.yaml, voices.kokoro.mispronouncing), so G2P differences are
     not cosmetic. A corpus generated
     this way needs an eval against one that was not, not an assumption.
 

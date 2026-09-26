@@ -12,7 +12,7 @@ WAVs, separate after it. The TTS half speaks the protocol in `src/tts-service/` 
 |---|---|
 | `augment.py` | silence trimming, and the child-range pitch/formant copies |
 | `kokoro.py` | the Kokoro corpus client over the TTS protocol (server pool, voice probe, single/timed/batched render), moved verbatim out of `src/train/oww/train.py` so both trainers can use it; it speaks `tcp://` engines only (the MLX one on a Mac, the Docker one on the box); the run-on generator stays in the oWW trainer until mWW has run-on positives |
-| `negatives.py` | the negative wordlist, and the Kokoro mispronunciation list |
+| `negatives.py` | the negative recipe, and the Kokoro mispronunciation list |
 | `real.py` | real recordings into a corpus, weighted by repetition |
 | `piper.py` | Piper generation over the TTS protocol, plus the Piper voice metadata (exclusion tables, sex map) |
 | `positives.py` | the plain-positive sentence templates and their speed grid, shared by both engines |
@@ -84,9 +84,9 @@ Two lists. The first is per wake word — how a voice handles "seeree" says noth
 about how it would handle another phrase — so it lives in that word's YAML. The second
 is a property of the voice rather than of the phrase, so it stays in code.
 
-**1. `voices.<engine>.mispronouncing` in `src/wordlists/<word>.yaml`.** The voices to
+**1. `voices.<engine>.mispronouncing` in `recipes/<word>.yaml`.** The voices to
 exclude, under `piper:` or `kokoro:`. `audit_voices.py` prints this block ready to
-paste, and `wordlists.validate()` rejects a section it cannot use — an unknown engine
+paste, and `recipe.validate()` rejects a section it cannot use — an unknown engine
 or a misspelled key would otherwise be an exclusion that silently does nothing.
 
 **Key them per SPEAKER, not per model.** The expectation going in was the opposite —

@@ -37,7 +37,7 @@ from tqdm import tqdm
 # src/ while data/ and output/ stayed at the root.
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
-# The IMPORT root: `train`, `wordlists` and the eval modules import by their
+# The IMPORT root: `train`, `recipe` and the eval modules import by their
 # pre-reorg names, so what was added to sys.path at the git root is now src/.
 SRC_ROOT = REPO_ROOT / "src"
 
@@ -65,7 +65,7 @@ from train.corpus.kokoro import (KokoroPool,  # noqa: E402
                                  probe_kokoro_servers, run_jobs)
 from train.corpus.negatives import (LEGACY_VOICE_MARKER,  # noqa: E402
                                     TRAINING_COMMANDS, build_negative_phrases,
-                                    load_wordlist_or_exit)
+                                    load_recipe_or_exit)
 from train.corpus.piper import (generate_piper_samples,  # noqa: E402
                                 select_piper_voices)
 from train.corpus.positives import (PLAIN_SPEED_GRID, PLAIN_SPEEDS,  # noqa: E402
@@ -76,7 +76,7 @@ from train.corpus.real import (  # noqa: E402
 )
 from train import ownership, provenance  # noqa: E402
 from train.corpus import manifest as corpus_manifest  # noqa: E402
-from wordlists import (exclude_voice_holdout, voice_exclusions,  # noqa: E402
+from recipe import (exclude_voice_holdout, voice_exclusions,  # noqa: E402
                        voice_holdout)
 
 warnings.filterwarnings("ignore", message="Reached EOF prematurely")
@@ -804,7 +804,7 @@ def main():
     parser = argparse.ArgumentParser(description="Train a custom OpenWakeWord model")
     parser.add_argument("--wake-word", default="hey seeree", help="Wake word/phrase to train")
     parser.add_argument("--samples-per-voice", type=int, default=300,
-                        help="Samples per Kokoro voice (default: %(default)s). Raised from\n                             200 when the wordlists grew: 59 negative phrases and 60\n                             run-on command/speed combinations need more renderings each\n                             to keep per-item density up.")
+                        help="Samples per Kokoro voice (default: %(default)s). Raised from\n                             200 when the recipe grew: 59 negative phrases and 60\n                             run-on command/speed combinations need more renderings each\n                             to keep per-item density up.")
     parser.add_argument("--training-steps", type=int, default=50000,
                         help="Steps for the first training sequence (default: "
                              "%(default)s). openwakeword scales warmup, hold and the "
@@ -1033,7 +1033,7 @@ def main():
                              "(default: %(default)s). 0 disables them.")
     parser.add_argument("--exclude-voices", default="",
                         help="Comma-separated Kokoro voices to skip, added to the "
-                             "wordlist's voices.kokoro.mispronouncing for this wake "
+                             "recipe's voices.kokoro.mispronouncing for this wake "
                              "word. Use for a wake word nobody has audited yet.")
     parser.add_argument("--include-legacy-voices", action="store_true",
                         help="Keep Kokoro's v0 voices, which are skipped by default. "
@@ -1193,12 +1193,12 @@ def main():
     print(f"  {len(pool)} server(s), {len(kokoro_voices)} shared English voices")
 
     # The voices that render THIS phrase wrong are per-word data, so they come
-    # from the wordlist rather than from a table in this file: how a voice says
+    # from the recipe rather than from a table in this file: how a voice says
     # "seeree" says nothing about how it says another phrase. This is the same
     # hard stop build_negative_phrases makes further down, hit earlier - a word
-    # with no wordlist cannot produce a corpus that can be measured either.
-    wordlist = load_wordlist_or_exit(wake_word)
-    excluded = set(voice_exclusions(wordlist, "kokoro")["mispronouncing"])
+    # with no recipe cannot produce a corpus that can be measured either.
+    recipe = load_recipe_or_exit(wake_word)
+    excluded = set(voice_exclusions(recipe, "kokoro")["mispronouncing"])
     excluded.update(v.strip() for v in args.exclude_voices.split(",") if v.strip())
 
     # The v0 legacy voices, dropped by default. Reported separately from the
@@ -1229,36 +1229,36 @@ def main():
             print("ERROR: every available voice is excluded!")
             sys.exit(1)
 
-    # THE VOICE HOLDOUT (improvement.md P1.2): the voices the wordlist's
+    # THE VOICE HOLDOUT (improvement.md P1.2): the voices the recipe's
     # `voice_holdout:` section reserves for the synthetic ranking set are
     # excluded from every corpus build, so that set stays voice-disjoint from
     # training. The live catalog is the source of truth: an entry it no
     # longer offers means the section has drifted from the engine, and
     # that is an error - the silent outcome is the exclusion ending up empty
     # and the corpus quietly training on a held-out voice.
-    # A wordlist without the section is a no-op, and says so.
+    # A recipe without the section is a no-op, and says so.
     # Runs BEFORE the corpus-mode decision because the exclusion is part of
     # what the reuse check validates: the cf9c065b reuse, 2026-09-22, was a
     # run whose effective voice set differed from the corpus on exactly this
     # line and nothing else.
-    holdout = voice_holdout(wordlist)
+    holdout = voice_holdout(recipe)
     holdout_kokoro = holdout.get("kokoro") or []
     if holdout_kokoro:
         n_before = len(kokoro_voices)
         kokoro_voices, holdout_missing = exclude_voice_holdout(
             "kokoro", kokoro_voices, holdout)
         if holdout_missing:
-            sys.exit(f"ERROR: the voice holdout ({wordlist['_path']}) names "
+            sys.exit(f"ERROR: the voice holdout ({recipe['_path']}) names "
                      f"Kokoro voice(s) the live catalog does not offer: "
                      f"{holdout_missing}. The catalog is the source of "
                      f"truth - update or delete the stale entries in the "
-                     f"wordlist's `voice_holdout:` section rather than "
+                     f"recipe's `voice_holdout:` section rather than "
                      f"rebuilding a corpus whose holdout cannot be enforced.")
         print(f"  Excluding {n_before - len(kokoro_voices)} voice-holdout "
               f"voice(s) reserved for the synthetic ranking set: "
               f"{', '.join(holdout_kokoro)}")
     else:
-        print(f"  NOTE: no voice-holdout section in {wordlist['_path']} - the "
+        print(f"  NOTE: no voice-holdout section in {recipe['_path']} - the "
               f"synthetic ranking set has no reserved voices")
 
     # The Piper half, resolved here for the same reason (and only when it is
@@ -1280,10 +1280,10 @@ def main():
             piper_voices, holdout_missing = exclude_voice_holdout(
                 "piper", piper_voices, holdout)
             if holdout_missing:
-                sys.exit(f"ERROR: the voice holdout ({wordlist['_path']}) "
+                sys.exit(f"ERROR: the voice holdout ({recipe['_path']}) "
                          f"names Piper (voice, speaker) pair(s) the live "
                          f"audited selection does not carry: {holdout_missing}. "
-                         f"Update the wordlist's `voice_holdout:` section to "
+                         f"Update the recipe's `voice_holdout:` section to "
                          f"match the catalog this corpus is built from.")
 
     # === CORPUS MODE: reuse the frozen corpus or rebuild it =====================
@@ -1426,7 +1426,7 @@ def main():
 
         # Negative phrases - see build_negative_phrases for why the confusable ones
         # (near-misses of the wake word) are the important half of this list.
-        print("\n[Negative wordlist]")
+        print("\n[Negative recipe]")
         negative_phrases = build_negative_phrases(wake_word, args.negatives_file,
                                                  with_commands=args.runon_fraction > 0)
         print(f"  Total negative phrases: {len(negative_phrases)}")
@@ -1595,7 +1595,7 @@ def main():
     # cover the final tree). It is what --corpus reuse validates against on the
     # next run, and what provenance hashes into the run tag's corpus half.
     if not args.skip_corpus:
-        from wordlists import path_for  # recorded, not gated: the training confusables
+        from recipe import path_for  # recorded, not gated: the training confusables
         # The manifest's shaping is the REQUESTED shaping (corpus_shaping - what
         # matches_requested diffs on reuse, unchanged) plus the holdout list, so a
         # reader can see the exclusion without re-deriving it: the corpus the
@@ -1621,7 +1621,7 @@ def main():
                               "positive_test": n_pos_test,
                               "negative_train": n_neg_train,
                               "negative_test": n_neg_test},
-            wordlist_path=path_for(wake_word),
+            recipe_path=path_for(wake_word),
             wall_time_s=time.time() - corpus_start)
 
     # Create config and run training. The training-stage hyperparameters that

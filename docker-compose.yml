@@ -63,9 +63,13 @@ services:
       # Trained models and their manifests. A SEPARATE TREE from the corpus, so the
       # rmtree above cannot reach a model even in principle.
       - ./output:/app/output
-      - ./src/wordlists:/app/src/wordlists:ro       # the phrases, per wake word
-      # SOURCE IS MOUNTED, NOT BAKED IN. The images COPY src/train/ and src/tts-service/ so
-      # their build-time import check has something to check, and these mounts shadow
+      - ./src/recipe:/app/src/recipe:ro       # the loader
+      # The data itself. The loader resolves it at <repo-root>/recipes, and inside
+      # this image the repo root is /app - so without this mount the trainers would
+      # import cleanly and then fail to find a single phrase list.
+      - ./recipes:/app/recipes:ro
+      # SOURCE IS MOUNTED, NOT BAKED IN. The images COPY src/train/, src/tts-service/ and
+      # src/recipe/ so their build-time import check has something to check, and these mounts shadow
       # that copy at runtime - so editing a trainer or a script does not mean
       # rebuilding a CUDA image. Read-only: the trainers read their source, they
       # never write it.
@@ -76,7 +80,7 @@ services:
       - ./src/tts-service:/app/src/tts-service:ro
       - ./src/scripts:/app/src/scripts:ro
     environment:
-      # /app/src is the import root: the repo modules (train, wordlists, eval) import by
+      # /app/src is the import root: the repo modules (train, recipe, eval) import by
       # their pre-reorg names, and they are mounted there, not installed.
       - PYTHONPATH=/app/src
       # Named explicitly: inside this container the trainers' loopback defaults
@@ -97,9 +101,12 @@ services:
       # output/ is models. train.py rmtree's data/corpus/<wake_word>/oww/ every run.
       - ./data:/app/data
       - ./output:/app/output
-      - ./src/wordlists:/app/src/wordlists:ro
-      # SOURCE IS MOUNTED, NOT BAKED IN. The images COPY src/train/ and src/tts-service/ so
-      # their build-time import check has something to check, and these mounts shadow
+      - ./src/recipe:/app/src/recipe:ro
+      # The data, at the path the loader derives from its own location (see the
+      # mww service above for why the mount is not optional).
+      - ./recipes:/app/recipes:ro
+      # SOURCE IS MOUNTED, NOT BAKED IN. The images COPY src/train/, src/tts-service/ and
+      # src/recipe/ so their build-time import check has something to check, and these mounts shadow
       # that copy at runtime - so editing a trainer or a script does not mean
       # rebuilding a CUDA image. Read-only: the trainers read their source, they
       # never write it.

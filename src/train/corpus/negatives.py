@@ -1,4 +1,4 @@
-"""The negative wordlist: what the model must learn to reject.
+"""The negative recipe: what the model must learn to reject.
 
 Engine-agnostic because it is text - the phrases are rendered to WAVs by whichever
 TTS the trainer uses, and both trainers need the same list for the same measured
@@ -8,17 +8,17 @@ Kept deliberately DISJOINT from the eval corpus in generate_negatives.py. The
 false-accept gates in the tuning log are scored on that corpus, so a phrase appearing
 in both would turn a generalisation measurement into a memorisation one. This module
 used to ask the reader to check that by hand before adding a phrase; the phrases now
-live in the wake word's wordlist, where wordlists.validate() checks it.
+live in the wake word's recipe, where recipe.validate() checks it.
 """
 
 import sys
 from pathlib import Path
 
 # The per-word tables - confusable phrases and the voices that render this phrase
-# wrong - live in src/wordlists/<word>.yaml, not here. This module keeps only the
+# wrong - live in recipes/<word>.yaml, not here. This module keeps only the
 # word-agnostic lists: a wake-word-keyed dict in a module every wake word shares
 # makes a new phrase a code edit, and skipping that edit fails silently.
-import wordlists
+import recipe
 
 # Negatives that are useful whatever the wake word is: ordinary openers, and the
 # wake words of other assistants.
@@ -46,8 +46,8 @@ TRAINING_COMMANDS = [
 ]
 
 # Voices that mispronounce the wake word are per-word data and live in the
-# wordlist: `voices.kokoro.mispronouncing` in src/wordlists/<word>.yaml, read
-# through wordlists.voice_exclusions(). The rationale that used to sit here - how
+# recipe: `voices.kokoro.mispronouncing` in recipes/<word>.yaml, read
+# through recipe.voice_exclusions(). The rationale that used to sit here - how
 # the six were judged, why they are excluded from the negatives as well as the
 # positives, and why duration is not a usable proxy for listening - moved with
 # them, so it is beside the list it explains.
@@ -86,39 +86,39 @@ handicap it first appears - see src/tts-service/engines/kokoro_mlx/.
 
 # Both per-word tables that used to live here - MISPRONOUNCING_VOICES and
 # CONFUSABLE_NEGATIVES, each a dict keyed by wake word - moved to
-# src/wordlists/<word>.yaml, as `voices.kokoro.mispronouncing` and
+# recipes/<word>.yaml, as `voices.kokoro.mispronouncing` and
 # `train.confusable`. The rationale moved with them, so the measurements that
 # justified each entry sit beside the entries instead of in a module every wake
 # word shares, where the next word's author has to work out which parts transfer.
 
 
-def load_wordlist_or_exit(wake_word: str) -> dict:
-    """wordlists.load(wake_word), or its actionable message and exit(1).
+def load_recipe_or_exit(wake_word: str) -> dict:
+    """recipe.load(wake_word), or its actionable message and exit(1).
 
     Shared by every corpus entry point that needs the per-word tables, so the
-    failure reads the same whichever stage hits it first: no wordlist for this
+    failure reads the same whichever stage hits it first: no recipe for this
     wake word, or one that would produce a misleading measurement. Exiting rather
     than raising is the convention of the modules around this one - they are CLI
     stages, and a traceback for a missing data file hides the instruction that
-    wordlists already wrote ("Write one with the `write-wordlists` skill").
+    recipe already wrote ("Write one with the `write-recipes` skill").
     """
     try:
-        return wordlists.load(wake_word)
-    except wordlists.WordlistError as exc:
+        return recipe.load(wake_word)
+    except recipe.RecipeError as exc:
         print(f"ERROR: {exc}")
         sys.exit(1)
 
 
 def build_negative_phrases(wake_word: str, negatives_file: str = None,
                            with_commands: bool = True) -> list:
-    """Assemble the negative wordlist: base phrases plus confusables.
+    """Assemble the negative recipe: base phrases plus confusables.
 
     Confusables come from --negatives-file if given, otherwise from the wake
-    word's own wordlist (`train.confusable` in src/wordlists/<word>.yaml).
+    word's own recipe (`train.confusable` in recipes/<word>.yaml).
     Training without any is the single biggest measured cause of false accepts,
     so it warns rather than proceeding quietly.
 
-    A word with NO wordlist is an error rather than a warning: the wordlist is
+    A word with NO recipe is an error rather than a warning: the recipe is
     step 1 of the pipeline and the eval harness cannot run without one either, so
     a corpus built for a word that has none is a corpus that cannot be measured.
     --negatives-file stays as the escape hatch for a list kept elsewhere.
@@ -141,8 +141,8 @@ def build_negative_phrases(wake_word: str, negatives_file: str = None,
         confusables = [p for p in confusables if p and not p.startswith("#")]
         print(f"  Confusable negatives: {len(confusables)} from {path}")
     else:
-        data = load_wordlist_or_exit(wake_word)
-        confusables = wordlists.train_phrases(data)
+        data = load_recipe_or_exit(wake_word)
+        confusables = recipe.train_phrases(data)
         name = Path(data["_path"]).name
         if confusables:
             print(f"  Confusable negatives: {len(confusables)} from {name} "
@@ -151,7 +151,7 @@ def build_negative_phrases(wake_word: str, negatives_file: str = None,
             print(f"  WARNING: {name} carries no train.confusable phrases.")
             print("           The model will reject what it is shown here and fire on")
             print("           anything adjacent to the wake word. Write them with the")
-            print("           `write-wordlists` skill, or pass --negatives-file.")
+            print("           `write-recipes` skill, or pass --negatives-file.")
 
     # A confusable that is also a positive text would teach the two classes the
     # same clip; cheap to check, expensive to debug.

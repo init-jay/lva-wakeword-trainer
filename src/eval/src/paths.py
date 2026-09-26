@@ -31,14 +31,14 @@ coincidence of where the caller happened to be standing.
 from pathlib import Path
 
 # The repo root is the nearest ancestor that has BOTH data/recordings/ and
-# src/wordlists - not a fixed depth above this file. The image mounts this tree
+# src/recipe - not a fixed depth above this file. The image mounts this tree
 # at /app/eval, one level shallower than the checkout's src/eval/src/, and a
-# fixed offset would be right in exactly one of the two places. (wordlists/ moved
+# fixed offset would be right in exactly one of the two places. (recipe/ moved
 # under src/ in the restructure; data/recordings/ stayed at the git root, so the
 # pair now straddles the boundary and still singles the root out.)
 def _repo_root():
     for parent in Path(__file__).resolve().parents:
-        if (parent / "data" / "recordings").is_dir() and (parent / "src" / "wordlists").is_dir():
+        if (parent / "data" / "recordings").is_dir() and (parent / "src" / "recipe").is_dir():
             return parent
     # A fresh clone has no data/ at all: it is gitignored and produced by the record
     # and corpus steps. The root is still unambiguous from TRACKED markers, and
@@ -46,12 +46,12 @@ def _repo_root():
     # that imports it - unrunnable until somebody has been to a microphone. Same walk,
     # weaker anchor, and the strict one above still wins wherever both exist.
     for parent in Path(__file__).resolve().parents:
-        if (parent / "src" / "wordlists").is_dir() and (parent / "Makefile").is_file():
+        if (parent / "src" / "recipe").is_dir() and (parent / "Makefile").is_file():
             return parent
     raise RuntimeError(
         f"no repo root above {__file__}: looked for an ancestor holding BOTH "
-        "data/recordings/ and src/wordlists/, then for one holding the tracked pair "
-        "(src/wordlists/ and Makefile). A fresh clone has no data/ at all - it is "
+        "data/recordings/ and src/recipe/, then for one holding the tracked pair "
+        "(src/recipe/ and Makefile). A fresh clone has no data/ at all - it is "
         "gitignored and produced by the record and corpus steps - so if the second "
         "walk also failed, this file is not inside a checkout of the repo.")
 

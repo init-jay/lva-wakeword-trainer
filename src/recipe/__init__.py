@@ -1,12 +1,12 @@
 """Load and validate the per-wake-word phrase lists.
 
-THE WORDLISTS ARE THE PART OF THIS PIPELINE THAT DOES NOT TRANSFER. Everything else
+THE RECIPES ARE THE PART OF THIS PIPELINE THAT DOES NOT TRANSFER. Everything else
 - the trainers, the augmentation, the gates, the eval harness - works unchanged for
 any wake word. The phrases do not: "hey serious" probes the decision boundary of
 "hey seeree" and says nothing at all about "okay jarvis". Leaving them hardcoded in
 generate_negatives.py made the repo look general while quietly being about one phrase.
 
-So they live here, one YAML file per wake word, and `.claude/skills/write-wordlists`
+So they live here, one YAML file per wake word, and `.claude/skills/write-recipes`
 is how a new one gets written.
 
 WHAT THIS MODULE EXISTS TO ENFORCE, beyond parsing:
@@ -44,7 +44,7 @@ Both trainers and the eval harness read this, so it imports nothing from either.
   an eval positive rendered from one of those voices is inside the training
   distribution no matter how novel its phrasing - and the only axis left to
   generalise on, cheaply and with a real n, is the voice. The holdout section
-  is a tracked part of the wordlist, one configuration per wake word, because
+  is a tracked part of the recipe, one configuration per wake word, because
   a list that lives only in a comment drifts: the trainers exclude it from the
   live catalog and fail when an entry the catalog no longer offers, which is
   what pins it.
@@ -54,14 +54,19 @@ from pathlib import Path
 
 import yaml
 
-# The GIT root: the YAML files beside this module moved with it under src/,
-# but the data/ and output/ trees this module's callers anchor on stay at
-# the git root, which is one level up.
+# The GIT root: this module is the loader (src/recipe/), the per-word YAML
+# files it loads live at the repo root (recipes/), and the data/ and
+# output/ trees its callers anchor on do too - so the root is two levels
+# up from this file.
 REPO_ROOT = Path(__file__).resolve().parents[2]
-WORDLIST_DIR = Path(__file__).resolve().parent
+# The per-word data lives at the repo root, beside data/ and deploy/: hand-
+# written input that the trainers and the eval harness both read. The module
+# here is the loader, the recipes are the input - two different kinds of
+# thing, which is why the data is not under src/.
+RECIPE_DIR = REPO_ROOT / "recipes"
 
 # The eval corpus categories, and what each one is FOR. Read as documentation for
-# whoever writes the next wordlist: a category is a question about the model, not a
+# whoever writes the next recipe: a category is a question about the model, not a
 # bag of phrases, and the answer is only meaningful per category (see
 # src/eval/src/generate_negatives.py on why a pooled false-accept rate means nothing).
 EVAL_CATEGORIES = {
@@ -95,17 +100,17 @@ VOICE_ENGINES = ("kokoro", "piper")
 VOICE_CLASSES = ("mispronouncing", "unaudited")
 
 
-class WordlistError(Exception):
-    """Raised for a wordlist that would produce a misleading measurement."""
+class RecipeError(Exception):
+    """Raised for a recipe that would produce a misleading measurement."""
 
 
 def path_for(wake_word):
-    """wordlists/<safe_wake_word>.yaml - the same slug the rest of the repo uses."""
-    return WORDLIST_DIR / f"{wake_word.replace(' ', '_').lower()}.yaml"
+    """recipes/<safe_wake_word>.yaml - the same slug the rest of the repo uses."""
+    return RECIPE_DIR / f"{wake_word.replace(' ', '_').lower()}.yaml"
 
 
 def load(wake_word=None, path=None, validate_lists=True):
-    """Return the parsed wordlist for a wake word.
+    """Return the parsed recipe for a wake word.
 
     Raises rather than falling back to a default: a silently-empty category reads as
     "the model never false-accepts here", which is the most expensive wrong answer
@@ -113,14 +118,14 @@ def load(wake_word=None, path=None, validate_lists=True):
     """
     if path is None:
         if wake_word is None:
-            raise WordlistError("need either a wake word or a path")
+            raise RecipeError("need either a wake word or a path")
         path = path_for(wake_word)
     path = Path(path)
     if not path.is_file():
-        available = sorted(p.stem for p in WORDLIST_DIR.glob("*.yaml"))
-        raise WordlistError(
-            f"no wordlist at {path}. Available: {', '.join(available) or '(none)'}. "
-            f"Write one with the `write-wordlists` skill - the phrases are specific "
+        available = sorted(p.stem for p in RECIPE_DIR.glob("*.yaml"))
+        raise RecipeError(
+            f"no recipe at {path}. Available: {', '.join(available) or '(none)'}. "
+            f"Write one with the `write-recipes` skill - the phrases are specific "
             f"to the wake word and cannot be defaulted.")
 
     data = yaml.safe_load(path.read_text()) or {}
@@ -128,7 +133,7 @@ def load(wake_word=None, path=None, validate_lists=True):
     if validate_lists:
         problems = validate(data)
         if problems:
-            raise WordlistError(
+            raise RecipeError(
                 f"{path} would produce a misleading measurement:\n  "
                 + "\n  ".join(problems))
     return data
@@ -150,7 +155,7 @@ def eval_categories(data, names=None):
 
 
 def validate(data):
-    """Return a list of problems; empty means the wordlist is usable."""
+    """Return a list of problems; empty means the recipe is usable."""
     problems = []
     wake_word = (data.get("wake_word") or "").strip()
     if not wake_word:
@@ -200,7 +205,7 @@ def validate(data):
 
 
 def train_phrases(data, category="confusable"):
-    """[phrase, ...] from the wordlist's `train:` section, de-duplicated.
+    """[phrase, ...] from the recipe's `train:` section, de-duplicated.
 
     Empty is a legitimate answer for a word nobody has written confusables for,
     and the caller warns rather than failing: the phrases are what stops the
@@ -227,7 +232,7 @@ def voice_exclusions(data, engine):
     caller bug, not a missing audit.
     """
     if engine not in VOICE_ENGINES:
-        raise WordlistError(
+        raise RecipeError(
             f"unknown engine {engine!r}; the voice tables cover "
             f"{', '.join(VOICE_ENGINES)}")
     section = (data.get("voices") or {}).get(engine) or {}
@@ -293,9 +298,9 @@ def _voice_problems(data):
 # Voice holdout (improvement.md P1.2)
 # ---------------------------------------------------------------------------
 
-# A SECTION of the per-wake-word wordlist, not a second file: one configuration
+# A SECTION of the per-wake-word recipe, not a second file: one configuration
 # per wake word, and a voice reservation belongs to the word that measured it.
-# A wordlist that does not carry the section is a no-op - the same way an empty
+# A recipe that does not carry the section is a no-op - the same way an empty
 # entry in the per-wake-word mispronunciation tables is - deliberately not an
 # error, because a fresh word before its first holdout reservation must still
 # train. The trainers print that they ran with no holdout.
@@ -303,16 +308,16 @@ VOICE_HOLDOUT_ENGINES = ("kokoro", "piper")
 
 
 def voice_holdout(data):
-    """The voices the wordlist reserves OUT of every corpus build for this word.
+    """The voices the recipe reserves OUT of every corpus build for this word.
 
-    `data` is a loaded wordlist. Returns
+    `data` is a loaded recipe. Returns
     {"kokoro": [voice, ...], "piper": [(voice, speaker-or-None), ...]} -
-    both lists empty when the wordlist does not carry the section, which is
+    both lists empty when the recipe does not carry the section, which is
     the no-op: call sites check the lists, never the section's presence.
     """
     section = data.get("voice_holdout") or {}
     if not isinstance(section, dict):
-        raise WordlistError(f"{data.get('_path')}: `voice_holdout:` must be a "
+        raise RecipeError(f"{data.get('_path')}: `voice_holdout:` must be a "
                             f"mapping of engine -> voice list")
     kokoro = [str(v).strip() for v in (section.get("kokoro") or []) if str(v).strip()]
     piper = []
@@ -354,7 +359,7 @@ def exclude_voice_holdout(engine, catalog, holdout=None):
 
     `engine` is "kokoro" (catalog = voice strings) or "piper" (catalog =
     (voice, speaker-or-None) pairs); `holdout` is a voice_holdout() result,
-    both lists empty when the wordlist carries no section (the no-op).
+    both lists empty when the recipe carries no section (the no-op).
 
     `missing` is the failure to read: a holdout entry the catalog does not
     offer means the section has drifted from the engine, and the caller

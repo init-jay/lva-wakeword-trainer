@@ -1,7 +1,7 @@
-"""Guards for the voice holdout (a `voice_holdout:` section of the wordlist,
+"""Guards for the voice holdout (a `voice_holdout:` section of the recipe,
 improvement.md P1.2).
 
-The phrase rule in src/wordlists/__init__.py keeps the eval and training
+The phrase rule in src/recipe/__init__.py keeps the eval and training
 corpora disjoint on PHRASE; the voice holdout keeps them disjoint on VOICE.
 One configuration per wake word: the section is a tracked part of the word,
 and a voice reservation belongs to the word that measured it. The enforcement
@@ -12,7 +12,7 @@ contract, from the task it came out of:
   `missing` list the exclusion returns), never a silent skip, because the
   silent outcome is the exclusion ending up empty and the corpus quietly
   training on a voice that was supposed to be held out;
-* a wordlist without the section is a NO-OP (a fresh word before its first
+* a recipe without the section is a NO-OP (a fresh word before its first
   reservation still trains), which is why every call site checks the returned
   lists rather than assuming the section exists.
 """
@@ -24,13 +24,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
-import wordlists  # noqa: E402
+import recipe  # noqa: E402
 
 from train.corpus.negatives import LEGACY_VOICE_MARKER  # noqa: E402
 
 
 def _wl(section):
-    # A loaded-wordlist shape with the holdout section under test: the reader
+    # A loaded-recipe shape with the holdout section under test: the reader
     # and the validator both work on the dict, so no temp file is needed. The
     # eval section carries the six categories validate() requires, with
     # phrases that are neither the wake word nor each other's (the
@@ -55,9 +55,9 @@ KOKORO_CATALOG = ["af_aoede", "af_bella", "am_santa", "am_adam", "bf_isabella"]
 
 
 def test_tracked_section_parses_and_is_nonempty():
-    data = wordlists.load("hey seeree")
-    holdout = wordlists.voice_holdout(data)
-    assert holdout, "the example wordlist's voice_holdout: section is missing or empty"
+    data = recipe.load("hey seeree")
+    holdout = recipe.voice_holdout(data)
+    assert holdout, "the example recipe's voice_holdout: section is missing or empty"
     assert set(holdout) == {"kokoro", "piper"}
     assert all(isinstance(v, str) and v for v in holdout["kokoro"])
     assert all(isinstance(p, tuple) and len(p) == 2 for p in holdout["piper"])
@@ -78,14 +78,14 @@ def test_heldout_voices_are_usable_not_mispronouncing():
     #
     # Per WORD, not repo-level: each section must be usable for the word that
     # carries it, because it only ever renders that word's eval set.
-    for path in sorted(wordlists.WORDLIST_DIR.glob("*.yaml")):
-        data = wordlists.load(path=path)
-        holdout = wordlists.voice_holdout(data)
+    for path in sorted(recipe.RECIPE_DIR.glob("*.yaml")):
+        data = recipe.load(path=path)
+        holdout = recipe.voice_holdout(data)
         if not holdout["kokoro"]:
             continue  # a sectionless word is a no-op, not a failure
         for voice in holdout["kokoro"]:
             assert LEGACY_VOICE_MARKER not in voice, f"{voice} is v0 legacy"
-            bad = set(wordlists.voice_exclusions(data, "kokoro")["mispronouncing"])
+            bad = set(recipe.voice_exclusions(data, "kokoro")["mispronouncing"])
             assert voice not in bad, (
                 f"{voice} mispronounces {data.get('wake_word')!r} - it cannot render "
                 f"an eval positive for that word")
@@ -95,16 +95,16 @@ def test_missing_section_is_a_noop():
     # An absent section reads as BOTH engines empty - the same shape a present
     # but unpopulated section reads as, so call sites check the lists, not
     # the presence of the section itself.
-    holdout = wordlists.voice_holdout(_wl(None))
+    holdout = recipe.voice_holdout(_wl(None))
     assert holdout == {"kokoro": [], "piper": []}
-    kept, missing = wordlists.exclude_voice_holdout("kokoro", KOKORO_CATALOG, holdout)
+    kept, missing = recipe.exclude_voice_holdout("kokoro", KOKORO_CATALOG, holdout)
     assert kept == KOKORO_CATALOG and missing == []
 
 
 def test_kokoro_exclusion_removes_and_reports():
-    holdout = wordlists.voice_holdout(
+    holdout = recipe.voice_holdout(
         _wl({"kokoro": ["af_aoede", "am_santa"]}))
-    kept, missing = wordlists.exclude_voice_holdout("kokoro", KOKORO_CATALOG, holdout)
+    kept, missing = recipe.exclude_voice_holdout("kokoro", KOKORO_CATALOG, holdout)
     assert missing == []
     assert kept == ["af_bella", "am_adam", "bf_isabella"]
 
@@ -113,9 +113,9 @@ def test_kokoro_stale_entry_is_missing_not_silently_dropped():
     # The failure mode the contract exists for: the engine no longer offers a
     # held-out voice. `missing` is what the callers exit on; a silent skip
     # would let the corpus train on a voice that was supposed to be held out.
-    holdout = wordlists.voice_holdout(
+    holdout = recipe.voice_holdout(
         _wl({"kokoro": ["af_aoede", "af_gone_away"]}))
-    kept, missing = wordlists.exclude_voice_holdout("kokoro", KOKORO_CATALOG, holdout)
+    kept, missing = recipe.exclude_voice_holdout("kokoro", KOKORO_CATALOG, holdout)
     assert missing == ["af_gone_away"]  # strings for kokoro, (voice, speaker) for piper
     assert kept == ["af_bella", "am_santa", "am_adam", "bf_isabella"]
 
@@ -127,10 +127,10 @@ def test_piper_pair_and_bare_entries():
         ("en_US-libritts_r-medium", "USL-A"),
         ("en_US-libritts_r-medium", "USL-B"),
     ]
-    holdout = wordlists.voice_holdout(
+    holdout = recipe.voice_holdout(
         _wl({"piper": ["en_GB-alan-medium",
                        "en_US-libritts_r-medium:USL-A"]}))
-    kept, missing = wordlists.exclude_voice_holdout("piper", catalog, holdout)
+    kept, missing = recipe.exclude_voice_holdout("piper", catalog, holdout)
     assert missing == []
     # The bare entry removes its (single) speaker; the pair entry removes only
     # that pair, the sibling speaker stays.
@@ -139,34 +139,34 @@ def test_piper_pair_and_bare_entries():
 
 
 def test_piper_stale_pair_is_missing():
-    holdout = wordlists.voice_holdout(
+    holdout = recipe.voice_holdout(
         _wl({"piper": ["en_GB-alan-medium",
                        "en_GB-nobody-medium:XXX"]}))
-    kept, missing = wordlists.exclude_voice_holdout(
+    kept, missing = recipe.exclude_voice_holdout(
         "piper", [("en_GB-alan-medium", None)], holdout)
     assert ("en_GB-nobody-medium", "XXX") in missing
     assert kept == []
 
 
 def test_section_shape_is_validated():
-    # The phrase-side checks run on every wordlist at load time; the holdout
+    # The phrase-side checks run on every recipe at load time; the holdout
     # section rides on the same validation, so a malformed section fails the
     # load, not a corpus build.
-    assert wordlists.validate(_wl(None)) == []
-    assert wordlists.validate(_wl({"kokoro": ["af_aoede"],
+    assert recipe.validate(_wl(None)) == []
+    assert recipe.validate(_wl({"kokoro": ["af_aoede"],
                                    "piper": ["en_GB-alan-medium"]})) == []
-    problems = wordlists.validate(_wl({"espeak": ["x"]}))
+    problems = recipe.validate(_wl({"espeak": ["x"]}))
     assert len(problems) == 1 and "espeak" in problems[0], problems
-    problems = wordlists.validate(_wl({"kokoro": ["af_aoede", ""]}))
+    problems = recipe.validate(_wl({"kokoro": ["af_aoede", ""]}))
     assert len(problems) == 1 and "voice_holdout.kokoro" in problems[0], problems
-    problems = wordlists.validate(_wl({"kokoro": "af_aoede"}))
+    problems = recipe.validate(_wl({"kokoro": "af_aoede"}))
     assert len(problems) == 1 and "voice_holdout.kokoro" in problems[0], problems
     # A section of the wrong SHAPE at read time is an error, not a no-op: a
     # no-op is the absent section, and a mapping that parses as a scalar would
     # otherwise be silently ignored.
     try:
-        wordlists.voice_holdout(_wl("af_aoede"))
-    except wordlists.WordlistError:
+        recipe.voice_holdout(_wl("af_aoede"))
+    except recipe.RecipeError:
         pass
     else:
         raise AssertionError("a non-mapping section must raise, not no-op")

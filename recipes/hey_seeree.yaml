@@ -419,7 +419,7 @@ eval:
 #
 train:
   # Phrases adjacent to THIS wake word, rendered as training negatives. Built out of
-  # the phrase's own consonants and vowels - the `write-wordlists` skill is how a
+  # the phrase's own consonants and vowels - the `write-recipes` skill is how a
   # new set gets written. Three shapes matter, and all three want those sounds:
   #   - the phrase, continuing into a different word ("hey Serena", "hey season")
   #   - "hey" attached to some other name ("hey Sienna", "hey Cynthia")
@@ -427,7 +427,7 @@ train:
   # Bare "hey" belongs here too: it is what teaches that the second syllable is
   # required rather than optional.
   #
-  # MUST BE DISJOINT FROM `eval:` ABOVE. wordlists.validate() enforces that now,
+  # MUST BE DISJOINT FROM `eval:` ABOVE. recipe.validate() enforces that now,
   # instead of the module comment in negatives.py asking the reader to check by
   # hand. Nine phrases that were in BOTH lists are dropped from here:
   #   eval.extend     hey season, hey sedan, hey seizure, hey serene, hey severe
@@ -594,9 +594,9 @@ voices:
       - "en_US-reza_ibrahim-medium"
       - "en_US-sam-medium"
 
-# THE VOICE HOLDOUT (improvement.md P1.2), a section of this wordlist: one
+# THE VOICE HOLDOUT (improvement.md P1.2), a section of this recipe: one
 # configuration per wake word, and a voice reservation belongs to the word that
-# measured it. The wordlist above keeps the eval and training corpora disjoint
+# measured it. The recipe above keeps the eval and training corpora disjoint
 # on PHRASE; this section keeps them disjoint on VOICE. Every entry below is
 # excluded from every corpus build (src/train/oww/train.py and
 # src/train/mww/corpus.py remove it from the live catalog and exit when an
@@ -632,7 +632,7 @@ voices:
 # the two halves from colliding; the enforcement above still applies and will
 # fail loudly if this instance's catalog has moved.
 #
-# A wordlist without this section is a no-op, not an error: a fresh word
+# A recipe without this section is a no-op, not an error: a fresh word
 # before its first holdout reservation must still build, and the trainers
 # print that they ran with no holdout.
 voice_holdout:

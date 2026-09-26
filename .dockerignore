@@ -3,9 +3,14 @@
 # Every service builds with `context: .`, so without this file the whole repo is
 # tarred and sent to the daemon on every build - INCLUDING data/, which is ~43 GB
 # once download-external-data.sh has run. None of it is reachable by a COPY: the
-# only sources any Dockerfile names are src/train/, src/tts-service/,
+# only sources any Dockerfile names are src/train/, src/tts-service/, src/recipe/,
 # docker/requirements.txt and src/train/patches/*.py. These patterns are
 # context-rooted (no leading **), so they carry the src/ prefix the restructure added.
+#
+# recipes/ - the per-word DATA - is deliberately NOT excluded even though no
+# Dockerfile COPYs it: it is a few tens of KB, and the trainers read it from a
+# bind mount at /app/recipes (docker-compose.yml). Excluding it would cost
+# nothing today and hide a real dependency tomorrow.
 #
 # THIS BECAME LOAD-BEARING WITH THE HOST TRAINER. src/train/train-applesilicon/ has
 # its own uv environment, and a macOS torch install is several GB. It keeps its

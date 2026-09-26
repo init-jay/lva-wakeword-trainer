@@ -66,7 +66,7 @@ servers the corpus runs against, so what this audits is exactly what the corpus
 gets. Speaker voices (piper-style) and plain voices (kokoro-style) are both
 handled; the server's catalog answer decides which.
 
-    # after: paste the printed YAML into src/wordlists/<word>.yaml, under
+    # after: paste the printed YAML into recipes/<word>.yaml, under
     #        voices.<engine>.mispronouncing - that is where the corpus builders read it
 """
 
@@ -88,7 +88,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src" / "tts-servic
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tts_protocol import TtsClient  # noqa: E402
-from wordlists import VOICE_ENGINES, path_for  # noqa: E402
+from recipe import VOICE_ENGINES, path_for  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -346,10 +346,10 @@ def main():
             bad.append(voice)
 
     if bad:
-        # The wordlist keys are the engines the corpus builders read; a server may
+        # The recipe keys are the engines the corpus builders read; a server may
         # report a more specific name ("kokoro_mlx"), which still belongs under
         # its engine's key. Anything else would be rejected by
-        # wordlists.validate() as an unknown engine - an exclusion under a key
+        # recipe.validate() as an unknown engine - an exclusion under a key
         # nobody reads is an exclusion that does nothing, so say so here rather
         # than after a corpus has been built with it.
         key = next((e for e in VOICE_ENGINES if e in engine.lower()), engine.lower())

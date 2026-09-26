@@ -90,7 +90,7 @@ sys.path.insert(0, str(paths.REPO_ROOT / "src" / "tts-service" / "tts_protocol")
 
 from tts_protocol import TtsClient  # noqa: E402
 from train.corpus.piper import select_piper_voices  # noqa: E402
-from wordlists import load, path_for, voice_holdout  # noqa: E402
+from recipe import load, path_for, voice_holdout  # noqa: E402
 
 SR = 16000
 FULL_SCALE = 32768.0
@@ -154,7 +154,7 @@ def _holdout_voices(args, engine, selection, holdout):
         what = "voice(s)" if engine == "kokoro" else "(voice, speaker) pair(s)"
         sys.exit(f"ERROR: the voice holdout ({path_for(args.wake_word)}) names {engine} "
                  f"{what} the live catalog does not carry: {missing}. Update the "
-                 f"wordlist's `voice_holdout:` section to match the catalog, "
+                 f"recipe's `voice_holdout:` section to match the catalog, "
                  f"rather than rendering a set whose holdout cannot be enforced.")
     shown = [e if not isinstance(e, tuple) else f"{e[0]}:{e[1]}"
              if e[1] is not None else e[0] for e in entries]
@@ -176,7 +176,7 @@ def set_manifest(out, args, written, holdout):
     manifest = {
         "set": "voice-holdout synthetic ranking set (improvement.md P1.2)",
         "what_it_is": ("Positives rendered ONLY from the voices "
-                       "the wordlist's `voice_holdout:` section holds out of every corpus "
+                       "the recipe's `voice_holdout:` section holds out of every corpus "
                        "build: voice-disjoint from training, every other axis "
                        "inside the training distribution (speeds 0.7-1.3, plain "
                        "phrase)."),
@@ -187,7 +187,7 @@ def set_manifest(out, args, written, holdout):
                            "the top sweep points go there, not here."),
         "wake_word": args.wake_word,
         "tts": args.tts,
-        "holdout_wordlist": str(path_for(args.wake_word)),
+        "holdout_recipe": str(path_for(args.wake_word)),
         "holdout": {k: (v if not v or not isinstance(v[0], tuple)
                         else [x if not isinstance(x, tuple)
                              else (f"{x[0]}:{x[1]}" if x[1] else x[0])
@@ -353,7 +353,7 @@ def main():
     p.add_argument("--voice-holdout", action="store_true",
                    help="Render the voice-HOLDOUT synthetic ranking set instead of "
                         "the training-distribution sanity corpus: every clip from "
-                        "the voices the wordlist's `voice_holdout:` section reserves out of "
+                        "the voices the recipe's `voice_holdout:` section reserves out of "
                         "every corpus build (the catalog is checked live, and a "
                         "held-out voice it no longer offers is an error, not a "
                         "skip), at speeds inside the 0.7-1.3 training range. "
@@ -410,7 +410,7 @@ def main():
     # even though voice SELECTION for Piper needs the live catalog.
     holdout = voice_holdout(load(path_for(args.wake_word))) if args.voice_holdout else None
     if args.voice_holdout and not holdout:
-        # The no-op rule applies to the TRAINERS (a wordlist without a
+        # The no-op rule applies to the TRAINERS (a recipe without a
         # `voice_holdout:` section: train on the whole catalog, print a note).
         # It does not apply here: with no reserved voices there is nothing to
         # render, and falling back to the in-corpus VOICES list would be a

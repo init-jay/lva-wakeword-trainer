@@ -7,9 +7,9 @@ Steps 1 and 4 need a microphone and run on your machine; steps 2 and 3 run in
 Docker. Replace `"hey seeree"` with your wake word throughout. For what happens
 inside each step, see [../ARCHITECTURE.md](../ARCHITECTURE.md).
 
-**0 · Wordlists and data.** The phrases are the one part that does not transfer
+**0 · Recipes and data.** The phrases are the one part that does not transfer
 between wake words — `extend`, `running` and `hey_other` are built from your phrase's
-own consonants and vowels. Copy `src/wordlists/hey_seeree.yaml`, rewrite those three, then
+own consonants and vowels. Copy `recipes/hey_seeree.yaml`, rewrite those three, then
 fetch the third-party corpora (~43 GB for both trainers; `oww` or `mww` alone is less):
 
 ```bash
