@@ -49,11 +49,14 @@ fi
 # The clone is a shared mutable state: a later pull or checkout moves HEAD, and
 # the venv's editable install silently follows it. Force it back to the pin.
 # Re-running this script is the repair for a moved HEAD too - the run script
-# checks the pin before spending an hour.
+# checks the pin before spending an hour. The working tree carries the patches'
+# edits on purpose (below), and a plain checkout refuses to move HEAD over them
+# ("local changes would be overwritten"), so -f discards them: the patch loop
+# re-applies them immediately after.
 if [[ "$(git -C "$CLONE_DIR" rev-parse HEAD 2>/dev/null)" != "$MWW_COMMIT" ]]; then
     echo "==> checking out $MWW_COMMIT in $CLONE_DIR/"
     git -C "$CLONE_DIR" fetch origin
-    git -C "$CLONE_DIR" checkout "$MWW_COMMIT"
+    git -C "$CLONE_DIR" checkout -f "$MWW_COMMIT"
 fi
 
 # --- patches ----------------------------------------------------------------------
