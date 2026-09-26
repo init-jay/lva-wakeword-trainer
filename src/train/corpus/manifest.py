@@ -30,13 +30,13 @@ are not byte-identical. Reuse therefore means exactly one thing: use the clips
 ALREADY ON DISK. If a re-render is wanted, delete the tree and rebuild; the
 `content_digest` — the sha256 over the final wav tree, AFTER trimming and child
 copies — is the number that moves when it does, and `corpus_identity()` (the
-sha256 of the manifest file itself) is what `train/provenance.py` hashes into the
+sha256 of the manifest file itself) is what `src/train/provenance.py` hashes into the
 run tag's data half.
 
 THE REFUSE-STALE-REUSE RULE. `check_reuse()` compares the requested shaping flags
 against the manifest and exits non-zero on ANY difference, printing the diff.
 This exists because today's `--skip-corpus` fails silently in both directions:
-with a changed `--samples-per-voice` it just ignores the flag (train/oww/train.py
+with a changed `--samples-per-voice` it just ignores the flag (src/train/oww/train.py
 says so in a comment), and with a changed `--augmentation-rounds` it reuses
 stale features as if nothing changed. Silent stale reuse is the failure mode
 this module exists to make loud. A corpus that no longer matches its request is

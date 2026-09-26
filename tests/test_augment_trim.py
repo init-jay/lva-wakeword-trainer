@@ -1,4 +1,4 @@
-"""Guards for trim_silence (train/corpus/augment.py).
+"""Guards for trim_silence (src/train/corpus/augment.py).
 
 Why it matters: BOTH frontends place a fixed-size window relative to the END
 of the array, so trailing silence displaces the phrase in the window the

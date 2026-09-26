@@ -4,7 +4,7 @@
         --voices data/external/piper/voices --port 8898
 
 No backend process: piper-tts 1.7.0 runs inside this one. The models come
-from the shared voices directory that scripts/download-external-data.sh
+from the shared voices directory that src/scripts/download-external-data.sh
 downloads; the default resolves it relative to the repo root.
 """
 import argparse

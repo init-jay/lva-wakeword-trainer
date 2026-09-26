@@ -177,7 +177,7 @@ def main():
     p.add_argument("--smoke", action="store_true",
                    help="Smoke run: the full pipeline SHAPE with the expensive "
                         "parts minified and the corpus REUSED, not regenerated - "
-                        "the end-to-end check for a changed train/ tree, in a few "
+                        "the end-to-end check for a changed src/train/ tree, in a few "
                         "minutes instead of the 14m14s measured full host run. "
                         "What changes: training_steps 200 (default: 10,000), "
                         "eval_step_interval 50 (default: 500, so the evaluation "
@@ -255,7 +255,7 @@ def main():
     p.add_argument("--tag", default=None,
                    help="name for this run's output directory (default: "
                         "<commit>[-dirty]-c<corpus>-h<config>, see "
-                        "train/provenance.py). Each run gets its own - "
+                        "src/train/provenance.py). Each run gets its own - "
                         "model_train_eval refuses to train into an existing "
                         "directory.")
     p.add_argument("--force", action="store_true",
@@ -499,7 +499,7 @@ def main():
 
     # Give the run directory back to the host user before anything on the host has
     # to touch it - the collection step in run-mww-training.sh copies these files
-    # out, and would otherwise hit Permission denied. See train/ownership.py.
+    # out, and would otherwise hit Permission denied. See src/train/ownership.py.
     ownership.hand_back(Path(args.output_dir), work_dir=Path.cwd())
 
     size_kb = model_path.stat().st_size / 1024

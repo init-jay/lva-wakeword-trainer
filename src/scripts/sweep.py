@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A sweep runner for the tuning loop: train -> eval -> (not better) -> retrain.
 
-    train-mww-applesilicon/.venv/bin/python scripts/sweep.py sweep.yaml [--dry-run]
+    src/train/train-mww-applesilicon/.venv/bin/python src/scripts/sweep.py sweep.yaml [--dry-run]
     (the venv is now under src/train/: src/train/train-mww-applesilicon/.venv)
 
 improvement.md P0.5. The loop this repo actually runs had no machine-readable
@@ -10,7 +10,7 @@ logs/training-*.log files and in scrollback, so the answer to "what did we
 already try, and what did it do" had to be reconstructed by re-reading them.
 This script runs a YAML-described grid of trainer options against ONE frozen
 corpus, each point at a deterministic sequence of seeds, and appends one
-record per completed run to output/<wake_word>/runs.jsonl (train/ledger.py),
+record per completed run to output/<wake_word>/runs.jsonl (src/train/ledger.py),
 so the loop ends in a number a program can read and the next session starts
 from what was actually measured instead of from memory.
 
@@ -130,7 +130,7 @@ TRAINER_PYTHON = {
 }
 
 # Keys that SHAPE THE CORPUS, per trainer. A grid key on one of these is
-# refused (module docstring): train/mww/corpus.py and train/oww/train.py list
+# refused (module docstring): src/train/mww/corpus.py and src/train/oww/train.py list
 # the shaping flags the reuse check compares against, and these are those
 # flags in CLI spelling.
 MWW_CORPUS_KEYS = {"samples-per-voice", "negatives-per-voice", "kokoro-fraction",
@@ -170,7 +170,7 @@ def is_first_job(pi, repeat):
 
     Distinct from the first POINT (pi == 0): a repeat of point 0 is NOT the
     first job, and must not run in auto corpus mode - auto reuses a matching
-    manifest but SILENTLY REBUILDS a mismatched one (train/oww/train.py's
+    manifest but SILENTLY REBUILDS a mismatched one (src/train/oww/train.py's
     --corpus auto), so a TTS catalog change between two repeats of point 0
     would redraw the frozen corpus mid-sweep with no error, and every later
     point would then verify against the NEW manifest and pass (bug.md C5,
@@ -370,12 +370,12 @@ def trainer_cmd(target, python, wake_word, base_args, point_args, seed,
     a named function with a test is not.)"""
     args = [*base_args, *point_args, "--seed", str(seed)]
     if target == "mww":
-        # `--ambient` IS the flag, not a positional: train/mww/train.py declares it
+        # `--ambient` IS the flag, not a positional: src/train/mww/train.py declares it
         # with nargs="*", so a bare list of directories parses as "zero ambient sets"
         # and the run dies at its own preflight ("no validation_ambient or
         # testing_ambient data in any feature set") with exit 1, not exit 2.
         # Every point of an early sweep failed this way. The run script gets it
-        # right (scripts/run-mww-training-applesilicon.sh:466), which is how a
+        # right (src/scripts/run-mww-training-applesilicon.sh:466), which is how a
         # divergence between the two survived - and tests/test_sweep.py now
         # asserts this shape.
         ambient_args = ["--ambient", *[str(a) for a in ambient]] if ambient else []
@@ -391,7 +391,7 @@ def trainer_cmd(target, python, wake_word, base_args, point_args, seed,
 def tag_names_no_corpus(tag):
     """True when a run tag's corpus half is provenance's 'absent' placeholder.
 
-    train/provenance.py:167 renders the corpus digest as the literal "absent" when the
+    src/train/provenance.py:167 renders the corpus digest as the literal "absent" when the
     corpus dir holds no manifest, so such a tag names no audio. Named here (rather than
     an inline `in` test) so tests/test_sweep.py can pin the refusal without running a
     sweep.
@@ -409,7 +409,7 @@ def corpus_exists(corpus):
     """Any WAV in the corpus, under either layout: oww lays out four subdirs
     (positive/negative x train/test), mww two (positives, negatives). Listing
     both covers either, the same reason the manifest digest does
-    (train/corpus/manifest.py)."""
+    (src/train/corpus/manifest.py)."""
     subdirs = ("positives", "negatives",
                "positive/train", "positive/test",
                "negative/train", "negative/test")
@@ -472,7 +472,7 @@ def corpus_action(wake_word, target, corpus, features, first_point, dry_run,
 
     if first_point and not manifest.is_file():
         # BUILD. Into an existing tree the corpus stage refuses to append
-        # (it would merge two runs - train/mww/corpus.py), so --clean.
+        # (it would merge two runs - src/train/mww/corpus.py), so --clean.
         cmd = [python, "-m", "train.mww.corpus", "--wake-word", wake_word,
                *corpus_args]
         if corpus_exists(corpus):
@@ -489,7 +489,7 @@ def corpus_action(wake_word, target, corpus, features, first_point, dry_run,
             die(f"corpus built but no {manifest} written - the corpus stage "
                 f"predates the manifest stage. Re-run the current version.")
         # FEATURES, once: derived from the frozen corpus by tracked code, so
-        # one build serves every point and repeat (train/mww/features.py).
+        # one build serves every point and repeat (src/train/mww/features.py).
         if not features.is_dir():
             cmd = [python, "-m", "train.mww.features", "--wake-word", wake_word]
         else:
@@ -529,7 +529,7 @@ def corpus_action(wake_word, target, corpus, features, first_point, dry_run,
             f"(verify --skip exited {result.returncode}, above). The mww corpus is "
             f"frozen for a whole sweep and the sweep never rebuilds a manifest that "
             f"exists, so rebuild it first: "
-            f"scripts/run-mww-training-applesilicon.sh (or move the corpus dir aside), "
+            f"src/scripts/run-mww-training-applesilicon.sh (or move the corpus dir aside), "
             f"then re-run this sweep.")
     if first_point and not features.is_dir():
         result = run_stage("features (none on disk yet)",
@@ -611,7 +611,7 @@ def main():
     corpus_section = dict(spec.get("corpus") or {})
     # The run script's defaults for the host route: Piper on 8898, 12
     # speakers per voice. Everything else (kokoro-url, fractions) defaults
-    # inside train/mww/corpus.py and inherits PIPER_URL/KOKORO_URL.
+    # inside src/train/mww/corpus.py and inherits PIPER_URL/KOKORO_URL.
     corpus_section.setdefault("piper-url", "tcp://127.0.0.1:8898")
     corpus_section.setdefault("piper-speakers", 12)
     corpus_args = options_to_args(corpus_section) if target == "mww" else []
@@ -729,7 +729,7 @@ def main():
             if (out_dir / tag).exists():
                 # A failed earlier run left a partial directory and
                 # model_train_eval refuses to train into one; deleting it is
-                # the only thing --force is for here (train/mww/train.py's
+                # the only thing --force is for here (src/train/mww/train.py's
                 # own text), and the ledger skip above guarantees it cannot
                 # delete a completed run.
                 print(f"  removing partial {out_dir / tag} from a failed earlier run")
@@ -751,7 +751,7 @@ def main():
             # The model was WRITTEN is the real signal, not the exit code -
             # openwakeword exits 1 on its own (broken) tflite conversion
             # after a good run, and a failed run leaves the PREVIOUS model
-            # in place; both checks are train/oww/train.py's, the mtime
+            # in place; both checks are src/train/oww/train.py's, the mtime
             # comparison is the same test run-oww-training.sh re-checks in
             # the shell.
             model_path = out_dir / f"{safe}.onnx"
@@ -815,7 +815,7 @@ def main():
                       f"without an eval block, and the ledger says so")
             else:
                 # Verbatim: the ledger stores what eval printed, not a
-                # re-derivation of it (train/ledger.py, module docstring).
+                # re-derivation of it (src/train/ledger.py, module docstring).
                 eval_block = json.loads(json_path.read_text())
 
         config = None

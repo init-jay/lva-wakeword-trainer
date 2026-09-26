@@ -59,7 +59,7 @@ deep-phonemizer==0.0.19
 # TWO THINGS USED TO LIVE HERE AND DO NOT BELONG:
 #   piper-phonemize - the only Piper import in openWakeWord's train.py is the one
 #                     src/train/patches/skip-piper-import.py deletes, and this repo's Piper
-#                     support (train/corpus/piper.py) talks Wyoming over a socket to
+#                     support (src/train/corpus/piper.py) talks Wyoming over a socket to
 #                     the piper SERVICE. Nothing in this image phonemises locally.
 #   webrtcvad       - microWakeWord's silence trimming, in the mww image, which does
 #                     not read this file. src/train/mww/config.py disables it anyway

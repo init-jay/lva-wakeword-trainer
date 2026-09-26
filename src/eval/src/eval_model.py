@@ -4,7 +4,7 @@ Score a trained wake-word model against the four gates below.
 
 Everything here is measured by streaming - `Model.predict_clip` slides the model
 over the clip 80 ms at a time, exactly as live detection does - because that is
-what the gates are about. `eval/src/check_model_alignment.py` answers a different question
+what the gates are about. `src/eval/src/check_model_alignment.py` answers a different question
 (where in the window the model wants the phrase) by placing clips at fixed offsets;
 a clip that misses at one offset may well fire at the next one in streaming, so the
 two scripts are not interchangeable.
@@ -19,7 +19,7 @@ Gates:
 
 The weakest-speaker gate is not one of the original four. It is here because everything
 else on that list is an average over speakers, and an average is what let a 4-year-old
-sit at 24% detection behind a 97% adult for long enough to need train/corpus/augment.py.
+sit at 24% detection behind a 97% adult for long enough to need src/train/corpus/augment.py.
 
 Two details of the method matter enough to state:
 
@@ -31,7 +31,7 @@ Two details of the method matter enough to state:
 
 The --json output also records a THRESHOLD SWEEP over a fixed 0.05-0.95 grid: a
 re-threshold of the per-clip peaks already computed in this one run, so the run
-ledger (train/ledger.py) can compare models at a matched false-accept budget
+ledger (src/train/ledger.py) can compare models at a matched false-accept budget
 instead of a single threshold - 'Never compare models at a fixed threshold'
 (CLAUDE.md); bug.md C3 step 2 (2026-09-22), the 40-eval manual 0.25-0.85 job.
 
@@ -42,7 +42,7 @@ generate_negatives.py is adversarial by construction - a fifth of it is
 phrase-extending - so a pooled false-accept rate means nothing. Category comes from
 the filename prefix (`extend_000_af_bella.wav` -> `extend`).
 
-BOTH TRAINERS ARE SCORED THROUGH THE SAME CODE. `eval/src/backends.py` picks an
+BOTH TRAINERS ARE SCORED THROUGH THE SAME CODE. `src/eval/src/backends.py` picks an
 openWakeWord or a microWakeWord backend by inspecting the model, so everything below
 is arithmetic over scores. Two consequences worth stating rather than discovering:
 
@@ -55,7 +55,7 @@ is arithmetic over scores. Two consequences worth stating rather than discoverin
 
 POSITIVES DEFAULT TO THE HELD-OUT RECORDINGS, not to everything recorded. The trainer
 globs data/recordings/samples/ recursively, so scoring these gates against that tree
-measures memorisation; `eval/src/paths.py` carries the split and warns if a run is pointed
+measures memorisation; `src/eval/src/paths.py` carries the split and warns if a run is pointed
 back inside it. The `_runon` directories are excluded here on purpose - this file
 builds its own command-following case by concatenating a command onto a plain clip,
 so a real run-on recording among the positives would be scored as the phrase alone.
@@ -89,7 +89,7 @@ import scipy.io.wavfile
 # Runnable as `python src/eval/src/eval_model.py` as well as `python -m
 # eval.eval_model`. The module form is the eval image's: src/ is mounted as the
 # `eval` package, so the package is importable. The plain-path form - the host
-# invocation, scripts/setup-eval-host.sh - only has this directory on
+# invocation, src/scripts/setup-eval-host.sh - only has this directory on
 # sys.path, so try both. The same guard the other scripts here carry.
 try:
     from eval import backends, paths
@@ -297,7 +297,7 @@ def report_by_speaker(rows, spans):
     NOT behind a flag, and printed whenever there is more than one speaker. The
     pooled number above it is an average over speakers, and an average over speakers
     is precisely what hides the one who fails: the run that motivated the child-range
-    shifting in train/corpus/augment.py measured a 4-year-old at 24% while the adult
+    shifting in src/train/corpus/augment.py measured a 4-year-old at 24% while the adult
     read 97%, and the pooled figure looked healthy throughout.
     """
     print(f"\n  {'speaker':<20}{'n':>4}{'detected':>12}{'median score':>14}"

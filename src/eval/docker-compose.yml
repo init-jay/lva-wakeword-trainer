@@ -26,7 +26,7 @@ services:
       # the mount point is what keeps the in-image package name `eval`, which
       # every `python -m eval.X` invocation depends on.
       - ./src:/app/eval:ro
-      # train/ for `python -m train.mww.manifest`, which cuts the ESPHome manifest
+      # src/train/ for `python -m train.mww.manifest`, which cuts the ESPHome manifest
       # from a measured cutoff - an evaluation decision, so it belongs in this image.
       - ../../src/train:/app/src/train:ro
       # The TTS protocol client, for the corpus generators' --tts-url. The eval

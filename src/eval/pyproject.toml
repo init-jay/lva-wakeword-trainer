@@ -4,15 +4,16 @@ version = "0.1.0"
 description = "Step 3 on the host, for Apple Silicon - the scoring env the Docker image is"
 requires-python = "==3.11.*"
 
-# THE FIFTH HOST ENVIRONMENT, after record/, preflight/, train-applesilicon/ and
-# train-mww-applesilicon/, and the one that needed least justifying: both
+# THE FIFTH HOST ENVIRONMENT, after src/record/, src/preflight/,
+# src/train/train-applesilicon/ and src/train/train-mww-applesilicon/, and the one
+# that needed least justifying: both
 # deployment-runtime wheels (pymicro-wakeword, pyopen-wakeword) publish
 # macosx_15_0_universal2, so nothing here is emulated - no TensorFlow, no torch,
 # no Metal question (there is no accelerator in inference). It exists because
 # scoring is the loop's most-run step and was Docker-only on a Mac, and Docker
 # Desktop on Apple Silicon passes nothing useful through for it.
 #
-# THE PINS ARE A CONTRACT WITH eval/Dockerfile. This env exists to answer "is
+# THE PINS ARE A CONTRACT WITH src/eval/Dockerfile. This env exists to answer "is
 # this model good" the way the device will read it, and the deployment runtime
 # is the two wakeword wheels - so both envs pin the SAME ranges
 # (pymicro-wakeword>=2,<3, pyopen-wakeword>=1,<2, numpy>=2,<3). Let one float
@@ -28,7 +29,7 @@ requires-python = "==3.11.*"
 #
 # WHY THE .venv LIVES HERE rather than in a sibling directory: unlike the
 # trainers (whose source tree is mounted into an image that would sweep a
-# multi-GB .venv along), eval/ is a self-contained compose project whose
+# multi-GB .venv along), src/eval/ is a self-contained compose project whose
 # image bakes in nothing - the sources are mounted, not copied. The price is
 # that this .venv sits inside that build context, which is why .dockerignore
 # beside this file keeps it out of every `docker compose build` upload.
@@ -59,7 +60,7 @@ dependencies = [
 # openwakeword is DELIBERATELY NOT a dependency here. Its setup.py pins
 # torchaudio>=0.13.1,<1, and a full resolve of that would drag torch into a
 # scoring env for a module (openwakeword.model) that uses no torch at all.
-# scripts/setup-eval-host.sh installs the shared openwakeword/ clone
+# src/scripts/setup-eval-host.sh installs the shared openwakeword/ clone
 # `uv pip install --no-deps -e` instead - the same move both trainer envs
 # make, for the same pin. All eight of that script's patches touch only
 # train.py (it passes it as each patch's sole target), so the inference path

@@ -58,7 +58,7 @@ corpus actually uses - the per-engine protocol servers on 8898 (piper) and
 8899/8901 (the two docker kokoro instances; the Mac's in-process mlx one
 defaults to 8900) - and it can batch, because that is how the corpus renders.
 A raw `http://` URL is also accepted for the un-wrapped Kokoro-FastAPI
-(scripts/start-kokoro-host.sh, or the fastapi port of the docker image): that
+(src/scripts/start-kokoro-host.sh, or the fastapi port of the docker image): that
 mode is unbatched only, one clip per request, which is what all the historical
 tables above are.
 

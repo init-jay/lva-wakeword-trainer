@@ -23,7 +23,7 @@ TypeError: augment_clips() got an unexpected keyword argument 'seed'.)
 
 The TTS engines are NOT seedable (Piper's VITS samples noise per call, Kokoro
 exposes nothing), so a same-seed run still renders different audio - which is why
-the corpus is frozen as a manifest instead (train/corpus/manifest.py). The seed
+the corpus is frozen as a manifest instead (src/train/corpus/manifest.py). The seed
 covers everything downstream of the corpus.
 """
 import sys

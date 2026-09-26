@@ -69,7 +69,7 @@ def list_devices(backend: str):
 
 
 class PyAudioSource:
-    """PortAudio capture. Default because ffmpeg's produced audible clicks in record/."""
+    """PortAudio capture. Default because ffmpeg's produced audible clicks in src/record/."""
 
     def __init__(self, device, chunk_samples):
         import pyaudio
@@ -164,7 +164,7 @@ def main():
         raise SystemExit(
             "preflight runs the DEPLOYMENT runtime, which has no ONNX path, and a "
             "live check of a pipeline the device does not run would not mean much.\n"
-            "Convert it first with train/oww/onnx2tflite.py, which verifies the "
+            "Convert it first with src/train/oww/onnx2tflite.py, which verifies the "
             "result, then preflight the .tflite.")
 
     backend = backends.load(args.model, sliding_window_size=args.sliding_window_size)
@@ -247,7 +247,7 @@ def main():
         print("rather than a dead model - try --threshold just under the peak above.")
     elif detections == 0:
         print("Nothing came close. Check the level line above was moving while you")
-        print("spoke, then confirm the model scores your holdout in eval/.")
+        print("spoke, then confirm the model scores your holdout in src/eval/.")
 
 
 if __name__ == "__main__":

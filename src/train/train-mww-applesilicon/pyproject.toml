@@ -8,7 +8,7 @@ description = "microWakeWord host trainer, Apple Silicon - the container-free co
 # `uv sync` with 3.13 selected fails in cargo. TF 2.21 ships cp312 wheels.
 requires-python = ">=3.12,<3.13"
 
-# THE FOURTH HOST ENVIRONMENT, after record/, preflight/ and train-applesilicon/,
+# THE FOURTH HOST ENVIRONMENT, after src/record/, src/preflight/ and src/train/train-applesilicon/,
 # and the reason is the same as train-applesilicon's: Docker Desktop passes no
 # Metal device through, and the container's TF is measured slower on this
 # hardware than the macOS wheel at the same version (SPEED.md).
@@ -73,13 +73,13 @@ dependencies = [
     "webrtcvad-wheels",
     "pyyaml",
 
-    # The repo's own code: train/corpus/piper.py (the corpus client) decodes
+    # The repo's own code: src/train/corpus/piper.py (the corpus client) decodes
     # and resamples with scipy, and every stage shows progress with tqdm.
     # train-applesilicon has neither need.
     "scipy",
     "tqdm",
 
-    # The TTS protocol client: train/corpus/kokoro.py and piper.py speak it over
+    # The TTS protocol client: src/train/corpus/kokoro.py and piper.py speak it over
     # raw TCP sockets (tts-protocol, path source below). The engines themselves
     # run in their own uv projects and carry their own dependencies - same split
     # as the Docker images.

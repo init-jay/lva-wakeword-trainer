@@ -48,7 +48,7 @@ if [[ ! "$WAKE_WORD" =~ ^[A-Za-z][A-Za-z\'â€™-]*([[:space:]]+[A-Za-z][A-Za-z\'â€
 fi
 shift
 
-# The REPO ROOT, not this script's directory - it moved to scripts/ in the reorg
+# The REPO ROOT, not this script's directory - it moved to src/scripts/ in the reorg
 # and every docker compose call below needs the compose file in the working dir.
 cd "$(dirname "$0")/../../"
 
@@ -73,8 +73,8 @@ trap cleanup EXIT
 
 # Rebuild first, unless told not to.
 #
-# WHAT STILL NEEDS A REBUILD, now that docker-compose bind-mounts train/ and
-# scripts/ over the copies in the image: the openwakeword PATCHES, requirements.txt,
+# WHAT STILL NEEDS A REBUILD, now that docker-compose bind-mounts src/train/ and
+# src/scripts/ over the copies in the image: the openwakeword PATCHES, requirements.txt,
 # and the Dockerfiles. Those are applied or installed at build time and cannot be
 # mounted over. Editing train.py no longer needs one - the mount shadows the copy -
 # which is a change from when this line was written.
@@ -336,11 +336,11 @@ fi
 if [[ $STATUS -ne 0 ]]; then
     echo "=== NOTE: training exited $STATUS but the model WAS written."
     echo "    Normally the tflite conversion failing after the .onnx is saved."
-    echo "    Convert with train/oww/onnx2tflite.py, which verifies the result."
+    echo "    Convert with src/train/oww/onnx2tflite.py, which verifies the result."
 fi
 
 # Name the output by the code AND the audio that produced it - see
-# train/provenance.py. train.py files the tag itself - corpus half from the
+# src/train/provenance.py. train.py files the tag itself - corpus half from the
 # manifest written this run, config half from the resolved config - so the
 # archive and the <tag>.config.json beside it are named by one number. Reading it
 # back here rather than recomputing it in the shell is what keeps the two from

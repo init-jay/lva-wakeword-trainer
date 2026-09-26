@@ -119,7 +119,7 @@ def clips_feature_set(directory, truth, sampling_weight, penalty_weight,
             # None, NOT a seed. A seed here hands the split back to upstream's per-FILE
             # shuffle (microwakeword/audio/clips.py:145-157 only builds split_clips when
             # random_split_seed is not None), which scatters the N copies of one recording
-            # across train and validation - the leak train/mww/split.py exists to close,
+            # across train and validation - the leak src/train/mww/split.py exists to close,
             # and it would come back silently, because the counts all still look right.
             # NOTE this factory is unused today: every feature set the trainers assemble is
             # mmap_feature_set, so nothing constructs Clips from this dict. If it ever is

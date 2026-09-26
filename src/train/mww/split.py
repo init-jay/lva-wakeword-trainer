@@ -25,7 +25,7 @@ import re
 # vtlp<ratio>_<file>.wav                         (corpus/augment.py's shifted TTS clips)
 #
 # The third form is easy to miss because it is written by a different producer:
-# train/corpus/augment.py:143 names its formant-shifted copies vtlp{ratio:.2f}_{clip.name},
+# src/train/corpus/augment.py:143 names its formant-shifted copies vtlp{ratio:.2f}_{clip.name},
 # with no real_ prefix. A shifted copy of a synthetic clip is the same utterance in the
 # same voice, so leaving it its own identity leaks exactly what this module exists to stop.
 _COPY_PREFIX_RE = re.compile(
@@ -154,7 +154,7 @@ def partition_indices(names, split_count, holdout_copies=1):
     enumerating the assignment's values as indices would address unrelated rows, and
     every count would still look right because the totals are unchanged. Indexing
     `names` is the only correct source, and here it is checkable without the TensorFlow
-    environment train/mww/features.py needs to run.
+    environment src/train/mww/features.py needs to run.
 
     `by_mode` has exactly the three keys a DatasetDict of splits needs; "dropped" rows
     are returned separately as names, because they are excluded from every split and a

@@ -8,9 +8,9 @@ always used. Engines produce their native rate and convert at the edge:
     engines/kokoro_mlx.py - the latter asks the model for 16 kHz directly)
   * piper renders at 22.05 kHz and resamples down (engines/piper.py)
 
-`time_stretch` moved here from train/corpus/augment.py (2026-09-08), because the
+`time_stretch` moved here from src/train/corpus/augment.py (2026-09-08), because the
 piper engine applies speed with it and this package must not import train/.
-train/corpus/augment.py re-exports it, so every existing import keeps working.
+src/train/corpus/augment.py re-exports it, so every existing import keeps working.
 """
 
 # 16 kHz because that is what the corpus is: every clip in the pipeline is written
@@ -38,7 +38,7 @@ def time_stretch(x, factor: float, sr: int = 16000,
                  frame_ms: float = 30.0, seek_ms: float = 7.0):
     """Lengthen `x` by `factor` without moving pitch (WSOLA overlap-add).
 
-    Moved verbatim from train/corpus/augment.py.
+    Moved verbatim from src/train/corpus/augment.py.
 
     Plain overlap-add at a fixed hop cuts frames at arbitrary phase and the
     reassembled periods fight each other, which on a voiced phrase sounds like

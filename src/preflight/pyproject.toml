@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Listen to a trained wake word model live, on the machine you are sitting at"
 requires-python = ">=3.10"
 
-# Its own host environment, for the same reason record/ has one: this step needs the
+# Its own host environment, for the same reason src/record/ has one: this step needs the
 # MICROPHONE, so it cannot run in a container, and it must not drag in the pinned
 # torch/tensorflow stack the trainers carry.
 #
@@ -12,19 +12,19 @@ requires-python = ">=3.10"
 # tuning-run path, not the deployment one. A preflight exists to answer "will this
 # behave on the device", so it runs the two libraries Linux Voice Assistant itself
 # depends on and nothing else. Scoring a .onnx here would measure a pipeline that
-# never ships - convert it with train/oww/onnx2tflite.py and preflight the .tflite.
+# never ships - convert it with src/train/oww/onnx2tflite.py and preflight the .tflite.
 #
 # Both wheels publish macosx_15_0_universal2 alongside their manylinux ones, so this
 # runs native on Apple Silicon. macOS 15 is the floor; an older Mac falls back to the
 # sdist and will fail to find libtensorflowlite_c.
 #
-# Versions match eval/Dockerfile, so a preflight and an eval of the same model
+# Versions match src/eval/Dockerfile, so a preflight and an eval of the same model
 # go through the same inference code.
 dependencies = [
     "numpy>=2,<3",
     "pymicro-wakeword>=2,<3",
     "pyopen-wakeword>=1,<2",
-    # PortAudio capture, the default here as in record/ - the ffmpeg fallback is kept
+    # PortAudio capture, the default here as in src/record/ - the ffmpeg fallback is kept
     # for hosts without it. Needs the PortAudio headers to build:
     # macOS `brew install portaudio`.
     "pyaudio",

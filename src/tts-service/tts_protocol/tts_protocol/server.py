@@ -27,7 +27,7 @@ WHAT THE SERVER DECIDES, AND WHY IT DECIDES LITTLE:
 
   * EVERY ENGINE CALL UNDER ONE LOCK. Every engine this server is expected to
     host is effectively single-threaded: Kokoro-FastAPI measured at 101.8% CPU
-    - exactly one core - with the GPU idle (train/corpus/kokoro.py,
+    - exactly one core - with the GPU idle (src/train/corpus/kokoro.py,
     KokoroPool); kokoro-mlx is one model instance per process; Piper holds one
     voice resident at a time (engines/piper.py). Letting two connections in at
     once would not run them in parallel, it would make them race for that one

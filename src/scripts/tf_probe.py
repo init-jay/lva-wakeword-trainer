@@ -8,7 +8,7 @@ install, both pinned to 2.21.0. The result is in SPEED.md, "microWakeWord on
 the Mac: host vs. container" - the host won, 1.17x on the full train step.
 
 The shapes are the real model's, transcribed from
-microwakeword/mixednet.py + MODEL_FLAGS in train/mww/train.py: spectrogram
+microwakeword/mixednet.py + MODEL_FLAGS in src/train/mww/train.py: spectrogram
 (time=200, mels=16), batch 128, first conv (5,1) stride 3 -> 32, then MDConv
 blocks - depthwise (7,1)/(11,1) split across the channels, pointwise (1,1) ->
 64 - matching "[5], [7,11], [9,15], [23]" and pointwise_filters 64. The GEMM
@@ -36,7 +36,7 @@ import tensorflow.keras as k
 
 BATCH = 128
 # 1500 ms clip at a 10 ms step - CLIP_DURATION_MS / WINDOW_STEP_MS in
-# train/mww/config.py. This probe uses 200 slices rather than 150 because it
+# src/train/mww/config.py. This probe uses 200 slices rather than 150 because it
 # runs the block's depthwise kernels in series, so their valid-padding drops
 # stack instead of the real MDConv's one ring buffer of max(ksize)-1; 200 keeps
 # the (23,1) in the clear (200 -> 66 -> 50 -> 28 -> 6). The per-element cost is

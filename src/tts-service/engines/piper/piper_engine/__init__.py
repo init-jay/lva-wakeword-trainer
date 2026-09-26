@@ -21,7 +21,7 @@ speakers within one multi-speaker model ~28 ms (the session is reused; only a
 different model file costs a reload).
 
 PIN: piper-tts==1.7.0 with onnxruntime==1.29.0 - the same pair the Wyoming
-host venv (scripts/start-piper-host.sh) and the Docker image install, because
+host venv (src/scripts/start-piper-host.sh) and the Docker image install, because
 1.8.0's G2P path differs and a mixed fleet would be a distribution shift, not
 a version bump.
 

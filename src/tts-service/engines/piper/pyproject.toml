@@ -5,7 +5,7 @@ description = "tts-protocol engine: in-process piper-tts (no Wyoming), for the M
 requires-python = ">=3.11"
 
 # piper-tts is PINNED, not ranged: the Wyoming host venv
-# (scripts/start-piper-host.sh) and the Docker image install 1.7.0, and
+# (src/scripts/start-piper-host.sh) and the Docker image install 1.7.0, and
 # 1.8.0's G2P path differs from 1.7.0's - an unversioned mix across the
 # fleet would be a distribution shift in the trained audio, not a dependency
 # bump. onnxruntime is pinned to the version 1.7.0 actually resolves on this

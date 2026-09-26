@@ -4,7 +4,7 @@
     python -m train.ledger --wake-word "hey seeree" [--show] [--grid-keys K [K...]]
 
 WHAT A RECORD IS. One line per COMPLETED training run: the target (oww/mww), the
-full run tag (train/provenance.py: code + corpus + config, the same string the
+full run tag (src/train/provenance.py: code + corpus + config, the same string the
 model directory is named after), the corpus id (the manifest's short-7 identity,
 so a record says WHICH frozen corpus it trained on), the seed, the resolved
 config the trainer filed as <tag>.config.json, wall time per stage, and the
@@ -152,7 +152,7 @@ def _fmt(value):
 def _unwrap(value):
     """A single-element list as its element.
 
-    mww files its multi-value knobs as lists (train/mww/config.py build():
+    mww files its multi-value knobs as lists (src/train/mww/config.py build():
     training_steps: [50000]) even when the sweep's grid passed a scalar, so
     the label 50000 and the config [50000] must compare equal or the drift
     warning (below) fires on every mww record. Multi-element lists keep
@@ -164,15 +164,15 @@ def _unwrap(value):
 
 
 # Grid key (the trainer's CLI spelling, what the sweep's YAML says) -> the
-# key the RESOLVED config files it under (train/oww/train.py create_config /
-# train/mww/config.py build). bug.md C1 (2026-09-22): the 094e414 sweep ran
+# key the RESOLVED config files it under (src/train/oww/train.py create_config /
+# src/train/mww/config.py build). bug.md C1 (2026-09-22): the 094e414 sweep ran
 # before the grid was threaded into the command, so four rows carried 25k
 # labels around runs that were filed at 50k, and grouping on the label
 # printed an 80.9% "25k" mean that was really a 25k/50k mix - contradicting
 # the hand-built 73.5% verdict in improvement.md. The map is keyed by target
 # because the two trainers file the same CLI option under different names:
-# oww --training-steps lands in config["steps"] (train/oww/train.py:438),
-# mww's in config["training_steps"] as a list (train/mww/config.py:222) -
+# oww --training-steps lands in config["steps"] (src/train/oww/train.py:438),
+# mww's in config["training_steps"] as a list (src/train/mww/config.py:222) -
 # a map that is not target-aware is the same bug wearing a different coat.
 # Keys that spell the same in both (e.g. lr) need no entry: the
 # hyphen-to-underscore fallback in _resolved_value covers them, and a grid
@@ -242,7 +242,7 @@ def _resolved_value(rec, key):
 
 
 def _config_hash(rec):
-    """The tag's h-half: the resolved-config hash (train/provenance.py).
+    """The tag's h-half: the resolved-config hash (src/train/provenance.py).
 
     bug.md C2 (2026-09-22): the 50k group printed n=4 when its four records
     were two (config-hash, seed) pairs, each run at two commits - h94736bd/

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fleet throughput for the Piper corpus path: clips/s vs N instances.
 
-P2.1 in improvement.md shipped the PiperFleet sharding (train/corpus/piper.py)
+P2.1 in improvement.md shipped the PiperFleet sharding (src/train/corpus/piper.py)
 and start-tts-fleet.sh but never measured the N-way throughput the plan
 hypothesised (N x the single-instance rate). This is that measurement.
 

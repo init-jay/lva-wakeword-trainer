@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Prepare the HOST openWakeWord trainer on Apple Silicon. Setup only - it trains
-# nothing; scripts/run-oww-training-applesilicon.sh does that.
+# nothing; src/scripts/run-oww-training-applesilicon.sh does that.
 #
 #     ./src/scripts/setup-applesilicon-trainer.sh
 #

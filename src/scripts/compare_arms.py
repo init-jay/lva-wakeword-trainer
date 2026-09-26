@@ -13,12 +13,12 @@ then prints, per arm:
 
   - corpus_id(s): a loud warning when one arm spans more than one corpus -
     cross-corpus rows must never be silently averaged;
-  - per-speaker detection n/m with a Wilson CI (eval/src/eval_model.py's
+  - per-speaker detection n/m with a Wilson CI (src/eval/src/eval_model.py's
     wilson_interval, imported - the ci95 values already in the ledger came
     from that exact function; per speaker, never pooled across speakers);
   - adversarial false accepts PER CATEGORY, extend and hey_other separately -
     the eval's ADVERSARIAL axis - never pooled with the other categories;
-  - matched-FA detection: B is the SAME rule train/ledger.py's summarise
+  - matched-FA detection: B is the SAME rule src/train/ledger.py's summarise
     prints - the median across swept arms of each arm's own median recorded-
     threshold adv FA, printed with that derivation. Each arm is read AT B on
     its OWN threshold_sweep curve via ledger._at_most_budget - a
@@ -33,7 +33,7 @@ collapse and print n=K (M runs); divergent duplicates print a DETERMINISM
 WARNING naming both tags), _sweep_curve and _at_most_budget (point picks only). Records with no threshold_sweep
 (every pre-sweep row) keep the labelled @-threshold reading and get
 '- (no sweep on file)' in the matched cell - the mixed-vintage fallback
-train/ledger.py carries, because the append-only ledger holds both vintages.
+src/train/ledger.py carries, because the append-only ledger holds both vintages.
 
 Read-only: nothing here opens the ledger for writing.
 """
@@ -55,8 +55,8 @@ if str(REPO_ROOT / "src") not in sys.path:
 # keep the table cells byte-compatible with `python -m train.ledger`.
 from train import ledger  # noqa: E402
 
-# eval/ has no __init__.py on the host: the eval IMAGE mounts eval/src as the
-# package `eval` (eval/docker-compose.yml; tests/test_eval_stats.py replicates
+# src/eval/ has no __init__.py on the host: the eval IMAGE mounts src/eval/src as the
+# package `eval` (src/eval/docker-compose.yml; tests/test_eval_stats.py replicates
 # the mount with the same trick). Register it in-process so wilson_interval
 # is imported rather than reimplemented - a second Wilson could drift from
 # the ci95 values the eval block already recorded.
@@ -66,7 +66,7 @@ if "eval" not in sys.modules:
     sys.modules["eval"] = _pkg
 from eval.eval_model import wilson_interval  # noqa: E402
 
-# The false-accept axis (eval/src/eval_model.py ADVERSARIAL): extend and
+# The false-accept axis (src/eval/src/eval_model.py ADVERSARIAL): extend and
 # hey_other, never pooled with the other negative categories (CLAUDE.md).
 ADVERSARIAL = ("extend", "hey_other")
 
@@ -74,7 +74,7 @@ ADVERSARIAL = ("extend", "hey_other")
 def _load(path):
     """Every record as a list of dicts in file order. Absent file -> [].
 
-    Mirrors train/ledger.py load() for an arbitrary path - the --ledger flag
+    Mirrors src/train/ledger.py load() for an arbitrary path - the --ledger flag
     is what makes this testable with synthetic files without ever touching
     the append-only history."""
     if not path.is_file():
@@ -102,7 +102,7 @@ def _arm_samples(recs):
     sweeps, where one (config, seed) legitimately spans two corpora and the two
     evals are EXPECTED to differ - that is the arm, not a regression. Keying on
     the pair alone shouted a determinism failure at the variable under test,
-    which is the same false positive train/ledger.py widened its own key to
+    which is the same false positive src/train/ledger.py widened its own key to
     stop; the two keys have to agree or this tool contradicts the ledger it
     reads.
     """
@@ -200,7 +200,7 @@ def render(records, grid_key, ledger_file):
         arm_info[value] = dict(recs=recs, n=n, n_runs=n_runs, samples=samples,
                                corpora=corpora, curves=curves, fa0s=fa0s)
 
-    # The common FA budget: the SAME rule train/ledger.py summarise prints -
+    # The common FA budget: the SAME rule src/train/ledger.py summarise prints -
     # the median across swept arms of each arm's own median adv FA at its
     # recorded threshold. Read each arm AT that budget on its OWN curve.
     budget = None
@@ -216,7 +216,7 @@ def render(records, grid_key, ledger_file):
             lines += [
                 f"  matched-FA budget: adv FA <= {budget:.1f}% - the median, across the",
                 f"  {n_swept} swept arm(s), of each arm's own median adv FA at its recorded",
-                "  threshold. The rule train/ledger.py summarise prints.",
+                "  threshold. The rule src/train/ledger.py summarise prints.",
                 "  Each arm is read AT that budget on its OWN curve - a step-function point",
                 "  pick, never interpolated (CLAUDE.md: never compare models at a fixed threshold).",
                 "",
@@ -306,7 +306,7 @@ def render(records, grid_key, ledger_file):
                     "an interpolation.")
             lines.append(cell)
         else:
-            # Mixed-vintage fallback (train/ledger.py): no sweep on file for
+            # Mixed-vintage fallback (src/train/ledger.py): no sweep on file for
             # this arm - the @-threshold reading above is all it has.
             lines.append(f"    det@FA<={budget:.1f}%   -  (no sweep on file; "
                          "@-threshold reading only)"

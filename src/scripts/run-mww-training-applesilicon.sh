@@ -14,7 +14,7 @@
 # Piper-only negative set all stay fixed, mirroring the 30% its openWakeWord
 # sibling already runs (engines swapped). 0.3 needs the Kokoro engine above;
 # KOKORO_FRACTION=0 (or --kokoro-fraction 0) runs all-Piper, the historical corpus,
-# and needs only Piper. The module document: train/mww/corpus.py.
+# and needs only Piper. The module document: src/train/mww/corpus.py.
 #
 # --samples-per-voice N (default 60, the corpus module's) sets the corpus DEPTH
 # and is consumed by this script, applied to the corpus stage only - the train
@@ -30,7 +30,7 @@
 # one of the two produced a firehose that fired on everything Piper-ish and lost
 # its FAPH operating point entirely. Doubling this to 24 (1,968 clips, ~2 minutes
 # of TTS) is the cheap, single-variable counter-test; the measurement lives in
-# train/mww/corpus.py, point 5.
+# src/train/mww/corpus.py, point 5.
 #
 # SKIP_CORPUS=1 / SKIP_FEATURES=1 behave exactly as in run-mww-training.sh.
 #
@@ -49,7 +49,7 @@
 # measures 21.66 clips/s in src/scripts/bench_tts.py, against the ~16 the mww corpus
 # stage ran at against it (improvement.md P2.1 - the corpus stage is the
 # serial wall of a Mac run, ~5 of its ~14 measured minutes). Throughput scales
-# with PROCESSES: PIPER_URLS takes the comma-joined list scripts/start-tts-fleet.sh
+# with PROCESSES: PIPER_URLS takes the comma-joined list src/scripts/start-tts-fleet.sh
 # prints (it starts N instances on 8898+ in the background and waits for each
 # voices round trip), and the corpus shards the fleet BY VOICE - each model
 # pinned to one instance for the whole run, so an instance loads each of its
@@ -62,12 +62,12 @@
 # set, because a comma list is an explicit statement and a bare PIPER_URL left
 # exported from another context is not.
 #
-# SMOKE=1: a few-minute end-to-end check that a changed train/ tree still runs the
+# SMOKE=1: a few-minute end-to-end check that a changed src/train/ tree still runs the
 # whole pipeline: the corpus through the --skip path (no TTS servers; a
 # pre-manifest corpus is reused as-is), the pre-built features, 200-step
 # training, real tflite conversion. It implies SKIP_CORPUS=1 and appends --smoke
 # to both the tag computation and the train stage, so both resolve the same
-# smoke-<stamp> run directory (train/mww/train.py --smoke). The smoke-named model
+# smoke-<stamp> run directory (src/train/mww/train.py --smoke). The smoke-named model
 # files in output/<wake>/mww/ cannot be mistaken for a real run's archive:
 #
 #     SMOKE=1 ./src/scripts/run-mww-training-applesilicon.sh "hey seeree"
@@ -78,7 +78,7 @@ cd "$(dirname "$0")/../../"
 ENV_DIR="src/train/train-mww-applesilicon"
 CLONE="microwakeword"
 CLONE_DIR="src/train/microwakeword"
-# Same pin as scripts/setup-mww-applesilicon-trainer.sh - one value, two files,
+# Same pin as src/scripts/setup-mww-applesilicon-trainer.sh - one value, two files,
 # keep them in lockstep when the fork moves.
 MWW_COMMIT="4665173cd35f1cff9a61e06fc427f124766c488e"
 
@@ -183,7 +183,7 @@ if [[ ! "$KOKORO_FRACTION" =~ ^([0-9]+(\.[0-9]+)?|\.[0-9]+)$ ]]; then
 fi
 if awk -v f="$KOKORO_FRACTION" 'BEGIN { exit !(f >= 0.0 && f < 1.0) }'; then
     : # [0, 1) - 1 is excluded on purpose: the negatives are Piper-only, so Piper
-    # must stay in the corpus (train/mww/corpus.py enforces the same bound).
+    # must stay in the corpus (src/train/mww/corpus.py enforces the same bound).
 else
     echo "ERROR: KOKORO_FRACTION must be in [0, 1) - got $KOKORO_FRACTION." >&2
     echo "       (1 is not allowed: the adversarial negatives are Piper-only.)" >&2
@@ -274,7 +274,7 @@ fi
 export KOKORO_URL
 
 # THE CONTAINER MAY OWN THESE FILES. Both paths write data/corpus/ and output/,
-# and the trainer images run as root - train/ownership.py hands output/ back
+# and the trainer images run as root - src/train/ownership.py hands output/ back
 # afterwards, but data/corpus/ is left as root wrote it. A host run then fails on
 # permissions somewhere unhelpful, so check here where the fix is obvious.
 SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
@@ -434,7 +434,7 @@ fi
 # The tag is computed HERE, after the corpus exists and before training starts -
 # the same reason run-mww-training.sh documents: the corpus is part of the tag,
 # and model_train_eval refuses to train into an existing directory. The checksum
-# guard in train/mww/train.py still applies - it is in the code, not in the shell.
+# guard in src/train/mww/train.py still applies - it is in the code, not in the shell.
 #
 # Computed THROUGH train.mww.train --print-tag, not through train.provenance: the
 # tag's config half (-h) is a hash of the resolved hyperparameters, which only

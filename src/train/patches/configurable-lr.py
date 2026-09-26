@@ -3,7 +3,7 @@
 Learning rate is the first hyperparameter anyone tunes, and upstream it is not
 reachable: `lr = 0.0001` is hardcoded inside `auto_train` (the line that opens
 the sequence-1 block), not a config key, not a CLI flag, not read from
-anywhere. This repo's train/oww/train.py has never touched it - 0.0001 with
+anywhere. This repo's src/train/oww/train.py has never touched it - 0.0001 with
 the per-sequence /10 decay (0.0001 -> 0.00001 -> 0.000001 across the three
 sequences) is upstream's schedule, unchanged, so the default here preserves
 that exact behaviour: a config without "lr" trains at 0.0001 as before.

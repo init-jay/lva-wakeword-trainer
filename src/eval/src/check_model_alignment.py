@@ -25,7 +25,7 @@ Takes either the .onnx or the .tflite. Prefer the .tflite when that is what you
 deploy: a wrong-axis conversion loads cleanly and returns plausible scores while
 detecting nothing, so the artifact that ships is the one worth measuring.
 
-WHY THIS KEEPS ITS OWN LOADER INSTEAD OF USING `eval/src/backends.py`. Step 3
+WHY THIS KEEPS ITS OWN LOADER INSTEAD OF USING `src/eval/src/backends.py`. Step 3
 said to point all three eval tools at the shared backend layer; the other two are on
 it and this one is not, deliberately. That contract is `score(pcm) -> scores`, fed 16
 kHz audio and streamed. This tool never has PCM at the point it calls the model - it
@@ -166,7 +166,7 @@ class WakeWordModel:
     Scoring the tflite matters because it is what actually ships. The ONNX and the
     tflite are not guaranteed to agree - a wrong-axis conversion loads cleanly,
     reports a plausible input shape and returns plausible 0-1 scores while detecting
-    nothing (see train/oww/onnx2tflite.py). Measuring what you deploy removes that
+    nothing (see src/train/oww/onnx2tflite.py). Measuring what you deploy removes that
     whole class of surprise, and skips a conversion step when iterating.
     """
 

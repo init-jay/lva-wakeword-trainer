@@ -24,7 +24,7 @@ response shapes.
 
 The URL is therefore a `tcp://` spec, not an HTTP URL:
 
-  KOKORO_URL=tcp://127.0.0.1:8899,tcp://127.0.0.1:8901 python train/oww/train.py ...
+  KOKORO_URL=tcp://127.0.0.1:8899,tcp://127.0.0.1:8901 python src/train/oww/train.py ...
 
 The old `http://...` / `mlx://...` forms are deliberately rejected by the
 client - they used to mean different backends with different audio, and a

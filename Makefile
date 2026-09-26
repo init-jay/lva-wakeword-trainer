@@ -40,7 +40,7 @@ help:
 
 # The full pipeline at minified size: reuse the corpus, recompute the features,
 # train 200 steps, do the real tflite conversion. The model lands in a smoke
-# directory; the canonical model and .last_run_tag are untouched (train/oww/
+# directory; the canonical model and .last_run_tag are untouched (src/train/oww/
 # train.py --smoke).
 smoke-oww:
 	SMOKE=1 ./src/scripts/run-oww-training-applesilicon.sh "$(WAKE)"

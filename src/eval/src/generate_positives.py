@@ -45,7 +45,7 @@ Examples
         --url tcp://127.0.0.1:8900
 
     # Piper instead of Kokoro (protocol port 8898; the voice list is then the
-    # audited selection from train/corpus/piper.py, so its exclusion tables apply)
+    # audited selection from src/train/corpus/piper.py, so its exclusion tables apply)
     python -m eval.generate_positives --wake-word "hey seeree" \\
         --tts piper --piper-url tcp://127.0.0.1:8898
 
@@ -437,7 +437,7 @@ def main():
             # The trainer's audited selection: drops the voices whose pronunciation
             # of this wake word failed the audit, so the corpus cannot contain
             # mislabelled phrases - the failure mode the Kokoro side spent eleven
-            # runs discovering (train/corpus/piper.py).
+            # runs discovering (src/train/corpus/piper.py).
             selection = select_piper_voices(args.piper_url, args.wake_word,
                                             max_speakers=args.max_speakers)
             if not selection:

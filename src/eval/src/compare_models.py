@@ -46,19 +46,19 @@ Usage, from the repo root:
         output/hey_seeree/oww/hey_seeree_705c23b.onnx \\
         output/hey_seeree/mww/hey_seeree_705c23b.json
 
-    # the same, on the host env (scripts/setup-eval-host.sh) - plain-path form,
+    # the same, on the host env (src/scripts/setup-eval-host.sh) - plain-path form,
     # from the repo root: the `-m eval.X` module form is the image's mount
     src/eval/.venv/bin/python src/eval/src/compare_models.py --models M M2
 
 POSITIVES MUST BE RECORDINGS THE MODEL HAS NOT TRAINED ON, which is why the defaults
-come from `eval/src/paths.py` rather than being spelled out here: the trainer globs
+come from `src/eval/src/paths.py` rather than being spelled out here: the trainer globs
 data/recordings/samples/ recursively, so scoring against that tree reports training
 accuracy - it overstated detection by ~10 points during this work. Passing a
 directory inside samples/ anyway is warned about, not blocked.
 
 Needs onnxruntime and an importable openwakeword for .onnx, plus a TFLite runtime
 and pymicro-features for microWakeWord. The `eval` compose service carries all of
-it and builds native on the Mac; the host env (eval/pyproject.toml) carries the
+it and builds native on the Mac; the host env (src/eval/pyproject.toml) carries the
 same pins.
 """
 
@@ -76,7 +76,7 @@ import numpy as np
 # streaming, same noise-floor padding, same per-clip RNG seed.
 # Runnable as `python src/eval/src/compare_models.py` as well as `python -m
 # eval.compare_models` - the plain-path form is the host invocation
-# (scripts/setup-eval-host.sh). The try/except is the same guard the other
+# (src/scripts/setup-eval-host.sh). The try/except is the same guard the other
 # scripts here carry.
 try:
     from eval import backends, eval_model as ev, paths
@@ -305,7 +305,7 @@ def main():
 
     # PER SPEAKER, at one matched point. Every row above is an average over speakers,
     # so a model that fails one voice and carries the rest reads as merely slightly
-    # worse - the failure mode that produced the 24%/97% split in train/corpus/
+    # worse - the failure mode that produced the 24%/97% split in src/train/corpus/
     # augment.py. One FA count rather than all of them, because the question here is
     # "does any speaker fall off", not "where is the operating point".
     fa = args.per_speaker_fa

@@ -19,7 +19,7 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 # Flat layout: the package directory is tts_protocol/ inside the project root
 # tts-service/tts_protocol/. The trainers and the eval image do not pip-install
-# this at all - train/corpus/__init__.py puts the project root on sys.path -
+# this at all - src/train/corpus/__init__.py puts the project root on sys.path -
 # but the engine uv projects take it as a path dependency, which needs the
 # build backend.
 packages = ["tts_protocol"]

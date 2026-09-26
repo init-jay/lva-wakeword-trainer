@@ -179,7 +179,7 @@ fi
 # --- the run tag -----------------------------------------------------------------
 #
 # Computed HERE, after the corpus exists and before training starts. Both halves of
-# that matter. The corpus is part of the tag (train/provenance.py hashes it), so it
+# that matter. The corpus is part of the tag (src/train/provenance.py hashes it), so it
 # has to be on disk first; and model_train_eval refuses to train into an existing
 # directory, so the tag has to be decided before the run rather than after it. That
 # is the opposite of the openWakeWord side, where the corpus is built by the training

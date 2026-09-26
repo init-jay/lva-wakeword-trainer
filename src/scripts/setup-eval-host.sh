@@ -9,7 +9,7 @@
 # install re-applies the same editable, and the .pth is rewritten with exactly
 # one absolute path.
 #
-# THE PINS IN eval/pyproject.toml MUST STAY EQUAL TO eval/Dockerfile's
+# THE PINS IN src/eval/pyproject.toml MUST STAY EQUAL TO src/eval/Dockerfile's
 # (pymicro-wakeword>=2,<3, pyopen-wakeword>=1,<2, numpy>=2,<3, scipy, PyYAML) or
 # host and container stop scoring the same inference pipeline and a number
 # from one cannot be checked against a number from the other.
@@ -55,7 +55,7 @@ done
 
 # --- the environment ------------------------------------------------------------
 #
-# Python 3.11, the image's base (eval/pyproject.toml): the wheels are py3-none
+# Python 3.11, the image's base (src/eval/pyproject.toml): the wheels are py3-none
 # so the minor cannot change the pipeline, but the same one keeps a host number
 # and a container number apart by nothing at all.
 echo "==> syncing $ENV_DIR"
@@ -96,7 +96,7 @@ printf '%s\n' "$(cd "$CLONE_DIR" && pwd)" > "$SITE/openwakeword-clone.pth"
 
 # --- prove it --------------------------------------------------------------------
 #
-# The same build-time checks eval/Dockerfile's verify block runs, for the same
+# The same build-time checks src/eval/Dockerfile's verify block runs, for the same
 # reason: a missing shared library or feature model surfaces deep inside a run
 # as something that reads like a model problem. Loading a builtin model
 # exercises the bundled libtensorflowlite_c, which merely importing does not.
