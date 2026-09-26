@@ -4,7 +4,7 @@
 # one oww knob the sweep can vary on the host (the configurable-lr patch
 # reads config["lr"], which is not a train.oww.train CLI option). 25k vs
 # the parser default 50k: if 25k holds the per-speaker numbers inside the
-# measured 10-point seed noise, half the wall time is free.
+# measured seed noise, half the wall time is free.
 #
 # Corpus: features are REUSED via the sidecar (same rounds/seed as the
 # corpus build), so no TTS servers are needed to run it. A sweep pins the

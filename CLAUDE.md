@@ -42,8 +42,10 @@ guess a wake word from the repo's existing `hey_seeree` files.
   status written down (`deploy/README.md`), out of `output/` because trainers rmtree
   that tree every run. Replacing the candidate requires a measured win at matched
   false accepts, per speaker. The adversarial negative set is not a constant: it
-  has been widened as the wordlists grew, and a scorecard measured on an older
-  negative set is not comparable to one on the current set, so the staged
+  has been widened when the resolution of the matched-FA comparison demanded it
+  (with few clips, a single clip was worth several points of every row), and a
+  scorecard measured on an older negative set is not comparable to one on the
+  current set, so the staged
   candidate must be re-baselined before a ship call.
 - **Retune in search of the weak voice.** The weakest-detection speaker in the
   campaign this pipeline came out of was a child: it stayed the weakest at every
@@ -68,8 +70,9 @@ Anywhere else, including a Mac: `docker-compose.yml:docker-compose.cpu.yml`, whi
 swaps both trainers for multi-arch CPU images. Slower, and the only in-Docker
 option on Apple Silicon - Docker Desktop passes no Metal
 device through, so there is no MPS image to select and `docker-compose.mps.yml`
-stays empty. Give Docker Desktop enough RAM first: the 17.28 GB feature array is
-mmap'd, and running short of memory page-faults rather than erroring.
+stays empty. Give Docker Desktop enough RAM first: the feature array is
+mmap'd at multi-GB scale, and running short of memory page-faults rather than
+erroring.
 `SKIP_BUILD=1` on either training script reuses the image; needed after a
 `docker builder prune`, since the rebuild is then cold.
 
@@ -130,7 +133,8 @@ edit. If a measurement is claimed, cite where it came from — several were foun
 expensive way, and a plausible-sounding replacement is worse than none.
 
 The plan file (`improvement.md`) and the review file (`bug.md`) were removed
-from the repo: the measurements they carried live on branch `train/hey_seeree`,
+from the repo: the measurements they carried live in SPEED.md on branch
+`train/hey_seeree`,
 the incident history in the git log and the test docstrings. Code comments that
 cite "improvement.md P.." or "bug.md B.." are provenance for the commit that
 implemented or fixed the finding, not links to keep alive.

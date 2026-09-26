@@ -82,7 +82,8 @@ def main():
 
     if "CoreMLExecutionProvider" not in ort.get_available_providers():
         print("CoreMLExecutionProvider not available - nothing to probe. "
-              "Record that in SPEED.md and stop.")
+              "Record that with the repo's measurements (SPEED.md on branch "
+              "train/hey_seeree) and stop.")
         return
 
     # One fixed input: deterministic, and the same array feeds every session.
@@ -109,7 +110,7 @@ def main():
         emb_m = make_session("embedding_model.onnx",
                              ["CoreMLExecutionProvider", "CPUExecutionProvider"])
     except Exception as e:
-        print(f"CoreML session creation FAILED ({type(e).__name__}: {e}) - record in SPEED.md and stop.")
+        print(f"CoreML session creation FAILED ({type(e).__name__}: {e}) - record it with the repo's measurements (SPEED.md on branch train/hey_seeree) and stop.")
         return
     print(f"CoreML sessions created in {time.perf_counter()-t0:.2f} s")
     print(f"  melspec providers in effect: {mel_m.get_providers()}")

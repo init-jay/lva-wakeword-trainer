@@ -201,8 +201,8 @@ to the average. A model can read PASS pooled and FAIL for one voice:
   speaker2              10        9/10         0.956          -210ms
   speaker3               6         3/6         0.520           140ms
 
-  [FAIL]  clean positive detection        40/51 (78%)     >= 98%
-  [FAIL]  weakest speaker (speaker3)      3/6 (50%)       >= 98%
+  [FAIL]  clean positive detection        40/51 (78%)     >= 97%
+  [FAIL]  weakest speaker (speaker3)      3/6 (50%)       >= 97%
 ```
 
 **A large spread across speakers is not fixed by retuning the threshold, and it is not
