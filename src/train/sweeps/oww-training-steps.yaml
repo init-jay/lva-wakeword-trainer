@@ -6,16 +6,11 @@
 # the parser default 50k: if 25k holds the per-speaker numbers inside the
 # measured 10-point seed noise, half the wall time is free.
 #
-# HISTORY, 2026-09-22: this grid was run (twice - see the erratum in
-# improvement.md) on the frozen cf9c065b corpus, which is GONE: it was
-# rebuilt in place as c348af7b (post-reservation, P1.2 voices excluded). A
-# re-run would fail the pinned-digest check, and should - its results are
-# historical, and the lever's verdict (not a win) stands. A future sweep
-# pins the corpus digest that exists on disk when it is written.
-#
-# Corpus: the frozen dd6ccf8 corpus (22,144 clips, manifest present),
-# features REUSED via the sidecar (same rounds/seed as its build). No TTS
-# servers needed. ~10 min (25k) to ~18 min (50k) of training per point.
+# Corpus: features are REUSED via the sidecar (same rounds/seed as the
+# corpus build), so no TTS servers are needed to run it. A sweep pins the
+# corpus digest that exists on disk when it is written; a re-run against a
+# rebuilt corpus would fail the pinned-digest check, and should - it would
+# no longer be comparable to the results it reproduces.
 wake_word: "hey seeree"
 target: oww
 base: {}

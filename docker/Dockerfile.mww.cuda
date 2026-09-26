@@ -5,7 +5,7 @@
 # and is linux/amd64 - it does not run natively on Apple Silicon, and there is no
 # CPU fallback inside it.
 # The suffix leaves room for a .cpu variant beside it, which exists (Dockerfile.mww.cpu);
-# a .mps one cannot exist - Docker Desktop passes no Metal device through (SPEED.md).
+# a .mps one cannot exist - Docker Desktop passes no Metal device through (SPEED.md on branch train/hey_seeree).
 #
 #
 # SEPARATE FROM THE openWakeWord IMAGE ON PURPOSE, and not by preference: mWW's

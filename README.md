@@ -84,7 +84,7 @@ summarises it.
 ## How long it takes
 
 The measurements behind the numbers below - and every comparison that led to a
-route recommendation - live in [SPEED.md](SPEED.md). This section only tells
+route recommendation - live in `SPEED.md` on branch `train/hey_seeree`. This section only tells
 you what to expect.
 
 | Step | CUDA box | Mac, host |

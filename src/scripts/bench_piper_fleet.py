@@ -27,7 +27,7 @@ overhead the corpus also pays, and it is included, not warmed away.
 
 --trials repeats the SAME workload back to back and reports min/max over trials
 (C4, bug.md: a single-trial reading in this repo has twice turned out to be a
-machine-load artefact - the MLX table in SPEED.md carries two numbers per cell
+machine-load artefact - the MLX fleet table in SPEED.md on branch train/hey_seeree carries two numbers per cell
 for exactly that reason), recording the machine's 1/5/15-min load average at
 the start and end of each trial. --sample-cpu measures each piper instance's
 CPU during the run two ways (psutil, the trainer venv carries it): the exact
