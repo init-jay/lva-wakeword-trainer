@@ -77,6 +77,25 @@ else
     docker compose build mww-trainer
 fi
 
+# THE IMAGE MUST CARRY THE PER-CLIP-STREAM-RESET PATCH. Without it the in-run
+# streaming ROC measures the persistent-stream condition deployment never runs
+# (data/lva-mww-cause/report.md), and the cutoff and ledger line inherit that
+# blind spot - while the tag's code half still names a commit that has the
+# patch. Two ways to get here silently: SKIP_BUILD=1 on an image built before
+# the patch, or a build whose MWW_REF checkout moved the anchor, where the patch
+# warns and exits 0. The host route guards its clone the same way. Read-only: a
+# grep of the image's own clone, which no compose mount shadows.
+if ! docker compose run --rm --no-deps --entrypoint grep mww-trainer \
+        -q 'model = Model(model_path, stride=stride)' \
+        /opt/micro-wake-word/microwakeword/test.py; then
+    echo "ERROR: the mww-trainer image's microWakeWord clone is missing its" >&2
+    echo "       per-clip-stream-reset patch. Either the image predates the patch" >&2
+    echo "       (rebuild it: re-run without SKIP_BUILD=1), or the patch anchor moved" >&2
+    echo "       in the MWW_REF checkout (read the build log's per-clip-stream-reset" >&2
+    echo "       WARNING line and update src/train/patches/per-clip-stream-reset.py)." >&2
+    exit 2
+fi
+
 # --- ambient sets ----------------------------------------------------------------
 #
 # Discovered rather than hardcoded, so adding a set to data/external/mww_ambient/
