@@ -26,7 +26,7 @@ if str(REPO_ROOT / "src") not in sys.path:
 
 import wordlists  # noqa: E402
 
-from train.corpus.negatives import LEGACY_VOICE_MARKER, MISPRONOUNCING_VOICES  # noqa: E402
+from train.corpus.negatives import LEGACY_VOICE_MARKER  # noqa: E402
 
 
 def _write_holdout(data):
@@ -60,10 +60,22 @@ def test_heldout_voices_are_usable_not_mispronouncing():
     # putting one in the list is a stale-list error waiting to happen. The
     # checkable half of "in the live catalog" is this table; the live half is
     # enforced at corpus-build time (catalog is the source of truth).
-    bad = set(MISPRONOUNCING_VOICES.get("hey_seeree", []))
-    for voice in wordlists.load_voice_holdout()["kokoro"]:
-        assert voice not in bad, f"{voice} mispronounces the wake word"
+    #
+    # Every wordlist in the directory, not one hardcoded wake word: the holdout
+    # list is repo-level, so a voice reserved for the ranking set has to be
+    # usable for whatever word is being trained next.
+    reserved = wordlists.load_voice_holdout()["kokoro"]
+    for voice in reserved:
         assert LEGACY_VOICE_MARKER not in voice, f"{voice} is v0 legacy"
+    for path in sorted(wordlists.WORDLIST_DIR.glob("*.yaml")):
+        if path.name == wordlists.VOICE_HOLDOUT_NAME:
+            continue                      # the repo-level holdout, not a wake word
+        data = wordlists.load(path=path)
+        bad = set(wordlists.voice_exclusions(data, "kokoro")["mispronouncing"])
+        for voice in reserved:
+            assert voice not in bad, (
+                f"{voice} mispronounces {data.get('wake_word')!r} - it cannot render "
+                f"an eval positive for that word")
 
 
 def test_missing_file_is_a_noop():

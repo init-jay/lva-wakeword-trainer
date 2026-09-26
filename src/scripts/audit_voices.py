@@ -66,7 +66,8 @@ servers the corpus runs against, so what this audits is exactly what the corpus
 gets. Speaker voices (piper-style) and plain voices (kokoro-style) are both
 handled; the server's catalog answer decides which.
 
-    # after: paste the printed block into MISPRONOUNCING_VOICES in train.py
+    # after: paste the printed YAML into src/wordlists/<word>.yaml, under
+    #        voices.<engine>.mispronouncing - that is where the corpus builders read it
 """
 
 import argparse
@@ -84,8 +85,10 @@ SR = 16000
 DEFAULT_SPEEDS = (0.75, 1.0, 1.3)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src" / "tts-service" / "tts_protocol"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tts_protocol import TtsClient  # noqa: E402
+from wordlists import VOICE_ENGINES, path_for  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -343,8 +346,21 @@ def main():
             bad.append(voice)
 
     if bad:
-        print("\nPaste into train/corpus/piper.py (MISPRONOUNCING_VOICES):")
-        print("    " + ",\n    ".join(repr(v) for v in bad))
+        # The wordlist keys are the engines the corpus builders read; a server may
+        # report a more specific name ("kokoro_mlx"), which still belongs under
+        # its engine's key. Anything else would be rejected by
+        # wordlists.validate() as an unknown engine - an exclusion under a key
+        # nobody reads is an exclusion that does nothing, so say so here rather
+        # than after a corpus has been built with it.
+        key = next((e for e in VOICE_ENGINES if e in engine.lower()), engine.lower())
+        print(f"\nPaste into {path_for(args.wake_word)} under "
+              f"voices.{key}.mispronouncing:")
+        print("".join(f'      - "{v}"\n' for v in bad))
+        if key not in VOICE_ENGINES:
+            print(f"  NOTE: this server reported engine {engine!r}, which the corpus "
+                  f"builders do not read (they read {', '.join(VOICE_ENGINES)}). The "
+                  f"section above would be rejected as an unknown engine: the audit "
+                  f"is still worth keeping, but wiring the exclusion needs code.")
     else:
         print("\nNo mispronouncing voices found.")
 

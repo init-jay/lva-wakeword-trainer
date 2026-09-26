@@ -58,8 +58,9 @@ DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
    mirroring the 30% its oWW sibling already runs. Negatives stay Piper-only on
    purpose: that is where the per-category signal (extend, hey_other) lives, and a
    second engine would blur attribution of a false accept to an engine. The Kokoro
-   voices get the same exclusions the oWW corpus applies (MISPRONOUNCING_VOICES and
-   the v0 legacy set, corpus/negatives.py) and the shared speed grid, so the two
+   voices get the same exclusions the oWW corpus applies (the wordlist's
+   voices.kokoro.mispronouncing and the v0 legacy set) and the shared speed grid, so
+   the two
    engines differ in timbre, not in speed or text. Both URLs are tcp://
    tts-protocol servers (src/tts-service/): on a Mac that is the in-process
    kokoro-mlx engine (`uv run --project src/tts-service/engines/kokoro_mlx
@@ -129,7 +130,8 @@ from train.corpus.augment import (CHILD_STRETCH_FRACTION,  # noqa: E402
 from train.corpus.kokoro import (KokoroPool,  # noqa: E402
                                  generate_kokoro_samples, probe_kokoro_servers)
 from train.corpus.negatives import (LEGACY_VOICE_MARKER,  # noqa: E402
-                                    MISPRONOUNCING_VOICES, build_negative_phrases)
+                                    build_negative_phrases,
+                                    load_wordlist_or_exit)
 from train.corpus.piper import (generate_piper_samples,  # noqa: E402
                                 select_piper_voices)
 from train.corpus.positives import (PLAIN_SPEED_GRID,  # noqa: E402
@@ -139,7 +141,8 @@ from train.corpus.real import (  # noqa: E402
     speaker_clip_counts,
 )
 from train.corpus import manifest as corpus_manifest  # noqa: E402
-from wordlists import exclude_voice_holdout, load_voice_holdout  # noqa: E402
+from wordlists import (exclude_voice_holdout, load_voice_holdout,  # noqa: E402
+                       voice_exclusions)
 from wordlists import path_for, voice_holdout_path  # noqa: E402
 
 
@@ -360,9 +363,11 @@ def main():
         # reason: a voice that says something other than the wake word is a
         # mislabelled positive regardless of engine, and the v0 legacy set is
         # older renderings of speakers already in the set. Six of 42 Kokoro
-        # voices did exactly this for "hey seeree" and went unnoticed for
-        # eleven runs - this list is not optional.
-        excluded = set(MISPRONOUNCING_VOICES.get(safe, []))
+        # voices did exactly this on the example word and went unnoticed for
+        # eleven runs - this list is not optional. It is per-word data, read from
+        # the wordlist: how a voice renders one phrase says nothing about another.
+        excluded = set(voice_exclusions(load_wordlist_or_exit(args.wake_word),
+                                       "kokoro")["mispronouncing"])
         legacy = sorted(v for v in kokoro_voices if LEGACY_VOICE_MARKER in v)
         if legacy:
             excluded.update(legacy)

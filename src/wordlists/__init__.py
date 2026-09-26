@@ -24,6 +24,17 @@ WHAT THIS MODULE EXISTS TO ENFORCE, beyond parsing:
 * DUPLICATES ARE DROPPED, NOT COUNTED TWICE. Category rates are read as
   fired/n, so a phrase appearing twice in one category quietly reweights it.
 
+* THE PER-WORD TRAINING DATA LIVES HERE TOO. `train.confusable` (the negative
+  phrases the trainer renders) and `voices.<engine>.{mispronouncing,unaudited}`
+  (the voices that render this phrase wrong, so every clip they produce is a
+  mislabelled positive) used to be dicts keyed by wake word inside
+  src/train/corpus/ - per-word data in modules every word shares. A new wake
+  word meant editing corpus code, and not editing it failed silently: the
+  builder warned and carried on with no confusables, and an unaudited voice set
+  contributes mislabelled positives nothing downstream can see. Unknown
+  categories and engines are rejected here rather than ignored, because the
+  ignored spelling of `mispronouncing:` is an exclusion that does nothing.
+
 Both trainers and the eval harness read this, so it imports nothing from either.
 
 * THE TRAINING CORPORA AND THE SYNTHETIC EVAL POSITIVES MUST NOT SHARE A VOICE.
@@ -65,6 +76,22 @@ EVAL_CATEGORIES = {
 # out of that phrase's own consonants and vowels. The rest are reusable as they are:
 # ordinary speech is ordinary speech whatever the wake word is.
 PHRASE_SPECIFIC = ("extend", "running", "hey_other")
+
+# The per-word TRAINING phrases. Word-agnostic lists (BASE_NEGATIVES, the
+# commands the run-on positives are built from) stay in
+# src/train/corpus/negatives.py: they are the same for every wake word, so
+# repeating them per word would be N copies of one list to keep in step.
+TRAIN_CATEGORIES = {
+    "confusable": "phrases adjacent to this wake word, rendered as training negatives",
+}
+
+VOICE_ENGINES = ("kokoro", "piper")
+
+# What a voice entry MEANS, and why the two are kept apart: `mispronouncing` was
+# measured and failed, `unaudited` is simply unknown. Merging them would destroy
+# the only record of which is which - i.e. that the second set is cheap to
+# reclaim by running the audit against the instance that generates the corpus.
+VOICE_CLASSES = ("mispronouncing", "unaudited")
 
 
 class WordlistError(Exception):
@@ -165,6 +192,98 @@ def validate(data):
             seen[key] = name
 
     problems.extend(_disjointness_problems(data, seen))
+    problems.extend(_train_problems(data))
+    problems.extend(_voice_problems(data))
+    return problems
+
+
+def train_phrases(data, category="confusable"):
+    """[phrase, ...] from the wordlist's `train:` section, de-duplicated.
+
+    Empty is a legitimate answer for a word nobody has written confusables for,
+    and the caller warns rather than failing: the phrases are what stops the
+    model firing on everything adjacent to the wake word, so "none yet" is the
+    expensive default to report, not an error to raise.
+    """
+    section = data.get("train") or {}
+    seen, out = set(), []
+    for phrase in section.get(category) or []:
+        key = str(phrase).strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(str(phrase).strip())
+    return out
+
+
+def voice_exclusions(data, engine):
+    """{"mispronouncing": [...], "unaudited": [...]} for one engine, for this word.
+
+    A word with no `voices:` section returns two empty lists rather than raising.
+    Nobody has audited it yet, which the caller reports loudly; raising here
+    would make an unaudited word untrainable, and the honest failure is a corpus
+    build that says it excluded nothing. An unknown ENGINE does raise - that is a
+    caller bug, not a missing audit.
+    """
+    if engine not in VOICE_ENGINES:
+        raise WordlistError(
+            f"unknown engine {engine!r}; the voice tables cover "
+            f"{', '.join(VOICE_ENGINES)}")
+    section = (data.get("voices") or {}).get(engine) or {}
+    return {name: [str(v).strip() for v in (section.get(name) or []) if str(v).strip()]
+            for name in VOICE_CLASSES}
+
+
+def _train_problems(data):
+    """Shape checks on `train:`. Absent is fine; malformed is not."""
+    section = data.get("train")
+    if section is None:
+        return []
+    if not isinstance(section, dict):
+        return [f"`train:` must map a category to a phrase list, and only knows "
+                f"{sorted(TRAIN_CATEGORIES)}"]
+    problems = []
+    unknown = set(section) - set(TRAIN_CATEGORIES)
+    if unknown:
+        problems.append(
+            f"unknown train categories {sorted(unknown)}; the trainer renders "
+            f"{sorted(TRAIN_CATEGORIES)} and would ignore the rest")
+    for name, phrases in section.items():
+        if not isinstance(phrases, list) or any(not isinstance(p, str) for p in phrases):
+            problems.append(f"train.{name} must be a list of strings")
+    return problems
+
+
+def _voice_problems(data):
+    """Shape checks on `voices:`. Absent is fine; a misspelled key is not.
+
+    The failure being guarded is silent: an exclusion table under a key nobody
+    reads is an exclusion that does nothing, and the corpus trains on the voices
+    it was supposed to drop.
+    """
+    section = data.get("voices")
+    if section is None:
+        return []
+    if not isinstance(section, dict):
+        return [f"`voices:` must map an engine ({', '.join(VOICE_ENGINES)}) to "
+                f"{list(VOICE_CLASSES)} lists"]
+    problems = []
+    unknown = set(section) - set(VOICE_ENGINES)
+    if unknown:
+        problems.append(
+            f"unknown voice engines {sorted(unknown)}; the corpus builders read "
+            f"{', '.join(VOICE_ENGINES)}")
+    for engine, classes in section.items():
+        if not isinstance(classes, dict):
+            problems.append(f"voices.{engine} must map {list(VOICE_CLASSES)} to voice lists")
+            continue
+        bad = set(classes) - set(VOICE_CLASSES)
+        if bad:
+            problems.append(
+                f"voices.{engine} has unknown keys {sorted(bad)}; known: "
+                f"{', '.join(VOICE_CLASSES)}")
+        for name, voices in classes.items():
+            if not isinstance(voices, list) or any(not isinstance(v, str) for v in voices):
+                problems.append(f"voices.{engine}.{name} must be a list of voice names")
     return problems
 
 
@@ -257,10 +376,15 @@ def exclude_voice_holdout(engine, catalog, holdout=None):
 def _disjointness_problems(data, eval_phrases):
     """The eval corpus and the training corpus must not share a phrase.
 
-    Only checked when the wordlist carries a `train:` section. The trainer still
-    keeps its lists in train/corpus/negatives.py, so today this catches nothing -
-    it is here so that migrating those lists into this file cannot reintroduce the
-    overlap the comments over there warn about three times.
+    Live, not aspirational: hey_seeree.yaml carries a `train:` section, and the
+    first time it was checked it caught nine phrases that were in both lists -
+    five in eval.extend (hey season, hey sedan, hey seizure, hey serene, hey
+    severe) and four in eval.hey_other (hey Cynthia, hey Serena, hey Sienna, hey
+    Simon). They were dropped from the TRAINING side: the eval corpus is the
+    measurement instrument, so changing it would make every false-accept rate
+    already recorded incomparable with the next one. The three comments in
+    src/train/corpus/negatives.py that asked the reader to check this by hand are
+    what let it happen.
     """
     section = data.get("train")
     if not isinstance(section, dict):

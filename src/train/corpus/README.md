@@ -80,11 +80,14 @@ exclusion list even though it is sometimes fine.
 
 ### What to write down afterwards
 
-Two lists, both keyed per wake word — how a voice handles "seeree" says nothing about
-how it would handle another phrase.
+Two lists. The first is per wake word — how a voice handles "seeree" says nothing
+about how it would handle another phrase — so it lives in that word's YAML. The second
+is a property of the voice rather than of the phrase, so it stays in code.
 
-**1. `MISPRONOUNCING_PIPER_VOICES` in `piper.py`** (or `MISPRONOUNCING_VOICES` in
-`negatives.py` for Kokoro). The voices to exclude.
+**1. `voices.<engine>.mispronouncing` in `src/wordlists/<word>.yaml`.** The voices to
+exclude, under `piper:` or `kokoro:`. `audit_voices.py` prints this block ready to
+paste, and `wordlists.validate()` rejects a section it cannot use — an unknown engine
+or a misspelled key would otherwise be an exclusion that silently does nothing.
 
 **Key them per SPEAKER, not per model.** The expectation going in was the opposite —
 espeak-ng phonemises per model, so every speaker in a voice gets the same phoneme
@@ -92,7 +95,7 @@ string, and it seemed to follow that they would all pronounce it alike. The 2026
 audit says otherwise: `en_US-l2arctic-medium` ran from `:ASI` at 0% to `:PNV` at 100%.
 Identical phonemes, different acoustic models, and intelligibility varies by speaker.
 
-**2. `PIPER_VOICE_SEX` in `piper.py` — generate it, do not listen for it.**
+**2. `PIPER_VOICE_SEX` in `src/train/corpus/piper.py` — generate it, do not listen for it.**
 
 It drives the child-range lever, the largest single win in the notebook: a 4-year-old
 went from 24% detection to 83% once the corpus stopped being adult-only (run 13).

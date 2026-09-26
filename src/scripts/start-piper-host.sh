@@ -23,8 +23,9 @@
 # pins and what docker/Dockerfile.piper pip-installs (checked 2026-09-07, when
 # it was still the rhasspy/wyoming-piper:2.4.3 image's /usr/src/.venv). A fresh
 # install today resolves 1.8.0 - a different G2P release - and the
-# MISPRONOUNCING/UNAUDITED_PIPER_VOICES exclusion lists in train/corpus/piper.py
-# were audited against this voice set and this G2P (piper.py header). Bump all
+# voices.piper.{mispronouncing,unaudited} exclusions in src/wordlists/<word>.yaml
+# were audited against this voice set and this G2P (src/train/corpus/piper.py's
+# header). Bump all
 # three together: this script, the engine's pyproject, and Dockerfile.piper.
 #
 #   ./src/scripts/start-piper-host.sh                  # run (foreground)

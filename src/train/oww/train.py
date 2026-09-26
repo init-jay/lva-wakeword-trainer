@@ -64,8 +64,8 @@ from train.corpus.kokoro import (KokoroPool,  # noqa: E402
                                  kokoro_tts_timed, phrase_end_sample,
                                  probe_kokoro_servers, run_jobs)
 from train.corpus.negatives import (LEGACY_VOICE_MARKER,  # noqa: E402
-                                    MISPRONOUNCING_VOICES,
-                                    TRAINING_COMMANDS, build_negative_phrases)
+                                    TRAINING_COMMANDS, build_negative_phrases,
+                                    load_wordlist_or_exit)
 from train.corpus.piper import (generate_piper_samples,  # noqa: E402
                                 select_piper_voices)
 from train.corpus.positives import (PLAIN_SPEED_GRID, PLAIN_SPEEDS,  # noqa: E402
@@ -76,7 +76,8 @@ from train.corpus.real import (  # noqa: E402
 )
 from train import ownership, provenance  # noqa: E402
 from train.corpus import manifest as corpus_manifest  # noqa: E402
-from wordlists import exclude_voice_holdout, load_voice_holdout  # noqa: E402
+from wordlists import (exclude_voice_holdout, load_voice_holdout,  # noqa: E402
+                       voice_exclusions)
 from wordlists import voice_holdout_path  # noqa: E402
 
 warnings.filterwarnings("ignore", message="Reached EOF prematurely")
@@ -1033,8 +1034,8 @@ def main():
                              "(default: %(default)s). 0 disables them.")
     parser.add_argument("--exclude-voices", default="",
                         help="Comma-separated Kokoro voices to skip, added to the "
-                             "built-in MISPRONOUNCING_VOICES list for this wake "
-                             "word. Use for a wake word with no built-in entry.")
+                             "wordlist's voices.kokoro.mispronouncing for this wake "
+                             "word. Use for a wake word nobody has audited yet.")
     parser.add_argument("--include-legacy-voices", action="store_true",
                         help="Keep Kokoro's v0 voices, which are skipped by default. "
                              "They are older renderings of speakers already in the "
@@ -1192,7 +1193,13 @@ def main():
         sys.exit(1)
     print(f"  {len(pool)} server(s), {len(kokoro_voices)} shared English voices")
 
-    excluded = set(MISPRONOUNCING_VOICES.get(safe_name, []))
+    # The voices that render THIS phrase wrong are per-word data, so they come
+    # from the wordlist rather than from a table in this file: how a voice says
+    # "seeree" says nothing about how it says another phrase. This is the same
+    # hard stop build_negative_phrases makes further down, hit earlier - a word
+    # with no wordlist cannot produce a corpus that can be measured either.
+    wordlist = load_wordlist_or_exit(wake_word)
+    excluded = set(voice_exclusions(wordlist, "kokoro")["mispronouncing"])
     excluded.update(v.strip() for v in args.exclude_voices.split(",") if v.strip())
 
     # The v0 legacy voices, dropped by default. Reported separately from the
