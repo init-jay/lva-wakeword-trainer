@@ -27,9 +27,11 @@ output/
 training_config.yaml
 
 # Virtual environments
-venv/
-.venv/
-.venv-*/
+# No trailing slash: a venv symlinked into src/ is a file to git, and `.venv/`
+# matches only directories - that gap put three absolute-path symlinks on main.
+venv
+.venv
+.venv-*
 
 # The openWakeWord clone that src/scripts/setup-applesilicon-trainer.sh makes under
 # src/train/. It is upstream's code plus our patches applied in place - reproducible from
