@@ -117,7 +117,7 @@ def main():
         emb_m = make_session("embedding_model.onnx",
                              ["CoreMLExecutionProvider", "CPUExecutionProvider"])
     except Exception as e:
-        print(f"CoreML session creation FAILED ({type(e).__name__}: {e}) - record it with the repo's measurements (SPEED.md on branch train/hey_seeree) and stop.")
+        print(f"CoreML session creation FAILED ({type(e).__name__}: {e}) - record it in docs/SPEED.md, under the closed avenues, and stop.")
         return
     print(f"CoreML sessions created in {time.perf_counter()-t0:.2f} s")
     print(f"  melspec providers in effect: {mel_m.get_providers()}")

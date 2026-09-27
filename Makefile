@@ -4,8 +4,7 @@
 # Thin wrappers only: the scripts keep their logic and their comments
 # (improvement.md P2.5), and CLAUDE.md carries the ordering between steps.
 # The costs below are the Apple-Silicon host numbers from docs/SPEED.md, measured
-# on one M1 Max; expect a different machine to move them. Measured model results
-# for the one example word are on branch `train/hey_seeree`.
+# on one M1 Max; expect a different machine to move them.
 # measured; "needs TTS" means the uv engines in src/tts-service/engines/, in
 # another terminal, per the run-script headers.
 
@@ -20,7 +19,7 @@ PY_MWW := src/train/train-mww-applesilicon/.venv/bin/python
 help:
 	@echo "make help           this list"
 	@echo "make smoke-oww      end-to-end check of the oww pipeline; minutes on a Mac,"
-	@echo "                    scaling with corpus size (measured timings: SPEED.md on branch train/hey_seeree)"
+	@echo "                    scaling with corpus size (measured timings: docs/SPEED.md)"
 	@echo "                    (corpus REUSED, no TTS; the cost is the forced feature recompute)"
 	@echo "make smoke-mww      end-to-end check of the mww pipeline; minutes on a Mac, no TTS, corpus+features REUSED"
 	@echo "make test           the test suite (tests/test_*.py); seconds, no data needed"

@@ -89,13 +89,17 @@ with a 30% Kokoro mix by default (`KOKORO_FRACTION=0` for the all-Piper corpus).
 scale corpus depth in search of quality: doubling it (with double the training
 steps) produced no deployable model in either engine mix - the runs that
 measured that live on branch `train/hey_seeree`.
-The route rationale and the efficiency measurements: `docs/SPEED.md`. One wake
-word's model results - detection and false-accept scores, sweep verdicts, the
-staged candidate: `SPEED.md` on branch `train/hey_seeree`, which is where the full
-campaign record survives.
-Where a comment cites `record/SPEED.md`, `record/` means that branch: the file is
-not in this tree, so the prefix is what keeps the pointer followable rather than
-apparent. `tests/test_record_pointers.py` fails any bare citation of it.
+The route rationale and the efficiency measurements: `docs/SPEED.md` - in this tree,
+and about the pipeline rather than any one word. One word's model results
+(detection and false-accept scores, sweep verdicts, the staged candidate) are
+`SPEED.md` on branch `train/hey_seeree`, which carries that campaign whole.
+
+The boundary is enforced, not remembered. `tests/test_record_pointers.py` fails any
+mention of the record branch or its file outside the prose that signposts it
+(`CLAUDE.md`, `README.md`, `ARCHITECTURE.md`, `docs/`), and fails a `SPEED.md`
+citation that is not `docs/SPEED.md`. So no trainer, image, Makefile line or skill
+depends on the record existing: a mechanism comment whose citation resolves only on
+one fork's branch is notes to one person, not documentation.
 
 ## Invariants that are easy to break
 

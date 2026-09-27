@@ -148,8 +148,8 @@ far.
 ├── docker-compose.yml            no GPU required; the eval step has its own file in src/eval/
 ├── docker-compose.cuda.yml       overlay: NVIDIA devices - kokoro, trainers
 ├── docker-compose.cpu.yml        overlay: CPU trainers - Apple Silicon, or any non-NVIDIA box
-├── src/train/train-applesilicon/           host uv env for the oww trainer (route evidence on branch train/hey_seeree)
-└── src/train/train-mww-applesilicon/       host uv env for the mww trainer (route evidence on branch train/hey_seeree)
+├── src/train/train-applesilicon/           host uv env for the oww trainer (route evidence: docs/SPEED.md)
+└── src/train/train-mww-applesilicon/       host uv env for the mww trainer (route evidence: docs/SPEED.md)
 ```
 
 The host envs are Python 3.12 uv venvs (`src/train/train-applesilicon/`,

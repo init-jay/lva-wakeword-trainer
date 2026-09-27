@@ -17,9 +17,9 @@ sequence, at the moment the decision happens:
 P1.4: the exported model is a weight-average of whichever checkpoints
 cleared the 90th-percentile gate. Which checkpoints - and how many - was
 previously invisible, and the gate is thresholded on the run's own validation
-metrics, so the count is a plausible source of the 10 points of run-to-run
-variance this repo has already measured at an identical config (record/SPEED.md,
-CLAUDE.md). This patch prints one line per merged checkpoint plus a summary:
+metrics, so the count is a plausible source of the run-to-run variance at an
+identical config that CLAUDE.md's never-compare-at-a-fixed-threshold invariant
+exists for. This patch prints one line per merged checkpoint plus a summary:
 
     # MERGE_AUDIT merged step=<training_step_ndx> seq=<n>
     # MERGE_AUDIT cleared=<k>/<total> percentile=90 steps=<comma-list>
@@ -34,8 +34,8 @@ ALSO FIXED HERE, the "one latent trap" in improvement.md: sequences 2 and 3
 build val_steps as np.int16 (upstream lines 299 and 319), so a
 --training-steps above ~327,000 overflows to NEGATIVE validation steps with
 no error. They are int64 now, like sequence 1's array; below that bound the
-array is identical modulo dtype. (record/SPEED.md's run-11 note already found 100k
-steps to be worse, so this un-traps rather than recommends.)
+array is identical modulo dtype. This un-traps the overflow; it does not
+recommend a larger step count, which is a per-word tuning question.
 
 The audit is PRINTS ONLY: no RNG draw (a seeded run stays byte-reproducible -
 the P0.1 bar), no control-flow change, no new config key. The
