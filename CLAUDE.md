@@ -85,21 +85,15 @@ own - the corpus clients speak the TTS protocol in `src/tts-service/` to the eng
 uv projects there (kokoro-mlx on 8900, in-process piper-tts on 8898; see
 `src/tts-service/README.md`), or a Docker service on a reachable port. The mww
 host route is the measured-faster one on a Mac; its corpus is Piper-majority
-with a 30% Kokoro mix by default (`KOKORO_FRACTION=0` for the all-Piper corpus). Do not
-scale corpus depth in search of quality: doubling it (with double the training
-steps) produced no deployable model in either engine mix - the runs that
-measured that live on branch `train/hey_seeree`.
-The route rationale and the efficiency measurements: `docs/SPEED.md` - in this tree,
-and about the pipeline rather than any one word. One word's model results
-(detection and false-accept scores, sweep verdicts, the staged candidate) are
-`SPEED.md` on branch `train/hey_seeree`, which carries that campaign whole.
+with a 30% Kokoro mix by default (`KOKORO_FRACTION=0` for the all-Piper corpus).
+Route rationale and efficiency measurements: `docs/SPEED.md`.
 
-The boundary is enforced, not remembered. `tests/test_record_pointers.py` fails any
-mention of the record branch or its file outside the prose that signposts it
-(`CLAUDE.md`, `README.md`, `ARCHITECTURE.md`, `docs/`), and fails a `SPEED.md`
-citation that is not `docs/SPEED.md`. So no trainer, image, Makefile line or skill
-depends on the record existing: a mechanism comment whose citation resolves only on
-one fork's branch is notes to one person, not documentation.
+Nothing in this repo records one word's model results - no detection or
+false-accept scores, no sweep verdicts, no staged candidate. The pipeline is the
+product here; a measurement of the example word is evidence about the example, not
+a property of the pipeline, and `tests/test_record_pointers.py` keeps it that way:
+it fails any `SPEED.md` citation that is not `docs/SPEED.md`, any reference to a
+record branch from any file, and any scorecard row in the timings doc.
 
 ## Invariants that are easy to break
 
@@ -142,16 +136,23 @@ one fork's branch is notes to one person, not documentation.
 
 ## Conventions
 
-Comments here explain *why*, usually with the measurement that settled it. Match
-that. If you change something a comment justifies, update the comment in the same
-edit. If a measurement is claimed, cite where it came from — several were found the
-expensive way, and a plausible-sounding replacement is worse than none.
+Comments explain *why*, in one line. Not the story that led to the why, not a
+run-by-run account, not a restatement of what the code below already says.
+Sprawl is this repo's failure mode: module docstrings reached 120-180 lines and
+buried the few constraints the code cannot enforce itself - a pinned version, a
+positional guarantee, a value that must not change, a cache key. Keep those, one
+line each. Dates that identify *which* guard exists are load-bearing; the paragraph
+retelling what happened that day is not, and the git log has it.
 
-The plan file (`improvement.md`) and the review file (`bug.md`) were removed
-from the repo: the efficiency measurements they carried live in `docs/SPEED.md`
-and the model results in SPEED.md on branch
-`train/hey_seeree`,
-the incident history in the git log and the test docstrings. Code comments that
+Mechanism text cites `docs/SPEED.md` or nothing. It never cites a branch outside
+this repo, and it carries no model results: `hey seeree`'s scores are evidence
+about the example, not a property of the pipeline. `tests/test_record_pointers.py`
+pins both rules. If you change something a comment justifies, update the comment in
+the same edit.
+
+The plan file (`improvement.md`) and the review file (`bug.md`) were removed from
+the repo: what still matters of them is in `docs/SPEED.md`, the git log and the test
+docstrings. Code comments that
 cite "improvement.md P.." or "bug.md B.." are provenance for the commit that
 implemented or fixed the finding, not links to keep alive.
 

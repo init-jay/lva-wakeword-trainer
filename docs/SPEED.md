@@ -3,10 +3,10 @@
 The route recommendations in `README.md` and `CLAUDE.md` rest on the measurements
 here. This file is the *efficiency* half of what was measured: which route to take,
 what each stage costs, and which avenues are closed by measurement rather than by
-opinion. It is not the record of any one wake word's model quality — detection and
-false-accept results, per-speaker scores, sweep verdicts and the staged candidate
-live on branch `train/hey_seeree` in `SPEED.md` and `deploy/`. Those numbers are a
-property of a campaign; the ones below are properties of the pipeline and a machine.
+opinion. It carries no model-quality results — no detection or false-accept scores,
+no per-speaker tables, no sweep verdicts. Those are properties of whatever word was
+trained; the numbers below are properties of the pipeline and the machine it ran on,
+which is the half that transfers.
 
 **Conditions, not constants.** Everything measured here was measured on two
 machines: an M1 Max (64 GB, 10 cores, no GPU, Docker Desktop) and an RTX 3090 box
@@ -91,9 +91,9 @@ the feature recompute, which smoke deliberately re-runs so a broken feature stag
 fails in minutes rather than hours.
 
 The corollary for anyone planning sweeps: **depth is not a free lever, and it is
-not a quality lever either.** Doubling corpus depth costs the near-linear amount
-the stage table implies (~14 min of corpus at 2x on the mww route) and produced no
-deployable model in either engine mix; the runs are on branch `train/hey_seeree`.
+not a quality lever either.** Doubling corpus depth costs the near-linear amount the
+stage table implies (~14 min of corpus at 2x on the mww route). Budget for it as a
+cost, not as a fix.
 
 ## Route choice on Apple Silicon: measure the op, not the platform
 
@@ -227,9 +227,9 @@ trainer. Three configurations, all on the M1 Max, all generating the SAME corpus
 | kokoro-mlx, in-process (`mlx://` then; `tcp://` since the refactor) | **19m06s** / 24m54s | 37m / 47m43s |
 
 MLX generates 1.2–1.6x faster **and produced a worse corpus on run-on clips** —
-plain positives are comparable. The per-run recall figures are a model-quality
-measurement and live on branch `train/hey_seeree`; what belongs here is the
-mechanism that was found, because it is checkable on any engine:
+plain positives are comparable. The recall delta is a model-quality measurement and
+is not recorded here; what belongs here is the mechanism that was found, because it
+is checkable on any engine:
 
     run-on minus plain duration, which should be the spoken tail:
       FastAPI   697 - 580 = 117 ms
