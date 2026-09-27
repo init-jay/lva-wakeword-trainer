@@ -89,8 +89,9 @@ sys.path.insert(0, str(paths.REPO_ROOT / "src"))
 sys.path.insert(0, str(paths.REPO_ROOT / "src" / "tts-service" / "tts_protocol"))
 
 from tts_protocol import TtsClient  # noqa: E402
+from train.corpus.negatives import load_recipe_or_exit  # noqa: E402
 from train.corpus.piper import select_piper_voices  # noqa: E402
-from recipe import load, path_for, voice_holdout  # noqa: E402
+from recipe import path_for, voice_holdout  # noqa: E402
 
 SR = 16000
 FULL_SCALE = 32768.0
@@ -354,7 +355,7 @@ def main():
                    help="Render the voice-HOLDOUT synthetic ranking set instead of "
                         "the training-distribution sanity corpus: every clip from "
                         "the voices the recipe's `voice_holdout:` section reserves out of "
-                        "every corpus build (the catalog is checked live, and a "
+                        "this word's corpus builds (the catalog is checked live, and a "
                         "held-out voice it no longer offers is an error, not a "
                         "skip), at speeds inside the 0.7-1.3 training range. "
                         "Output goes to data/corpus/eval/voice_holdout_tts by "
@@ -408,14 +409,22 @@ def main():
 
     # Engine construction is offline (no I/O), so it happens before the dry-run
     # even though voice SELECTION for Piper needs the live catalog.
-    holdout = voice_holdout(load(path_for(args.wake_word))) if args.voice_holdout else None
-    if args.voice_holdout and not holdout:
+    # load_recipe_or_exit, not load(): a word with no recipe file must print the
+    # instruction recipe already wrote, not a traceback - this is a CLI stage, the
+    # same convention the trainers use for the same reason.
+    holdout = (voice_holdout(load_recipe_or_exit(args.wake_word))
+               if args.voice_holdout else None)
+    if args.voice_holdout and not any(holdout.values()):
         # The no-op rule applies to the TRAINERS (a recipe without a
         # `voice_holdout:` section: train on the whole catalog, print a note).
         # It does not apply here: with no reserved voices there is nothing to
         # render, and falling back to the in-corpus VOICES list would be a
         # training-distribution measurement wearing the holdout's label - the
         # one outcome this whole item exists to prevent.
+        # `any(holdout.values())`, not `holdout`: voice_holdout() always returns
+        # both engine keys, so an absent section is a truthy dict of empty lists.
+        # Testing the dict was the shape the deleted file API had ({} on a missing
+        # file); against the section API that guard could never fire.
         sys.exit(f"ERROR: --voice-holdout needs a non-empty `voice_holdout:` section "
                  f"in {path_for(args.wake_word)}. The trainers treat the missing "
                  f"section as a no-op (a fresh word before its first reservation "

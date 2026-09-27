@@ -12,9 +12,9 @@ WAVs, separate after it. The TTS half speaks the protocol in `src/tts-service/` 
 |---|---|
 | `augment.py` | silence trimming, and the child-range pitch/formant copies |
 | `kokoro.py` | the Kokoro corpus client over the TTS protocol (server pool, voice probe, single/timed/batched render), moved verbatim out of `src/train/oww/train.py` so both trainers can use it; it speaks `tcp://` engines only (the MLX one on a Mac, the Docker one on the box); the run-on generator stays in the oWW trainer until mWW has run-on positives |
-| `negatives.py` | the negative recipe, and the Kokoro mispronunciation list |
+| `negatives.py` | the negative phrases that are useful whatever the wake word is (openers, other assistants' words, commands), the `_v0` legacy marker, and `load_recipe_or_exit` / `build_negative_phrases` — the per-word confusable lists are data in `recipes/<word>.yaml`, not here |
 | `real.py` | real recordings into a corpus, weighted by repetition |
-| `piper.py` | Piper generation over the TTS protocol, plus the Piper voice metadata (exclusion tables, sex map) |
+| `piper.py` | Piper generation over the TTS protocol, plus the Piper voice metadata (the sex map; the per-word exclusion tables it consults live in the recipe) |
 | `positives.py` | the plain-positive sentence templates and their speed grid, shared by both engines |
 
 These were moved out of `src/train/oww/train.py` without behaviour change — sixteen tuning

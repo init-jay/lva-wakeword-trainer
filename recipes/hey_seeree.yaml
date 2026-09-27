@@ -598,11 +598,13 @@ voices:
 # configuration per wake word, and a voice reservation belongs to the word that
 # measured it. The recipe above keeps the eval and training corpora disjoint
 # on PHRASE; this section keeps them disjoint on VOICE. Every entry below is
-# excluded from every corpus build (src/train/oww/train.py and
+# excluded from every corpus build OF THIS WORD (src/train/oww/train.py and
 # src/train/mww/corpus.py remove it from the live catalog and exit when an
 # entry the catalog no longer offers), and
 # src/eval/src/generate_positives.py --voice-holdout renders the synthetic eval
-# positives from these voices ONLY, into its own output directory.
+# positives from these voices ONLY, into its own output directory. Another word's
+# corpus is not this section's business: a reservation belongs to the word that
+# measured it, which is why it lives here and not in a repo-level file.
 #
 # WHAT THE RESULTING SET IS, in one line for whoever renders it next: a
 # low-variance RANKING SIGNAL for sweep points - voice disjoint from training,

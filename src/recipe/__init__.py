@@ -39,15 +39,24 @@ Both trainers and the eval harness read this, so it imports nothing from either.
 
 * THE TRAINING CORPORA AND THE SYNTHETIC EVAL POSITIVES MUST NOT SHARE A VOICE.
   The phrase rule above keeps the two corpora from memorising each other's TEXT;
-  `voice_holdout:` section keeps them from
-  sharing TIMBRE. The training corpora build from every usable engine voice, so
-  an eval positive rendered from one of those voices is inside the training
-  distribution no matter how novel its phrasing - and the only axis left to
-  generalise on, cheaply and with a real n, is the voice. The holdout section
-  is a tracked part of the recipe, one configuration per wake word, because
-  a list that lives only in a comment drifts: the trainers exclude it from the
-  live catalog and fail when an entry the catalog no longer offers, which is
-  what pins it.
+  the `voice_holdout:` section keeps them from sharing TIMBRE. The training
+  corpora build from every usable engine voice, so an eval positive rendered from
+  one of those voices is inside the training distribution no matter how novel its
+  phrasing - and the only axis left to generalise on, cheaply and with a real n,
+  is the voice. The section is a tracked part of the recipe, because a list that
+  lives only in a comment drifts: the trainers exclude it from the live catalog
+  and fail when an entry the catalog no longer offers, which is what pins it.
+
+  Its SCOPE is the word that carries it, and that is a deliberate reversal. While
+  the holdout was its own file it was repo-level, on the argument that "a voice is
+  an engine property, not a property of the phrase it renders". Folding it into
+  the recipe buys one configuration per wake word, and costs that argument: a
+  voice reserved for `hey seeree`'s ranking set may still appear in some other
+  word's training corpus, because that word's recipe says nothing about it. What
+  the measurement needs is the narrower property - the ranking set for a word must
+  be voice-disjoint from THAT word's corpora - so the trade is real but the
+  guarantee being defended still holds. A second word that wants a ranking set
+  makes its own reservations; it does not inherit this one's.
 """
 
 from pathlib import Path

@@ -20,7 +20,7 @@ help:
 	@echo "make smoke-oww      end-to-end check of the oww pipeline; a few minutes to ~15 min on a Mac"
 	@echo "                    (corpus REUSED, no TTS; the cost is the forced feature recompute, ~12 min)"
 	@echo "make smoke-mww      end-to-end check of the mww pipeline; ~5 min on a Mac, no TTS, corpus+features REUSED"
-	@echo "make test           the test suite (52 tests); seconds, no data needed"
+	@echo "make test           the test suite (tests/test_*.py); seconds, no data needed"
 	@echo "make fleet N=<n>    start N Piper TTS instances and print PIPER_URLS for the corpus runs;"
 	@echo "                    needs data/external (download-external-data.sh), the processes stay up until killed"
 	@echo "make eval           scoring on the HOST env (the Mac default, P2.4): sets it up if"
@@ -97,7 +97,7 @@ corpus-mww:
 
 # The voice-holdout synthetic ranking set (improvement.md P1.2): its own output
 # directory (data/corpus/eval/voice_holdout_tts) from the voices the recipe's
-# `voice_holdout:` section holds out of every corpus build, at speeds
+# `voice_holdout:` section holds out of that word's corpus builds, at speeds
 # inside the 0.7-1.3 training range. The live Kokoro catalog is probed and a
 # stale list fails loudly; the existing eval corpora are not touched.
 render-voice-holdout:

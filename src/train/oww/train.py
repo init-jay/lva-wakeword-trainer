@@ -1231,8 +1231,8 @@ def main():
 
     # THE VOICE HOLDOUT (improvement.md P1.2): the voices the recipe's
     # `voice_holdout:` section reserves for the synthetic ranking set are
-    # excluded from every corpus build, so that set stays voice-disjoint from
-    # training. The live catalog is the source of truth: an entry it no
+    # excluded from every corpus build of this word, so that set stays
+    # voice-disjoint from the training data it is meant to rank. The live catalog is the source of truth: an entry it no
     # longer offers means the section has drifted from the engine, and
     # that is an error - the silent outcome is the exclusion ending up empty
     # and the corpus quietly training on a held-out voice.

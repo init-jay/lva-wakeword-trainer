@@ -4,8 +4,9 @@
 # tarred and sent to the daemon on every build - INCLUDING data/, which is ~43 GB
 # once download-external-data.sh has run. None of it is reachable by a COPY: the
 # only sources any Dockerfile names are src/train/, src/tts-service/, src/recipe/,
-# docker/requirements.txt and src/train/patches/*.py. These patterns are
-# context-rooted (no leading **), so they carry the src/ prefix the restructure added.
+# docker/requirements.txt, docker/tts_engines/ and src/train/patches/*.py. These
+# patterns are context-rooted (no leading **), so they carry the src/ prefix the
+# restructure added.
 #
 # recipes/ - the per-word DATA - is deliberately NOT excluded even though no
 # Dockerfile COPYs it: it is a few tens of KB, and the trainers read it from a
