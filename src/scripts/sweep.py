@@ -4,7 +4,7 @@
     src/train/train-mww-applesilicon/.venv/bin/python src/scripts/sweep.py sweep.yaml [--dry-run]
     (the venv is now under src/train/: src/train/train-mww-applesilicon/.venv)
 
-improvement.md P0.5. The loop this repo actually runs had no machine-readable
+The loop this repo actually runs had no machine-readable
 edge: the results of "try a setting, is it better?" lived in 40+
 logs/training-*.log files and in scrollback, so the answer to "what did we
 already try, and what did it do" had to be reconstructed by re-reading them.
@@ -15,7 +15,7 @@ so the loop ends in a number a program can read and the next session starts
 from what was actually measured instead of from memory.
 
 FROZEN CORPUS, ONE RULE. During a sweep the corpus is a HELD-FIXED
-INDEPENDENT VARIABLE (improvement.md P0.3). The first grid point builds it
+INDEPENDENT VARIABLE. The first grid point builds it
 (mww: train.mww.corpus then train.mww.features; oww: the first train run
 builds it in-place); every later point only VERIFIES it - mww corpus
 --skip, which checks the corpus.json manifest against the shaping this
@@ -173,8 +173,8 @@ def is_first_job(pi, repeat):
     manifest but SILENTLY REBUILDS a mismatched one (src/train/oww/train.py's
     --corpus auto), so a TTS catalog change between two repeats of point 0
     would redraw the frozen corpus mid-sweep with no error, and every later
-    point would then verify against the NEW manifest and pass (bug.md C5,
-    2026-09-22 - the mirror of the cf9c065b silent reuse). Only the first
+    point would then verify against the NEW manifest and pass (2026-09-22 -
+    the mirror of the cf9c065b silent reuse). Only the first
     job may build; every later job verifies.
     """
     return pi == 0 and repeat == 0
@@ -183,7 +183,7 @@ def is_first_job(pi, repeat):
 def job_corpus_reuse(first_job, repeat, corpus_axes):
     """Whether an oww job runs with --corpus reuse (True) or auto (False).
 
-    Default is C5's rule: only the first job is auto, every later job
+    Default rule: only the first job is auto, every later job
     reuses-and-refuses. The exception is a sweep whose GRID varies a corpus
     axis, declared explicitly in `corpus_axes:` (e.g. real-vtlp): then
     the corpus is frozen per POINT, not per sweep - each point's repeat 0
@@ -363,8 +363,8 @@ def trainer_cmd(target, python, wake_word, base_args, point_args, seed,
     A grid key after base deliberately overrides a base default rather than
     depending on dict order. THE single source of truth for what a point
     runs - the dry run prints it, the real loop runs it, and
-    tests/test_sweep.py asserts the grid values reach it. (2026-09-22, B1:
-    the grid was computed per point but never applied - every point ran the
+    tests/test_sweep.py asserts the grid values reach it. (2026-09-22: the
+    grid was computed per point but never applied - every point ran the
     base config and was filed under a label the run did not use. A command
     built inline in the loop is exactly where that kind of omission hides;
     a named function with a test is not.)"""
@@ -435,7 +435,7 @@ def corpus_action(wake_word, target, corpus, features, first_point, dry_run,
     check_reuse call). It is reuse, not auto, on purpose: auto reuses a
     matching manifest but silently REBUILDS a mismatched one, which is how a
     catalog change between two repeats of point 1 would redraw the frozen
-    corpus mid-sweep without an error (bug.md C5, 2026-09-22 - the mirror of
+    corpus mid-sweep without an error (2026-09-22 - the mirror of
     the cf9c065b silent reuse).
 
     `first_job` is the first (point, repeat) of the sweep; `first_point` is
@@ -467,7 +467,7 @@ def corpus_action(wake_word, target, corpus, features, first_point, dry_run,
         # repeats included - passes --corpus reuse, which makes the trainer
         # call manifest.check_reuse and exit with the diff before any
         # training is spent. Not auto on the repeats: auto would silently
-        # rebuild a mismatched manifest (bug.md C5, 2026-09-22).
+        # rebuild a mismatched manifest (2026-09-22).
         return "reuse (verified inside the train run via --corpus reuse)"
 
     if first_point and not manifest.is_file():
@@ -646,7 +646,7 @@ def main():
             if target == "mww":
                 # The tag must see the grid too: it names the config the run
                 # will use, and a tag computed without the grid names a config
-                # that will not be run (B1).
+                # that will not be run.
                 tag = mww_tag(python, wake_word, base_args + point_args, seed)
             else:
                 tag = "(computed after the run: .last_run_tag)"
@@ -666,8 +666,8 @@ def main():
             print(f"    repeat {repeat}  seed {seed}  corpus: {action}")
             print(f"    tag: {tag}{skip}")
             # The full resolved command: the operator check that a grid value
-            # actually reaches the trainer (B1 was invisible because the
-            # dry run showed labels, not commands).
+            # actually reaches the trainer (the grid bug was invisible
+            # because the dry run showed labels, not commands).
             print(f"    cmd: {shlex.join(cmd)}")
         if compare_against:
             print(f"\n  compare_against: {compare_against}  "
@@ -687,7 +687,7 @@ def main():
 
         if target == "mww":
             # first_job passed on the real path too: the dry-run label and
-            # the real stage must agree on what counts as the build (C5's
+            # the real stage must agree on what counts as the build (the
             # label/command-disagreement class). The mww --skip path itself
             # already keys on the manifest existing, which a repeat of
             # point 0 has by then - no separate hole on this target.
@@ -710,7 +710,7 @@ def main():
                 die(f"no corpus.json manifest at {corpus} - a sweep cannot "
                     f"train on a corpus it cannot name.")
             # The grid must be in the tag too: the tag names the config the
-            # run will use (B1 - it used to name one that would not be run).
+            # run will use (it used to name one that would not be run).
             tag = mww_tag(python, wake_word, base_args + point_args, seed)
             if tag_names_no_corpus(tag):
                 # Belt and braces with the manifest check above: the corpus half of
@@ -738,11 +738,11 @@ def main():
             corpus_action(wake_word, target, corpus, features, first_point,
                           False, python, corpus_args, stage_times,
                           first_job=first_job)
-            # C5: NOT (not first_point) - that left every repeat of point 0
-            # in auto mode, where a manifest mismatch rebuilds the frozen
-            # corpus silently. The one exemption is a
-            # declared corpus_axes grid, where the point-0 job of each arm
-            # rebuilds on purpose (job_corpus_reuse).
+            # first_job here, NOT (not first_point) - that left every repeat
+            # of point 0 in auto mode, where a manifest mismatch rebuilds the
+            # frozen corpus silently. The one exemption is a declared
+            # corpus_axes grid, where the point-0 job of each arm rebuilds on
+            # purpose (job_corpus_reuse).
             cmd = trainer_cmd("oww", python, wake_word, base_args, point_args,
                               seed, corpus_reuse=job_corpus_reuse(
                                   first_job, repeat, spec.get("corpus_axes")))

@@ -152,9 +152,9 @@ the same edit.
 
 The plan file (`improvement.md`) and the review file (`bug.md`) were removed from
 the repo: what still matters of them is in `docs/SPEED.md`, the git log and the test
-docstrings. Code comments that
-cite "improvement.md P.." or "bug.md B.." are provenance for the commit that
-implemented or fixed the finding, not links to keep alive.
+docstrings. Do not cite either file or its labels (`P1.4`, `B1`, ...): a label
+that points at a deleted document tells the reader nothing. State the substance,
+or name the commit.
 
 Verify before asserting. Much of what looks obvious in this repo is not: `os.mkdir`
 is not recursive, `str.strip` is not `removesuffix`, and PyPI metadata does not

@@ -47,7 +47,7 @@
 # serial lane: the engine holds one model resident and takes every call under
 # one lock, so client threads queue instead of run, and the single instance
 # measures 21.66 clips/s in src/scripts/bench_tts.py, against the ~16 the mww corpus
-# stage ran at against it (improvement.md P2.1 - the corpus stage is the
+# stage ran at against it (the corpus stage is the
 # serial wall of a Mac run, ~5 of its ~14 measured minutes). Throughput scales
 # with PROCESSES: PIPER_URLS takes the comma-joined list src/scripts/start-tts-fleet.sh
 # prints (it starts N instances on 8898+ in the background and waits for each
@@ -545,7 +545,7 @@ echo
 echo "    Compare the wall time against the container's 26m06s (this machine, 2026-09-06)"
 echo "    and the per-stage numbers against src/scripts/tf_probe.py and src/scripts/bench_tts.py."
 echo
-echo "    Evaluate (host, P2.4; Docker still works):"
+echo "    Evaluate (host; Docker still works):"
 echo "      src/eval/.venv/bin/python src/eval/src/eval_model.py --model $TAGGED_MODEL"
 echo "      # or: cd src/eval && docker compose run --rm eval python -m eval.eval_model \\ --model ..."
 echo "    Confirm the cutoff against the held-out recordings before deploying it;"

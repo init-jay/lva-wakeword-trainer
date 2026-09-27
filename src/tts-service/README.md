@@ -111,8 +111,7 @@ pinned to one instance for the whole run - because round-robin would make
 every instance reload a model on most of its requests, and a reload (0.6 s)
 costs more than the synthesis it delays. Kokoro takes the same comma-list
 form on the client (round-robin, `KokoroPool`) but is a much weaker candidate
-on a Mac: MLX contends on one GPU, so measure before adding instances
-(improvement.md, P2.1).
+on a Mac: MLX contends on one GPU, so measure before adding instances.
 
 The engines' failure conventions survive the wire unchanged: Kokoro returns a
 null clip on a transient render miss (the generator retries that clip alone);

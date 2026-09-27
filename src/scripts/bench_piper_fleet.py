@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Fleet throughput for the Piper corpus path: clips/s vs N instances.
 
-P2.1 in improvement.md shipped the PiperFleet sharding (src/train/corpus/piper.py)
-and start-tts-fleet.sh but never measured the N-way throughput the plan
-hypothesised (N x the single-instance rate). This is that measurement.
+The PiperFleet sharding (src/train/corpus/piper.py) and start-tts-fleet.sh
+shipped without measuring the N-way throughput the plan hypothesised (N x
+the single-instance rate). This is that measurement.
 
 WHY THIS IS NOT bench_tts.py: bench_tts points at one URL (or does an
 --instances fan-out that sends EVERY clip to EVERY instance). The corpus does
@@ -26,7 +26,7 @@ overhead the corpus also pays, and it is included, not warmed away.
     # or: --urls tcp://127.0.0.1:8898,tcp://127.0.0.1:8897 --clips-per-pair 24
 
 --trials repeats the SAME workload back to back and reports min/max over trials
-(C4, bug.md: a single-trial reading in this repo has twice turned out to be a
+(a single-trial reading in this repo has twice turned out to be a
 machine-load artefact - the MLX table in docs/SPEED.md carries two numbers per cell
 for exactly that reason), recording the machine's 1/5/15-min load average at
 the start and end of each trial. --sample-cpu measures each piper instance's
@@ -248,8 +248,8 @@ def main():
         rate = total / wall if wall > 0 else 0.0
         trial_rates.append(rate)
         l1, l5, l15 = os.getloadavg()
-        head = (f"\n=== Piper fleet throughput  (P2.1)  trial {trial}/{args.trials} ==="
-                if args.trials > 1 else "\n=== Piper fleet throughput  (P2.1) ===")
+        head = (f"\n=== Piper fleet throughput  trial {trial}/{args.trials} ==="
+                if args.trials > 1 else "\n=== Piper fleet throughput ===")
         print(head)
         print(f"  instances (N)        : {N}   {', '.join(fleet.urls)}")
         print(f"  models / pairs       : {len(model_names)} models / {len(voices)} (voice,speaker) pairs")

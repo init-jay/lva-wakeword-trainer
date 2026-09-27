@@ -1,6 +1,6 @@
 """Patch openwakeword's train.py so every RNG it draws from is seeded from config["seed"].
 
-The tuning loop this repo is building (improvement.md P0) only means anything if two
+The tuning loop this repo is building only means anything if two
 runs differing in one hyperparameter differ in nothing else. Upstream seeds NOTHING:
 the model's initial weights come from an unseeded torch generator, the augmentation
 draws background / RIR / gain from the unseeded global numpy RNG, and Python's hash

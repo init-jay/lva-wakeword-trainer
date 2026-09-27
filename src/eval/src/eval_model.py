@@ -33,7 +33,7 @@ The --json output also records a THRESHOLD SWEEP over a fixed 0.05-0.95 grid: a
 re-threshold of the per-clip peaks already computed in this one run, so the run
 ledger (src/train/ledger.py) can compare models at a matched false-accept budget
 instead of a single threshold - 'Never compare models at a fixed threshold'
-(CLAUDE.md); bug.md C3 step 2 (2026-09-22), the 40-eval manual 0.25-0.85 job.
+(CLAUDE.md); the 40-eval manual 0.25-0.85 job (2026-09-22).
 
 Usage, from the repo root:
 
@@ -222,7 +222,7 @@ def threshold_sweep(pos_peaks, adv_peaks, grid=SWEEP_GRID):
     because by_category holds a peak for every clip; the FA axis here is the
     adversarial one, matching the eval block's "adversarial" field.
 
-    bug.md C3 step 2 (2026-09-22): the training-steps verdict cost 40
+    2026-09-22: the training-steps verdict cost 40
     hand-driven evals (one per 0.25-0.85 threshold) for a two-point sweep,
     because this harness took one --threshold and the ledger had no curve to
     compare on. This is what lets a sweep runner conclude itself.
@@ -425,7 +425,7 @@ def main():
                              "is not a person, so it is a low-variance ranking "
                              "signal for sweep points, never merged into the "
                              "gates above, which stay on the real held-out "
-                             "recordings (improvement.md P1.2)")
+                             "recordings")
     parser.add_argument("--verbose", action="store_true", help="Print a row per positive")
     parser.add_argument("--sliding-window-size", type=int, default=None,
                         help="microWakeWord only: probabilities averaged before "
@@ -434,8 +434,8 @@ def main():
                              "manifest says, so the manifest is under test too")
     parser.add_argument("--json", dest="json_path", default=None, metavar="PATH",
                         help="Also write every number printed here as machine-readable "
-                             "JSON to PATH (same values, for the run ledger - see "
-                             "improvement.md P0.5). Does not change the report.")
+                             "JSON to PATH (same values, for the run ledger). "
+                             "Does not change the report.")
     args = parser.parse_args()
 
     # The backend picks itself by inspecting the model, so the gates can be scored on
@@ -559,7 +559,7 @@ def main():
     else:
         print(f"\nNo command_*.wav in {args.negatives}; skipping the command-following gate.")
 
-    # --- threshold sweep (bug.md C3 step 2, 2026-09-22) -------------------------
+    # --- threshold sweep (2026-09-22) ------------------------------------------
     # The scores are all in hand: rows holds a peak per positive, by_category a
     # peak per negative, so the sweep is one pure pass over the peaks, not 19
     # model runs. It goes in the --json output (and the ledger verbatim with
@@ -608,8 +608,8 @@ def main():
     print("=" * 70)
 
     # One compact line, the detection@FA readings a human would have produced
-    # by hand-driving this harness across 0.25-0.85 (40 evals; bug.md C3,
-    # 2026-09-22). At-most-B semantics: the best detection on the curve with
+    # by hand-driving this harness across 0.25-0.85 (40 evals, 2026-09-22).
+    # At-most-B semantics: the best detection on the curve with
     # FA <= B - the curve is a step function, never interpolated.
     if sweep:
         print()
@@ -628,7 +628,7 @@ def main():
                 parts.append(f"det@FA<={b:.1%}: - (no grid point at or below it)")
         print("  " + "   ".join(parts))
 
-    # --- voice-holdout synthetic ranking set (improvement.md P1.2) ------------
+    # --- voice-holdout synthetic ranking set -----------------------------------
     # A separate block on purpose: these clips are rendered from the voices the
     # corpus builders never train on, at in-distribution speeds, so the held-out
     # axis is the voice alone. They rank sweep points (low variance, a real n),
@@ -677,7 +677,7 @@ def main():
         print("=" * 70)
 
     # --- machine-readable copy of the same numbers -------------------------------
-    # --json is the hook the run ledger (improvement.md P0.5) reads; the values are
+    # --json is the hook the run ledger reads; the values are
     # exactly what the report above printed, nothing recomputed a second way.
     if args.json_path:
         per_speaker = {}
@@ -728,7 +728,7 @@ def main():
                 if detected_cmd is not None else None
             ),
             "gates": [{"check": text, "gate": gate, "pass": ok} for text, gate, ok in checks],
-            # The matched-FA curve (bug.md C3 step 2, 2026-09-22): 19 x 2 rates
+            # The matched-FA curve (2026-09-22): 19 x 2 rates
             # plus two counts - a few hundred bytes, one model run. The FA axis
             # is the extend+hey_other subset, exactly the "adversarial" field
             # above, never the pooled set. None for a run with no adversarial
@@ -738,7 +738,7 @@ def main():
             # Deliberately a top-level sibling of "positives" and "gates", never
             # inside either: the voice-holdout set is a synthetic ranking signal
             # and a ledger reader must not be able to mistake it for the
-            # real-speaker numbers it sits beside (improvement.md P1.2).
+            # real-speaker numbers it sits beside.
             "voice_holdout_set": voice_holdout_result,
         }
         path = Path(args.json_path)

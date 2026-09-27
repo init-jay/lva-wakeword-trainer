@@ -35,7 +35,7 @@
 # PIPER FLEET (the fast path for the corpus stage): one Piper instance is one
 # serial lane - the engine holds one model resident and takes every call under
 # one lock, so client threads queue instead of run (21.66 clips/s measured for
-# the single instance in src/scripts/bench_tts.py, improvement.md P2.1). PIPER_URLS
+# the single instance in src/scripts/bench_tts.py). PIPER_URLS
 # takes the comma-joined list src/scripts/start-tts-fleet.sh N prints, and the
 # corpus shards the fleet BY VOICE - each model pinned to one instance for the
 # whole run (corpus/piper.py, PiperFleet):

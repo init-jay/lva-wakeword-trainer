@@ -1,10 +1,10 @@
 """Guards for src/scripts/compare_arms.py, the cross-arm ledger reader.
 
 The tool's whole contract is honest reading of the sweep arms: group on the
-grid VALUE (the arm), count distinct (config-hash, seed) pairs (bug.md C2),
+grid VALUE (the arm), count distinct (config-hash, seed) pairs,
 never pool per speaker or per negative category (CLAUDE.md), read
 matched-FA as a point pick on each arm's OWN curve at the ledger's common
-budget (bug.md C3 step 2), and label the mixed vintages. Warnings (divergent
+budget, and label the mixed vintages. Warnings (divergent
 duplicates, multi-corpus arms) go to stderr like src/train/ledger.py's.
 
 Plain-python convention (tests/_runner.py): no pytest, no fixture files in
@@ -260,7 +260,7 @@ def test_arm_grouping_and_duplicate_collapse():
     grid dict lacks the key are out of scope."""
     out, err = _run([
         # arm '' - two records of the SAME (config-hash, seed) pair, identical
-        # evals (the C2 duplicate: same run at two commits).
+        # evals (the same run at two commits).
         rec("aaa1111-corp0000-h1111111", 42, "", 0.90, 0.03),
         rec("bbb2222-corp0000-h1111111", 42, "", 0.90, 0.03),
         # arm ryan=30 - two DISTINCT pairs (two seeds), no collapse.

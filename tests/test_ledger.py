@@ -1,23 +1,23 @@
 """Guards for src/train/ledger.py's summarise: the runs were sound, the tool
 that summarised them was not.
 
-C1: group on the RESOLVED config, not the grid label. An early sweep ran
+Group on the RESOLVED config, not the grid label. An early sweep ran
 before the grid was threaded into the command, so some rows carried 25k
 labels around runs that were actually filed at 50k (config.steps), and
 grouping on the label printed a misleading "25k" mean that was really a
 25k/50k mix - contradicting the hand-built verdict.
 
-C2: n counts (config-hash, seed) PAIRS, not records. Two records sharing the
+n counts (config-hash, seed) PAIRS, not records. Two records sharing the
 tag's h-half (the config hash, src/train/provenance.py) and the seed are the
 same run computed at two commits - not two draws from a distribution. Exact
 duplicates collapse; duplicates whose evals differ are a determinism
 regression and must be named, not averaged over.
 
-C3 step 1: the columns carry the recorded eval threshold (@0.5, or `mixed`),
+The columns carry the recorded eval threshold (@0.5, or `mixed`),
 because the rates are one-threshold readings and CLAUDE.md forbids reading
 them as a matched-FA comparison.
 
-C3 step 2: when records carry eval_model.py's threshold_sweep (the
+When records carry eval_model.py's threshold_sweep (the
 fixed-grid re-threshold of that run's own per-clip peaks), the table reads
 a COMMON matched-FA budget: detection at at-most-B adversarial FA is a
 point pick on each group's own step-function curve, never an
@@ -118,7 +118,7 @@ def rec_sweep(tag, steps, seed, det, fa, curve, threshold=0.5):
 
 
 def test_same_label_different_config_splits_and_warns():
-    # C1: two records whose grid labels agree but whose resolved configs do
+    # Two records whose grid labels agree but whose resolved configs do
     # not must land in SEPARATE groups, with a stderr warning that names the
     # offending tag, the label and the resolved value.
     with tmp_ledger([
@@ -149,7 +149,7 @@ def test_record_without_config_falls_back_to_label():
 
 
 def test_exact_duplicates_collapse_to_distinct_pairs():
-    # C2: four records, two (config-hash, seed) pairs, each at two commits,
+    # Four records, two (config-hash, seed) pairs, each at two commits,
     # agreeing to the last digit. n is 2, with the run count alongside, and
     # the statistics come from the two distinct pairs.
     with tmp_ledger([
@@ -170,8 +170,8 @@ def test_exact_duplicates_collapse_to_distinct_pairs():
 
 
 def test_divergent_duplicates_are_loud():
-    # C2's other half: the same (config-hash, seed) with DIFFERENT eval
-    # numbers is a determinism regression - name both tags and the
+    # The other half of pair counting: the same (config-hash, seed) with
+    # DIFFERENT eval numbers is a determinism regression - name both tags and the
     # differing fields; do not collapse the disagreement into one number.
     with tmp_ledger([
         rec("aaa1111-base-hconfa", 50000, 50000, 1042, 0.9, 0.03),
@@ -191,7 +191,7 @@ def test_divergent_duplicates_are_loud():
 
 
 def test_mixed_thresholds_say_mixed():
-    # C3 step 1: one-threshold readings labelled per group; a group whose
+    # One-threshold readings labelled per group; a group whose
     # records were eval'd at different thresholds cannot pretend to be one
     # threshold and says so instead.
     with tmp_ledger([
@@ -206,7 +206,7 @@ def test_mixed_thresholds_say_mixed():
 
 
 def test_summary_carries_the_matched_fa_caveat():
-    # C3 step 1: the standing caveat under the table - the numbers cannot
+    # The standing caveat under the table - the numbers cannot
     # be read as a matched-FA comparison (CLAUDE.md).
     with tmp_ledger([
         rec("aaa1111-base-haaaaaa", 25000, 25000, 42, 0.7, 0.02),
@@ -218,7 +218,7 @@ def test_summary_carries_the_matched_fa_caveat():
 
 
 def test_label_config_drift_groups_on_resolved_steps():
-    # C1's self-correction, forced by construction instead of by history:
+    # Grouping's self-correction, forced by construction instead of by history:
     # one row's grid label disagrees with its resolved config.steps and must
     # group under the config value, with a stderr warning that names the
     # offending tag (the 25k/50k mix that made the table contradict the
@@ -281,7 +281,7 @@ def test_label_config_drift_groups_on_resolved_steps():
 
 
 # ---------------------------------------------------------------------------
-# C3 step 2: the matched-FA reading off the recorded threshold sweep
+# The matched-FA reading off the recorded threshold sweep
 # ---------------------------------------------------------------------------
 
 def test_matched_fa_at_most_budget_picks_the_right_point():

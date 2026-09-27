@@ -146,7 +146,7 @@ def test_wilson_interval_zero_n_is_none():
 
 
 # ---------------------------------------------------------------------------
-# threshold_sweep (bug.md C3 step 2, 2026-09-22: the 40-eval manual job)
+# threshold_sweep (2026-09-22: the 40-eval manual job)
 # ---------------------------------------------------------------------------
 
 def test_threshold_sweep_re_thresholds_peaks_hand_computed():

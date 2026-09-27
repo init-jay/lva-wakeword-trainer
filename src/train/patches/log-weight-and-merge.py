@@ -1,7 +1,7 @@
 """Patch openwakeword's train.py so auto_train's two hidden decisions print
 machine-readable audit lines, and val_steps can no longer overflow.
 
-P1.3 (improvement.md): a sequence that ends with best_val_fp above
+The weight doubling: a sequence that ends with best_val_fp above
 target_false_positives_per_hour DOUBLES max_negative_weight, and it can fire
 twice - a run requesting 2000 can train at 8000. This repo targets 0.1 (half
 of upstream's 0.2), and the measurement that set the default (tuning run 8:
@@ -14,8 +14,8 @@ sequence, at the moment the decision happens:
 
     # WEIGHT_AUDIT sequence=<n> requested=<x> doubled=<true|false> effective=<y>
 
-P1.4: the exported model is a weight-average of whichever checkpoints
-cleared the 90th-percentile gate. Which checkpoints - and how many - was
+The checkpoint merge: the exported model is a weight-average of whichever
+checkpoints cleared the 90th-percentile gate. Which checkpoints - and how many - was
 previously invisible, and the gate is thresholded on the run's own validation
 metrics, so the count is a plausible source of the run-to-run variance at an
 identical config that CLAUDE.md's never-compare-at-a-fixed-threshold invariant
@@ -30,15 +30,15 @@ per-sequence list) and merged_checkpoints (the steps list) - appended AFTER
 the run tag is computed, because they are recorded outcomes of the run, not
 inputs to it.
 
-ALSO FIXED HERE, the "one latent trap" in improvement.md: sequences 2 and 3
+ALSO FIXED HERE, a latent trap: sequences 2 and 3
 build val_steps as np.int16 (upstream lines 299 and 319), so a
 --training-steps above ~327,000 overflows to NEGATIVE validation steps with
 no error. They are int64 now, like sequence 1's array; below that bound the
 array is identical modulo dtype. This un-traps the overflow; it does not
 recommend a larger step count, which is a per-word tuning question.
 
-The audit is PRINTS ONLY: no RNG draw (a seeded run stays byte-reproducible -
-the P0.1 bar), no control-flow change, no new config key. The
+The audit is PRINTS ONLY: no RNG draw (a seeded run stays byte-reproducible);
+no control-flow change, no new config key. The
 self._audit_seq_bounds bookkeeping records len(self.best_models) before each
 sequence so the merge audit can say which sequence each merged checkpoint
 came from; it is read-only bookkeeping that train_model neither sees nor
@@ -54,7 +54,7 @@ path = sys.argv[1]
 with open(path) as f:
     content = f.read()
 
-SENTINEL = "# PATCHED: audit the negative-weight schedule (improvement.md P1.3)"
+SENTINEL = "# PATCHED: audit the negative-weight schedule"
 if SENTINEL in content:
     print(f"Already patched: {path}")
     sys.exit(0)
@@ -80,7 +80,7 @@ edits = [
     #    is AFTER the previous sequence's train_model call has run.)
     ("        weights = np.linspace(1, max_negative_weight, int(steps)).tolist()\n"
      "        val_steps = np.linspace(steps-int(steps*0.25), steps, 20).astype(np.int64)\n",
-     "        # PATCHED: audit the negative-weight schedule (improvement.md P1.3):\n"
+     "        # PATCHED: audit the negative-weight schedule:\n"
      "        # sequence 1 uses the requested weight as-is; sequences 2 and 3 may\n"
      "        # double it (below). Machine-readable so src/train/oww/train.py can file\n"
      "        # it in <tag>.config.json. Print only - no RNG draw, no flow change.\n"
@@ -108,8 +108,8 @@ edits = [
      "\n"
      "        weights = np.linspace(1, max_negative_weight, int(steps)).tolist()\n"
      "        # PATCHED: int64, like sequence 1 - np.int16 overflowed to NEGATIVE\n"
-     '        # validation steps at --training-steps > ~327k with no error\n'
-     '        # (improvement.md\'s "one latent trap"); identical array below it.\n'
+     '        # validation steps at --training-steps > ~327k with no error;\n'
+     '        # identical array below it.\n'
      "        val_steps = np.linspace(1, steps, 20).astype(np.int64)\n"
      "        self._audit_seq_bounds.append(len(self.best_models))\n"),
 
@@ -153,7 +153,7 @@ edits = [
      '                    score["val_fp_per_hr"] <= fp_percentile:\n'
      "                models.append(model)\n"
      "                _cleared.append(_i)\n"
-     "        # PATCHED: audit the checkpoint merge (improvement.md P1.4): the\n"
+     "        # PATCHED: audit the checkpoint merge: the\n"
      "        # exported model is a weight-average of whatever cleared this gate,\n"
      "        # and which checkpoints that was previously invisible - a\n"
      "        # plausible source of the measured run-to-run variance. Print only.\n"

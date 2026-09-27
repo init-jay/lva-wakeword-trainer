@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""P2.3 probe: CoreML EP vs CPU EP for the oww feature-stage models.
+"""Probe: CoreML EP vs CPU EP for the oww feature-stage models.
 
 The augmentation+feature stage is the largest non-TTS host stage (the 2026-09-21
 bar-test run spent ~12 min of it recomputing four arrays at 22,144 clips - that
@@ -9,9 +9,9 @@ openwakeword/openwakeword/utils.py pins providers to CUDA or CPU and there is
 no CoreML branch (patches/feature-device-selection.py keys the device off
 onnxruntime's real providers, which is where a CoreML branch would go).
 docs/SPEED.md's closed-Metal section is about TRAINING (torch/tensorflow), not
-these two ONNX models - so this question was open, and improvement.md P2.3
-prescribes exactly this probe: the real models on the real batch shape, on
-this machine, and the result written down either way.
+these two ONNX models - so this question was open, and this probe answers
+it: the real models on the real batch shape, on this machine, and the
+result written down either way.
 
     src/train/train-applesilicon/.venv/bin/python src/scripts/coreml_probe.py
 

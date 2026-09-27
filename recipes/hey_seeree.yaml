@@ -28,7 +28,7 @@ eval:
     - hey city hall
     - hey seeker
     - hey seaweed
-    # Widened 2026-09-21 (improvement.md P1.1): 20 clips made one clip worth
+    # Widened 2026-09-21: 20 clips made one clip worth
     # 3.1 points of every matched-FA row. Same rule as above - real words that
     # begin with the phrase's own syllables (se-/si-/ce-), then diverge.
     - hey severe
@@ -193,7 +193,7 @@ eval:
     - hey, did you remember to lock the door?
     - hey Sean, are you coming?
     - hey Cecily, the food is ready.
-        # Widened 2026-09-21 (improvement.md P1.1): names that start with the
+        # Widened 2026-09-21: names that start with the
     # phrase's second syllable are the hard cases (Se-, Si-, Sh-), then a
     # broad pool of ordinary first names.
     - hey Seamus
@@ -594,7 +594,7 @@ voices:
       - "en_US-reza_ibrahim-medium"
       - "en_US-sam-medium"
 
-# THE VOICE HOLDOUT (improvement.md P1.2), a section of this recipe: one
+# THE VOICE HOLDOUT, a section of this recipe: one
 # configuration per wake word, and a voice reservation belongs to the word that
 # measured it. The recipe above keeps the eval and training corpora disjoint
 # on PHRASE; this section keeps them disjoint on VOICE. Every entry below is

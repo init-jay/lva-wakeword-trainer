@@ -1,5 +1,4 @@
-"""Guards for the voice holdout (a `voice_holdout:` section of the recipe,
-improvement.md P1.2).
+"""Guards for the voice holdout (a `voice_holdout:` section of the recipe).
 
 The phrase rule in src/recipe/__init__.py keeps the eval and training
 corpora disjoint on PHRASE; the voice holdout keeps them disjoint on VOICE.

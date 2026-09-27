@@ -9,7 +9,7 @@
 # tts_protocol/server.py), so client threads against one instance queue, they
 # do not run. Throughput scales with PROCESSES: the single instance measures
 # 21.66 clips/s in src/scripts/bench_tts.py, and the mww corpus stage ran at ~16
-# clips/s aggregate against it (improvement.md, P2.1 - the corpus stage is
+# clips/s aggregate against it (the corpus stage is
 # the serial wall of a Mac run). N instances should land near N x that, and
 # src/scripts/bench_tts.py is the instrument to confirm it.
 #

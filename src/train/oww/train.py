@@ -410,7 +410,7 @@ def create_config(wake_word: str, n_samples: int, training_steps: int,
     config["target_phrase"] = [safe_name]
     config["model_name"] = safe_name
     config["n_samples"] = n_samples
-    # None = the pre-P1.5 behaviour: validation set is a tenth of training, floored
+    # None = the derived default: validation set is a tenth of training, floored
     # at 1000. An explicit value is what a sweep point moves.
     config["n_samples_val"] = (n_samples_val if n_samples_val is not None
                                else max(1000, n_samples // 10))
@@ -634,8 +634,8 @@ def report_free_vram():
 
 # The machine-readable audit lines patches/log-weight-and-merge.py makes the
 # upstream trainer print at the moments of its two hidden decisions - the
-# per-sequence negative-weight (the doubling, improvement.md P1.3) and the
-# checkpoint merge (P1.4). The wrapper captures them in-process as the
+# per-sequence negative-weight (the doubling) and the
+# checkpoint merge. The wrapper captures them in-process as the
 # subprocess streams; reading the run log after the fact is not an option:
 # the log exists only when the run script's `script -q` wrote it, through a
 # pty (with escape codes), and the direct-invocation path has no log at all.
@@ -694,8 +694,8 @@ def _parse_audit_lines(audit):
 
     effective_max_negative_weight is the PER-SEQUENCE list (requested /
     doubled / effective per sequence): the honest form, since sequences 2
-    and 3 each see a different weight (P1.3). merged_checkpoints is the
-    steps list from the merge summary line (P1.4) - a present-but-EMPTY
+    and 3 each see a different weight. merged_checkpoints is the
+    steps list from the merge summary line - a present-but-EMPTY
     list means the gate ran and nothing cleared it (upstream then exports
     the live model as-is), which is a different record from the null filed
     when the line is missing entirely (patch not applied).
@@ -908,10 +908,10 @@ def main():
                              "threshold, for free. Measured in tuning run 8, which "
                              "compared requested 2000 vs 4000; the weight doubling "
                              "is unconditional (best_val_fp is never updated - see "
-                             "patches/log-weight-and-merge.py and improvement.md "
-                             "P1.3), so that was effective 2000/4000/8000 vs "
-                             "4000/8000/16000 per sequence: a fair comparison, 4000 "
-                             "was not better. Recommend to leave at default.")
+                             "patches/log-weight-and-merge.py), so that was "
+                             "effective 2000/4000/8000 vs 4000/8000/16000 per "
+                             "sequence: a fair comparison, 4000 was not better. "
+                             "Recommend to leave at default.")
     parser.add_argument("--augmentation-rounds", type=int, default=3,
                         help="How many differently-augmented copies of each clip to "
                              "compute features for (default: %(default)s). Multiplies "
@@ -958,8 +958,7 @@ def main():
                              "always written).")
     parser.add_argument("--n-samples-val", type=int, default=None,
                         help="Validation clips to generate (default: "
-                             "%(default)s = max(1000, n_samples/10), the "
-                             "pre-P1.5 behaviour).")
+                             "%(default)s = max(1000, n_samples/10)).")
     parser.add_argument("--augmentation-batch-size", type=int, default=16,
                         help="Batch size for the augmentation pass over the "
                              "generated clips (default: %(default)s, the upstream "
@@ -1175,7 +1174,7 @@ def main():
             print("ERROR: every available voice is excluded!")
             sys.exit(1)
 
-    # THE VOICE HOLDOUT (improvement.md P1.2): the voices the recipe's
+    # THE VOICE HOLDOUT: the voices the recipe's
     # `voice_holdout:` section reserves for the synthetic ranking set are
     # excluded from every corpus build of this word, so that set stays
     # voice-disjoint from the training data it is meant to rank. The live catalog is the source of truth: an entry it no
@@ -1233,7 +1232,7 @@ def main():
                          f"match the catalog this corpus is built from.")
 
     # === CORPUS MODE: reuse the frozen corpus or rebuild it =====================
-    # P0.3: during a sweep the corpus is a HELD-FIXED INDEPENDENT VARIABLE. The
+    # During a sweep the corpus is a HELD-FIXED INDEPENDENT VARIABLE. The
     # default (auto) reuses it whenever a corpus.json manifest exists and matches
     # the requested shaping AND the resolved voice set above, so a tuning loop
     # does not redraw the TTS noise on every point; rebuilding is explicit
@@ -1667,8 +1666,8 @@ def main():
     # None = the audit lines never appeared (patch missing) - the WARNING above
     # is why. [] = the audit ran and nothing cleared the gate: the EXPECTED
     # value on this corpus - the gate requires accuracy, recall and fp to hold
-    # simultaneously and no checkpoint has ever cleared it (improvement.md
-    # P1.4, bug.md B2). A reader finding [] should not chase it as a bug.
+    # simultaneously and no checkpoint has ever cleared it.
+    # A reader finding [] should not chase it as a bug.
     resolved["merged_checkpoints"] = None if not merge_seen else merged_checkpoints
     config_json = model_path.parent / f"{tag}.config.json"
     config_json.write_text(json.dumps(resolved, indent=2, default=str) + "\n")

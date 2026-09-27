@@ -230,7 +230,7 @@ def main():
     # but the engines must be UP for a --skip run: an unverifiable catalog is
     # exactly the reuse the check refuses.
 
-    # Voice holdout (improvement.md P1.2): loaded HERE, before either engine
+    # Voice holdout: loaded HERE, before either engine
     # branch and the corpus-mode decision; enforced against the live catalog,
     # so a list that drifted from it fails loudly. Absent section is a no-op.
     recipe = load_recipe_or_exit(args.wake_word)

@@ -6,7 +6,7 @@ description: Score trained wake-word models against held-out recordings and deci
 # Evaluating trained wake-word models
 
 Step 3. On a Mac it runs in the host uv env - `src/eval/.venv`, set up by
-`./src/scripts/setup-eval-host.sh` - no Docker (improvement.md P2.4); everywhere else,
+`./src/scripts/setup-eval-host.sh` - no Docker; everywhere else,
 in the eval container built from `src/eval/` - its own compose project. Both carry
 both inference stacks and neither trainer, because scoring a model and training
 one have incompatible pins - and both pin the SAME deployment-runtime wheels
@@ -318,7 +318,7 @@ and moved a little has told you nothing. Say which single variable moved, and re
 - `pymicro_wakeword/microwakeword.py:158` has an upstream `print(config)`, so every
   mWW run dumps the manifest dict to stdout. Not this repo's bug; ignore the line.
 
-## The voice-holdout ranking set (improvement.md P1.2)
+## The voice-holdout ranking set
 
 A third corpus at `data/corpus/eval/voice_holdout_tts/`, rendered by
 `make render-voice-holdout` (Kokoro on 8900): positives from the voices the
