@@ -102,66 +102,27 @@ _SEED: int = 0
 # the pipeline between the probes, not the probes.
 SMOKE_TRAINING_STEPS = 200
 
-# Speed coverage of the positives, widened at the top for run 9.
-#
-# Measured failure: a synthetic sweep of the run 4 model detected 6/6 up to 1.25x,
-# then 3/6 at 1.40x, 2/6 at 1.60x - training rendered nothing above 1.3x, and it was
-# fine below (6/6 at 0.55x). Widen the top only.
-#
-# Matches a real failure too: four of the five held-out clips run 4 missed were the
-# fast ones, and the shortest (300 ms) shorter than every clip it detected. Kokoro
-# at 1.6x renders "hey seeree" in 390-590 ms, exactly that range - checked for
-# intelligibility, since degraded audio is worse than no coverage of the speed.
-#
-# Both lists move together - one variable, "how fast can the phrase be" - since
-# fast run-on speech is the commonest real case.
-#
-# Stays discrete and five long so the fallback path can cache its phrase-alone
-# reference per (voice, speed).
+# Speed coverage of the positives. The top end is widened because a synthetic sweep
+# showed detection collapsing above ~1.3x while 0.55x was fine; both lists move
+# together - one variable, "how fast can the phrase be". Discrete and five long so
+# the fallback path can cache its phrase-alone reference per (voice, speed).
 RUNON_SPEEDS = [0.8, 1.0, 1.2, 1.4, 1.6]
 
-# How much of the command's onset to keep after the wake word ends, in ms.
+# How much of the command's onset to keep after the wake word ends, in ms. What
+# matters is where the phrase ends relative to THE END OF THE ARRAY, because
+# create_fixed_size_clip aligns that with the window: plain positives sit at ~80 ms,
+# so run-ons must match or the positive set is bimodal and the model learns the
+# later mode.
 #
-# The value that matters is where the phrase ends relative to the END OF THE ARRAY,
-# because create_fixed_size_clip aligns that with the window. Plain positives sit at
-# ~80 ms (30 ms trim pad + ~50 ms residual); run-ons must match or the positive set
-# is bimodal and the model learns the later mode.
+# Cut from the engine's word timestamps, never inferred: an inferred boundary was
+# biased, voice-dependent, and sometimes cut inside the wake word. The fallback path
+# still infers, which is why it reports itself loudly.
 #
-# The boundary comes from Kokoro's /dev/captioned_speech word timestamps, so this is
-# the whole overshoot, not jitter on an estimate. Two earlier attempts inferred it
-# from a phrase-alone rendering:
-#
-#   v1, cut at phrase_len + U(50,250): kept 270-470 ms of command. Alignment peak
-#      160 -> 480 ms, median latency 70 -> 130 ms, extend false accepts 4/32 -> 7/32 -
-#      a trailing region holding speech in BOTH classes stops discriminating.
-#   v2, correcting for the 30 ms trim pad: still median +153 ms late and
-#      voice-dependent (af_bella ~0, bf_lily +348..+459), and 2/18 clips cut inside
-#      the wake word.
-#
-# The timestamps remove both the bias and the variance. The fallback path still uses
-# v2, which is why it reports itself loudly.
-#
-# THE RANGE MUST NOT START AT ZERO. The margin is not padding; it is what lets the
-# model hear the word ENDED rather than continued - the whole discrimination between
-# "hey seeree" and "hey serious". Measured against held-out real recordings:
-#
-#   effective margin   held-out run-on   extend+hey_other FA   latency
-#     ~50 ms (run 5)         28%              12/32             -20 ms
-#    ~140 ms (run 6)         40%               8/32              48 ms
-#    ~200 ms (run 4)         46%               6/32              77 ms
-#    ~225 ms (run 7)         56%               7/32              83 ms
-#
-# Runs 6 and 7 share an identical real-sample corpus and differ only in this
-# constant: +85 ms of margin bought +16 points of real run-on detection. That is the
-# relationship this value exploits.
-#
-# The false-accept column is NOT a gradient: it plateaus at 7-8/32 across a 3x range
-# of margin (the early monotonic reading was mostly escaping the pathological zero
-# case; run 4 also had half the real data). Do not raise this expecting fewer false
-# accepts.
-#
-# The cost is latency, which tracks margin and sits at 83 ms against a 120 ms gate.
-# Roughly one more step of headroom, for diminishing returns.
+# MUST NOT START AT ZERO. The margin is what lets the model hear the word ENDED
+# rather than continued - the whole difference between the wake word and a longer
+# word that starts with it. Raising it buys detection and latency, not fewer false
+# accepts, which plateau across a 3x range of margin; about one step of headroom
+# remains, for diminishing return.
 RUNON_TAIL_MS = (150.0, 300.0)
 
 
@@ -489,28 +450,17 @@ def create_config(wake_word: str, n_samples: int, training_steps: int,
     # can see is a config value it can move, and the yml's own comment cautions
     # against making it large - variety in the augmentation is the point.
     config["augmentation_batch_size"] = augmentation_batch_size
-    # MODELS OUT, CORPUS ELSEWHERE. Upstream uses output_dir for exactly three things
-    # (openwakeword/train.py:652, 905, 909): the .onnx export, the .tflite conversion
-    # beside it, and an empty <output_dir>/<model_name>/ it creates unconditionally -
-    # that last one is where the corpus WOULD have gone; its being empty is the
-    # visible sign corpus_dir took over. Everything else formerly derived from
-    # output_dir is re-pointed by patches/configurable-corpus-dir.py, which is what
-    # makes corpus_dir exist.
+    # MODELS OUT, CORPUS ELSEWHERE. Upstream uses output_dir for the .onnx export, the
+    # .tflite beside it, and an empty <output_dir>/<model_name>/ it creates unconditionally
+    # (its emptiness is the visible sign corpus_dir took over). Everything else re-derives
+    # from corpus_dir via patches/configurable-corpus-dir.py, which is what makes
+    # corpus_dir exist.
     # BOTH ABSOLUTE, AND corpus_dir MUST BE. Upstream runs os.path.abspath() on
-    # output_dir (train.py:649) but knows nothing about corpus_dir, so a relative
-    # value survives into trim_mmap, which builds its temp file like this:
-    #
-    #     output_file2 = mmap_path.strip(".npy") + "2.npy"       # data.py:876
-    #
-    # str.strip takes a CHARACTER SET and strips BOTH ends, so a leading "./" loses
-    # its dot and a relative path silently becomes absolute at the filesystem root:
-    #
-    #     ./data/corpus/hey_seeree/oww/positive_features_train.npy
-    #     ->  /data/corpus/hey_seeree/oww/positive_features_trai2.npy
-    #
-    # which fails with FileNotFoundError during feature computation - after corpus
-    # generation and augmentation have already run. (The mangled "trai" is the same
-    # bug eating the "n"; harmless once the directory is right.)
+    # output_dir but knows nothing about corpus_dir, and trim_mmap builds its temp file
+    # with `mmap_path.strip(".npy")` - str.strip takes a CHARACTER SET and strips both
+    # ends, so a leading "./" loses its dot and a relative path silently becomes
+    # absolute at the filesystem root. It then fails with FileNotFoundError during
+    # feature computation, after corpus generation has already run.
     config["output_dir"] = (str(output_dir) if output_dir is not None
                             else str(WORK_DIR / "output" / safe_name / "oww"))
     config["corpus_dir"] = str(WORK_DIR / "data" / "corpus" / safe_name / "oww")
@@ -1168,22 +1118,18 @@ def main():
         np.random.seed(args.seed)
 
     # === VOICE SET: resolved BEFORE the corpus-mode decision ====================
-    # The reuse check diffs the EFFECTIVE voice set, not only the shaping flags.
-    # The cf9c065b reuse, 2026-09-22: every shaping flag matched the manifest,
-    # but the tracked voice holdout (seven Kokoro voices + two Piper pairs)
-    # postdated the corpus build, and matches_requested never compared
+    # The reuse check diffs the EFFECTIVE voice set, not only the shaping flags. The
+    # cf9c065b reuse: every shaping flag matched the manifest, but the tracked voice
+    # holdout postdated the corpus build and matches_requested never compared
     # manifest["voices"] - so a post-reservation run silently trained on the
-    # pre-reservation corpus. The probe is the cheap `voices` op (a catalog
-    # fetch: no rendering, no model load), so a reuse run pays for it too;
-    # deferring it to the build stage is exactly what kept the check
-    # voice-blind, and it is the only way to know a catalog that has moved
-    # since the build cannot be reused as if it had not. The consequence: a
-    # --skip-corpus resume needs the TTS fleet UP (an unreachable catalog
-    # exits here, as it does for a build).
+    # pre-reservation corpus. The probe is the cheap `voices` op (a catalog fetch: no
+    # rendering, no model load), so a reuse run pays for it too; deferring it to the
+    # build stage is what kept the check voice-blind. Consequence: a --skip-corpus
+    # resume needs the TTS fleet UP - an unreachable catalog exits here, as it does
+    # for a build.
     #
     # Computed ONCE and consumed by BOTH the check and the build below: two
-    # computations of "live catalog minus exclusions" could drift from each
-    # other and re-open the same hole with the check fixed.
+    # computations of "live catalog minus exclusions" could drift and re-open the hole.
     print("\n[Kokoro servers]")
     pool = KokoroPool(args.kokoro_url.split(","))
     kokoro_voices = probe_kokoro_servers(pool)
@@ -1388,40 +1334,19 @@ def main():
     if not args.skip_corpus:
         # Text variations for positive samples.
         #
-        # NO UPPERCASE. `wake_word.upper()` was in this list for the first twelve runs
-        # and it renders the invented word as SPELLED-OUT LETTERS - "hey S-E-E-R-E-E" -
-        # labelled as the wake word. A sixth of the plain positives were mislabelled
-        # that whole time. Caught by ear; the measurements that were supposed to catch
-        # it both failed, and how they failed is the point:
-        #
-        #   * duration: 1083 ms against 965 ms, only +12%. Too weak to conclude
-        #     anything from; read as "emphatic delivery" instead.
-        #   * embedding distance: 0.535 from plain, about a DIFFERENT VOICE (0.70).
-        #     Read as "lots of diversity" when it was "this is not the same phrase".
-        #
-        # A large distance from plain cannot distinguish useful variety from a
-        # different utterance. Anything added here must be LISTENED to.
-        #
-        # It is uppercase on the invented word specifically: "HEY seeree" measures
-        # 0.031 from plain (nothing happens), while "hey SEEREE" measures 0.030 from
-        # "HEY SEEREE" (both spell it). A real word in caps is fine; the wake word is
-        # not a real word, which is the whole reason it makes a good wake word.
+        # NO UPPERCASE. `wake_word.upper()` sat in this list for a dozen runs, and on
+        # an invented word it renders SPELLED-OUT LETTERS ("hey S-E-E-R-E-E") labelled
+        # as the wake word - a sixth of the plain positives were mislabelled. Neither
+        # duration (+12%) nor embedding distance flagged it: distance from plain
+        # cannot distinguish useful variety from a different utterance. Anything added
+        # here must be LISTENED to. The effect is specific to an invented word -
+        # capitalising a real word is fine, and capitalising a lowercase wake word
+        # measures ~0.03 from plain when it does not spell.
         #
         # What is left is punctuation, which changes prosody without touching
-        # pronunciation. Distances from plain (af_bella / am_adam):
-        #
-        #   hey seeree,    0.437 / 0.344
-        #   hey seeree!    0.291 / 0.201
-        #   hey seeree...  0.264 / 0.523
-        #   hey seeree!!   0.158 / 0.232
-        #   hey seeree?    0.105 / 0.304
-        #   hey seeree.    0.086 / 0.294
-        #   Hey Seeree     0.027 / 0.053   <- dropped, indistinguishable from plain
-        #
-        # `.lower()` is also gone: a literal duplicate of a lowercase wake word.
-        #
-        # The phrase-alone texts and tuned speed grid live in corpus/positives.py so
-        # the microWakeWord corpus renders the same thing.
+        # pronunciation. `.lower()` is gone as a literal duplicate of a lowercase wake
+        # word. The phrase-alone texts and tuned speed grid live in
+        # corpus/positives.py so the microWakeWord corpus renders the same thing.
         positive_texts = plain_positive_texts(wake_word)
 
         # Negative phrases - see build_negative_phrases for why the confusable ones
@@ -1443,22 +1368,14 @@ def main():
         runon_test = int(args.samples_per_voice // 10 * args.runon_fraction)
         plain_test = args.samples_per_voice // 10 - runon_test
 
-        # piper_voices was resolved before the corpus-mode decision (above),
-        # alongside the Kokoro set: the reuse check and the manifest write
-        # validate against that same computation, so it is not re-derived
-        # here. Piper SUBSTITUTES for part of the phrase-alone budget rather
-        # than adding to it.
-        #
-        # Adding would move three things at once: engine diversity, total corpus size,
-        # and - because real clips are a FRACTION of the positive set - real-clip
-        # density, which run 10 measured as the largest single lever here (run-on
-        # 53% -> 77%). A naive "also generate Piper" over all 84 voices would have
-        # taken real clips from ~17% of positives to ~6%, measuring dilution rather
-        # than diversity.
-        #
-        # Substituting holds the total, the plain/run-on split, and real-clip density
-        # fixed, leaving one variable: where a share of the phrase-alone clips came
-        # from. Run-ons stay entirely Kokoro - see the --piper-fraction help for why.
+        # piper_voices was resolved before the corpus-mode decision (above), alongside
+        # the Kokoro set: the reuse check and the manifest write validate against that
+        # same computation, so it is not re-derived here. Piper SUBSTITUTES for part of
+        # the phrase-alone budget rather than adding to it - adding would move engine
+        # diversity, total corpus size, and (because real clips are a FRACTION of the
+        # positive set) real-clip density all at once, and density measured as the
+        # stronger lever. A naive "also generate Piper" over every voice measures
+        # dilution, not diversity.
         kokoro_plain_train, kokoro_plain_test = plain_train, plain_test
         if piper_voices:
             # The Piper half of the voice holdout was already excluded in the
