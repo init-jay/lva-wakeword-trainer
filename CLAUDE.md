@@ -89,7 +89,10 @@ with a 30% Kokoro mix by default (`KOKORO_FRACTION=0` for the all-Piper corpus).
 scale corpus depth in search of quality: doubling it (with double the training
 steps) produced no deployable model in either engine mix - the runs that
 measured that live on branch `train/hey_seeree`.
-The route rationale and the measurements: SPEED.md on branch `train/hey_seeree`.
+The route rationale and the efficiency measurements: `docs/SPEED.md`. One wake
+word's model results - detection and false-accept scores, sweep verdicts, the
+staged candidate: `SPEED.md` on branch `train/hey_seeree`, which is where the full
+campaign record survives.
 Where a comment cites `record/SPEED.md`, `record/` means that branch: the file is
 not in this tree, so the prefix is what keeps the pointer followable rather than
 apparent. `tests/test_record_pointers.py` fails any bare citation of it.
@@ -141,7 +144,8 @@ edit. If a measurement is claimed, cite where it came from — several were foun
 expensive way, and a plausible-sounding replacement is worse than none.
 
 The plan file (`improvement.md`) and the review file (`bug.md`) were removed
-from the repo: the measurements they carried live in SPEED.md on branch
+from the repo: the efficiency measurements they carried live in `docs/SPEED.md`
+and the model results in SPEED.md on branch
 `train/hey_seeree`,
 the incident history in the git log and the test docstrings. Code comments that
 cite "improvement.md P.." or "bug.md B.." are provenance for the commit that

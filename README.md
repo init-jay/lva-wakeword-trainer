@@ -83,8 +83,11 @@ summarises it.
 
 ## How long it takes
 
-The measurements behind the numbers below - and every comparison that led to a
-route recommendation - live in `SPEED.md` on branch `train/hey_seeree`. This section only tells
+The timings behind the numbers below, and the comparisons that led to each route
+recommendation, are in [docs/SPEED.md](docs/SPEED.md). What is deliberately not
+there is one wake word's model quality - detection and false-accept scores, sweep
+verdicts, the staged candidate - which lives in `SPEED.md` on branch
+`train/hey_seeree`. This section only tells
 you what to expect.
 
 | Step | CUDA box | Mac, host |

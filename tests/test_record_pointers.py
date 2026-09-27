@@ -1,98 +1,118 @@
-"""Pointers to the record must resolve from a tree that has no record.
+"""Pointers to the measurements must resolve from the tree that carries them.
 
-`main` is the pipeline; the hey_seeree measurements live on branch
-`train/hey_seeree` (see CLAUDE.md, "Where the measurements live"). Deleting
-SPEED.md from this tree is the easy half - the hard half is the ~20 comments
-that cite it as a *locatable source*: 'record/SPEED.md "Piper fleet"',
-"the result is in SPEED.md", "record that in SPEED.md and stop". Those are
-instructions to go look, and after the deletion they point at a file that is
-not here. CLAUDE.md:141 says plainly that the improvement.md/bug.md citations are
-provenance labels rather than links to keep alive, and that stays true of them:
-naming where a finding came from does not require a resolvable path. A citation
-that tells the reader to go and read something does.
+SPEED.md was split, not deleted. `docs/SPEED.md` is the pipeline-efficiency half -
+route choice, stage costs, the avenues closed by measurement - and it belongs in
+this tree, because it is what anyone tuning the pipeline for a different wake word
+needs. The campaign's model results (per-speaker scores, sweep verdicts, the
+staged candidate) moved to branch `train/hey_seeree`, where the rest of that
+record lives.
 
-So the rule this enforces is narrow and mechanical: in a tree WITHOUT SPEED.md,
-every mention of it carries the `record/` prefix (defined in CLAUDE.md) or names
-the branch, so the reader knows to look on `train/hey_seeree` instead of hunting
-for a file that was never meant to be here.
+So a citation of `SPEED.md` now has exactly two correct forms: `docs/SPEED.md`,
+which resolves here, or `record/SPEED.md`, where `record/` means that branch (the
+shorthand is defined in CLAUDE.md). A bare `SPEED.md` is a dead pointer: the root
+file is gone, and the reader has no way to know which half they were being sent to.
 
-Why a static test and not a comment: the pointer set is written by every future
-PR that measures something on its own wake word and moves the record out. A bare
-"SPEED.md" typed into a new comment is invisible in review - the reviewer sees a
-citation, not a dangling one - and nothing else in the suite would notice.
+That is invisible in review - a bare "SPEED.md" reads like a citation, and every
+other form of it also reads like a citation - hence this test rather than a note.
+Comments and docstrings wrap at ~79 columns, so the qualifier and the branch name
+often land on different lines; the check judges the citation plus the two lines
+after it, which is what a reader's eye does. On a tree that still carries the root
+file (the record branch), bare citations are correct, so nothing is asserted -
+and that fact is printed rather than passed quietly.
 """
 
+import re
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# Where the record lives when it is not in this tree.
 RECORD_BRANCH = "train/hey_seeree"
 RECORD_FILE = "SPEED.md"
+GUIDANCE_FILE = "docs/SPEED.md"
 
-# Not source: generated corpus/model trees, the data dirs, and the record's own
-# prose (RECORD.md is the record branch's README, where the name is the subject).
+# Not source: generated corpus/model trees and the record's own prose, where the
+# bare name is the subject rather than a pointer.
 SKIP_DIRS = {".git", "__pycache__", ".venv", "data", "output", "logs", "node_modules"}
 SKIP_NAMES = {"uv.lock", "RECORD.md"}
 
+# A provenance tag is <commit>-d<digest> / <commit>-<digest>-<hash> (src/provenance.py).
+MODEL_TAG = re.compile(r"\b[0-9a-f]{7}-(?:d[0-9a-f]{6,8}|[0-9a-f]{8})\b")
 
-def _mentions(path):
-    """(line_no, line) for every line naming the record file, or [] if unreadable."""
+
+def _lines(path):
     try:
-        text = path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8").splitlines()
     except (UnicodeDecodeError, OSError):
         return []                     # binary or unreadable: no prose to check
-    return [(i, ln) for i, ln in enumerate(text.splitlines(), 1) if RECORD_FILE in ln]
 
 
-def test_every_record_pointer_says_where_the_record_is():
-    if (REPO_ROOT / RECORD_FILE).exists():
-        # A tree that carries the record (the record branch itself, or main before
-        # it moved) needs no qualifier: the bare name resolves. Assert nothing,
-        # loudly enough that a run here is not mistaken for a pass.
-        print(f"  {RECORD_FILE} is in this tree, so bare citations resolve; "
-              f"qualification not required")
-        return
+def _citations(root):
+    """(relpath, lineno, window) for every line naming the measurements file."""
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.name in SKIP_NAMES or path == Path(__file__):
+            continue
+        rel = path.relative_to(root)
+        if set(rel.parts[:-1]) & SKIP_DIRS:
+            continue
+        lines = _lines(path)
+        for i, line in enumerate(lines):
+            if RECORD_FILE in line:
+                yield str(rel), i + 1, "\n".join(lines[i:i + 3])
+
+
+def test_every_citation_of_the_measurements_resolves():
     bad = []
-    for path in sorted(REPO_ROOT.rglob("*")):
-        if not path.is_file() or path.parent.name in SKIP_DIRS or any(
-                p in SKIP_DIRS for p in path.relative_to(REPO_ROOT).parts[:-1]):
+    for rel, line_no, window in _citations(REPO_ROOT):
+        if GUIDANCE_FILE in window or f"record/{RECORD_FILE}" in window \
+                or RECORD_BRANCH in window:
             continue
-        if path.name in SKIP_NAMES or path == Path(__file__):
-            continue
-        for line_no, line in _mentions(path):
-            # Comments and docstrings wrap at ~79 columns, so "SPEED.md on branch"
-            # and "train/hey_seeree" land on different lines more often than on the
-            # same one. The rule is semantic - a reader must be able to find the
-            # record - so judge it over the citation and the two lines after it.
-            window = "\n".join(line.splitlines()[0:1] + _tail(path, line_no, 2))
-            qualified = f"record/{RECORD_FILE}" in window or RECORD_BRANCH in window
-            if not qualified:
-                bad.append(f"{path.relative_to(REPO_ROOT)}:{line_no}: {line.strip()}")
+        bad.append(f"{rel}:{line_no}: {window.splitlines()[0].strip()}")
     assert not bad, (
-        f"{len(bad)} citation(s) of {RECORD_FILE} do not say where the record is - "
-        f"the file is not in this tree, so a bare name is a dead pointer. Prefix it "
-        f"`record/` (CLAUDE.md defines the shorthand) or name branch "
-        f"{RECORD_BRANCH}:\n" + "\n".join(f"    {b}" for b in bad[:20]))
+        f"{len(bad)} citation(s) of {RECORD_FILE} carry no prefix, and the root file "
+        f"is gone - write `{GUIDANCE_FILE}` for the efficiency half or "
+        f"`record/{RECORD_FILE}` for the campaign results (branch {RECORD_BRANCH}):\n"
+        + "\n".join(f"    {b}" for b in bad[:20]))
 
 
-def test_the_qualified_pointers_name_a_branch_that_exists():
-    """`record/` is only useful if it means something. Check the definition is in
-    CLAUDE.md, so a reader who greps the shorthand finds its meaning in one hop."""
+def test_both_halves_are_where_the_pointers_say():
+    """A pointer that resolves is only useful if it resolves to the right half."""
+    assert (REPO_ROOT / GUIDANCE_FILE).is_file(), f"{GUIDANCE_FILE} is missing"
+    if (REPO_ROOT / RECORD_FILE).exists():
+        print(f"  {RECORD_FILE} is in this tree (a record branch); the split "
+              f"checks do not apply here")
+        return
+    assert not (REPO_ROOT / RECORD_FILE).exists(), (
+        f"root {RECORD_FILE} is back: it is the campaign record, and it belongs on "
+        f"{RECORD_BRANCH}")
+
+
+def test_the_guidance_doc_is_efficiency_and_not_a_scorecard():
+    """`docs/SPEED.md` must stay the transferable half.
+
+    The seam this guards is the one the split was drawn at: a timings doc that
+    accumulates "model X scored Y" lines has silently become the record again, and
+    the next wake word's owner inherits numbers from a campaign that is not theirs.
+    Route costs and stage costs are allowed to name the corpus they were measured
+    on - a timing without its conditions is useless - so this checks the two forms
+    that are only ever results: a model's provenance tag, and a scorecard citation.
+    """
+    doc = (REPO_ROOT / GUIDANCE_FILE).read_text()
+    tags = MODEL_TAG.findall(doc)
+    assert not tags, f"model provenance tags in {GUIDANCE_FILE}: {tags}"
+    assert "scorecards.jsonl" not in doc and "det@FA" not in doc, (
+        f"{GUIDANCE_FILE} cites scorecard rows; those are one word's results and "
+        f"belong on {RECORD_BRANCH}")
+
+
+def test_the_record_shorthand_is_defined_where_a_reader_would_look():
+    """`record/` is only useful if its meaning is one hop away, in the file that
+    tells an agent where things live."""
     claude = (REPO_ROOT / "CLAUDE.md").read_text()
-    assert f"record/{RECORD_FILE}" in claude or "record/`" in claude, (
-        "CLAUDE.md no longer defines the `record/` shorthand that the comments use")
-    assert RECORD_BRANCH in claude, f"CLAUDE.md does not name branch {RECORD_BRANCH}"
-
-
-def _tail(path, line_no, n):
-    """The n lines after line_no, for judging a citation that wraps."""
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except (UnicodeDecodeError, OSError):
-        return []
-    return lines[line_no:line_no + n]
+    assert f"record/{RECORD_FILE}" in claude, (
+        "CLAUDE.md no longer defines the `record/` shorthand the comments use")
+    assert RECORD_BRANCH in claude and GUIDANCE_FILE in claude, (
+        f"CLAUDE.md must name both halves: {GUIDANCE_FILE} and branch {RECORD_BRANCH}")
 
 
 def main():

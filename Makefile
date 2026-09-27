@@ -3,8 +3,9 @@
 #
 # Thin wrappers only: the scripts keep their logic and their comments
 # (improvement.md P2.5), and CLAUDE.md carries the ordering between steps.
-# The costs below are the Apple-Silicon host numbers from SPEED.md on branch
-# `train/hey_seeree` where
+# The costs below are the Apple-Silicon host numbers from docs/SPEED.md, measured
+# on one M1 Max; expect a different machine to move them. Measured model results
+# for the one example word are on branch `train/hey_seeree`.
 # measured; "needs TTS" means the uv engines in src/tts-service/engines/, in
 # another terminal, per the run-script headers.
 

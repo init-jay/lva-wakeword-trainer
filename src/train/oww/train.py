@@ -92,7 +92,7 @@ _SEED: int = 0
 
 # The smoke-mode training size: the smallest at which the full pipeline still
 # runs end to end. 200 steps is ~30 s of the torch loop on an M-series Mac,
-# against ~8 min at the 50,000-step default (record/SPEED.md: the full host run's
+# against ~8 min at the 50,000-step default (docs/SPEED.md: the full host run's
 # training loop, 50k steps, is the minority of its ~35 minutes). The feature
 # arrays are NOT minified - upstream sizes them from the corpus directories and
 # exposes no size knob - so a smoke run still pays the full recompute (~12 min

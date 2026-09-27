@@ -3,12 +3,12 @@
 
 The augmentation+feature stage is the largest non-TTS host stage (the 2026-09-21
 bar-test run spent ~12 min of it recomputing four arrays at 22,144 clips - that
-corpus's numbers, recorded in record/SPEED.md's range of 11-12m30s), and it runs
+corpus's numbers, recorded in docs/SPEED.md's range of 11-12m30s), and it runs
 onnxruntime on CPU:
 openwakeword/openwakeword/utils.py pins providers to CUDA or CPU and there is
 no CoreML branch (patches/feature-device-selection.py keys the device off
 onnxruntime's real providers, which is where a CoreML branch would go).
-record/SPEED.md's closed-Metal section is about TRAINING (torch/tensorflow), not
+docs/SPEED.md's closed-Metal section is about TRAINING (torch/tensorflow), not
 these two ONNX models - so this question was open, and improvement.md P2.3
 prescribes exactly this probe: the real models on the real batch shape, on
 this machine, and the result written down either way.
@@ -80,7 +80,7 @@ def main():
                          "probe reports the rate per 1000 clips instead of an absolute "
                          "time - an absolute figure only means anything for the corpus "
                          "you are actually building (the hey_seeree feature stage was "
-                         "22,144 clips; record/SPEED.md).")
+                         "22,144 clips; docs/SPEED.md).")
     args = ap.parse_args()
 
     import onnxruntime as ort
@@ -89,8 +89,8 @@ def main():
 
     if "CoreMLExecutionProvider" not in ort.get_available_providers():
         print("CoreMLExecutionProvider not available - nothing to probe. "
-              "Record that with the repo's measurements (SPEED.md on branch "
-              "train/hey_seeree) and stop.")
+              "Record that with the repo's other measurements (docs/SPEED.md, the "
+              "closed-avenues section) and stop.")
         return
 
     # One fixed input: deterministic, and the same array feeds every session.
