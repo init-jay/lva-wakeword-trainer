@@ -8,7 +8,7 @@ requires-python = ">=3.11,<3.13"
 # reason than either of those. They run on the host because they need a MICROPHONE.
 # This one runs on the host because Docker Desktop does not pass the Metal device
 # through, so a containerised "MPS" build silently gets CPU; the Metal question is
-# closed, not pending - SPEED.md says why.
+# closed, not pending - record/SPEED.md says why.
 #
 # WHY IT IS NOT AT src/train/host/. `COPY src/train/ ./src/train/` in both trainer Dockerfiles
 # would sweep a .venv into the images, and a macOS torch install is several GB. The
@@ -103,7 +103,7 @@ dependencies = [
 
     # Feature computation. The CPU package, NOT onnxruntime-gpu - which publishes
     # no macOS wheel at all. (It does carry CoreMLExecutionProvider, had the
-    # CoreML route ever been pursued - it was abandoned; SPEED.md.)
+    # CoreML route ever been pursued - it was abandoned; record/SPEED.md.)
     "onnxruntime>=1.19,<2",
 
     # ONNX -> tflite conversion, so a host run produces the same two artefacts a

@@ -43,7 +43,7 @@ JSON per exchange, measured at under 1 ms against 100-500 ms renders.
   - Piper is not. onnxruntime parallelises across cores, and one instance measured
     980% CPU - ten cores (this short-phrase workload; on the longer oww recipe
     phrases the same box measures 462% per instance, and a fleet of 2-8 still
-    cannot beat one - SPEED.md "Piper fleet", 2026-09-22). A second instance was
+    cannot beat one - record/SPEED.md "Piper fleet", 2026-09-22). A second instance was
     0.88x, slower than one, because the two contend for cores the first was
     already using.
 
@@ -124,7 +124,7 @@ def sweep_one(spec: str, voice: str, batch: int, threads: int, clips: int):
         # `clips`. Without it every batched run renders one full-size chunk
         # past the request - 64 clips for 60, 112 for 100 at batch 16 -
         # while rate divides by the requested count, reading throughput
-        # 7-12% low. This is the tool that feeds SPEED.md; do not bias the
+        # 7-12% low. This is the tool that feeds record/SPEED.md; do not bias the
         # numbers it publishes.
         work = [[i for i in range(i, min(i + size, clips))]
                 for i in range(0, clips, size)]

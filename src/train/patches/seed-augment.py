@@ -5,7 +5,7 @@ runs differing in one hyperparameter differ in nothing else. Upstream seeds NOTH
 the model's initial weights come from an unseeded torch generator, the augmentation
 draws background / RIR / gain from the unseeded global numpy RNG, and Python's hash
 randomization is on. This repo has already measured 10 points of run-to-run variance
-at an IDENTICAL config (SPEED.md, CLAUDE.md) - until this patch lands, a sweep point
+at an IDENTICAL config (record/SPEED.md, CLAUDE.md) - until this patch lands, a sweep point
 measures the seed, not the hyperparameter.
 
 The patch does ONE thing, keyed on config["seed"] (absent or 0 = untouched, so a

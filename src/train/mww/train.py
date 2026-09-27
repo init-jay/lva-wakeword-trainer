@@ -84,7 +84,7 @@ MODEL_FLAGS = [
 SPLITS = ("training", "validation", "testing", "testing_ambient", "validation_ambient")
 
 # The smoke-mode sizes. 200 training steps against the 10,000-step default: the
-# full host run measured 14m14s (corpus + features + train + conversion, SPEED.md),
+# full host run measured 14m14s (corpus + features + train + conversion, record/SPEED.md),
 # and the training loop is a minority of it, so 200 steps is a matter of seconds
 # to a minute here. The eval interval moves 500 -> 50 deliberately: with the
 # default interval a 200-step run would evaluate only at the last step (train.py:

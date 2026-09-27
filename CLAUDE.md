@@ -90,6 +90,9 @@ scale corpus depth in search of quality: doubling it (with double the training
 steps) produced no deployable model in either engine mix - the runs that
 measured that live on branch `train/hey_seeree`.
 The route rationale and the measurements: SPEED.md on branch `train/hey_seeree`.
+Where a comment cites `record/SPEED.md`, `record/` means that branch: the file is
+not in this tree, so the prefix is what keeps the pointer followable rather than
+apparent. `tests/test_record_pointers.py` fails any bare citation of it.
 
 ## Invariants that are easy to break
 

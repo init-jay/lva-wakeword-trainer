@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """TensorFlow microbenchmark: the op mix microWakeWord's mixednet is made of.
 
-The torch probe for openWakeWord (SPEED.md) sent GEMM to the host via
+The torch probe for openWakeWord (record/SPEED.md) sent GEMM to the host via
 Accelerate and convolutions to the container via oneDNN; that result did not
 transfer to a convolutional model, and this was the measurement it prescribed: the same probe in `docker/Dockerfile.mww.cpu` and in a host TF
-install, both pinned to 2.21.0. The result is in SPEED.md, "microWakeWord on
+install, both pinned to 2.21.0. The result is in record/SPEED.md, "microWakeWord on
 the Mac: host vs. container" - the host won, 1.17x on the full train step.
 
 The shapes are the real model's, transcribed from

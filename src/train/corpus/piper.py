@@ -89,7 +89,7 @@ class PiperFleet:
     loads each of its models once rather than per request.
 
     Disposition (C4, bug.md): on ONE machine a fleet does not help, and this
-    is measured, not assumed - SPEED.md "Piper fleet" (2026-09-22, re-measured
+    is measured, not assumed - record/SPEED.md "Piper fleet" (2026-09-22, re-measured
     the same evening, 3-6 trials per size with the load average recorded per
     trial): one instance 15.49-16.51 clips/s at 462% mean CPU (4.6 of the box's
     10 cores; no fleet of 2-8 instances passes ~18 clips/s total, and N=2 is a
