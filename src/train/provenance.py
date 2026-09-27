@@ -16,7 +16,7 @@
             h: the resolved config (hyperparameters + seed)
 
 WHY THE COMMIT ALONE IS NOT ENOUGH. A git hash identifies the code and every file
-git tracks - including src/wordlists/, docker/requirements.txt and the patches. It says
+git tracks - including recipes/ and src/recipe/, docker/requirements.txt and the patches. It says
 nothing about the two inputs this repo deliberately does NOT track, and those are
 precisely the ones that move: the real recordings, and the synthetic corpus generated
 from a TTS server. Two runs at the same commit, one with a third speaker recorded and
@@ -61,7 +61,7 @@ corpus tree in place of the scoped half):
 EXPECT THE DATA HALF TO MOVE EVEN WHEN YOU CHANGED NOTHING, and treat that as the
 tool working. The corpus is re-rendered by a TTS server on every run and the audio
 is not bit-identical between renders - measured here: regenerating the eval corpus
-from an unchanged wordlist produced the same 100 filenames and shifted the scorecard
+from an unchanged recipe produced the same 100 filenames and shifted the scorecard
 (one category 0/12 -> 1/12). So the tag identifies A RUN, not a configuration. That
 is the useful reading anyway: two runs of an identical configuration have measured
 77% and 67% on the same held-out clips, and calling them by the same name is how

@@ -89,8 +89,9 @@ sys.path.insert(0, str(paths.REPO_ROOT / "src"))
 sys.path.insert(0, str(paths.REPO_ROOT / "src" / "tts-service" / "tts_protocol"))
 
 from tts_protocol import TtsClient  # noqa: E402
+from train.corpus.negatives import load_recipe_or_exit  # noqa: E402
 from train.corpus.piper import select_piper_voices  # noqa: E402
-from wordlists import load_voice_holdout, voice_holdout_path  # noqa: E402
+from recipe import path_for, voice_holdout  # noqa: E402
 
 SR = 16000
 FULL_SCALE = 32768.0
@@ -139,7 +140,7 @@ def _holdout_voices(args, engine, selection, holdout):
     """
     entries = holdout.get(engine) or []
     if not entries:
-        sys.exit(f"ERROR: the voice holdout ({voice_holdout_path()}) reserves no "
+        sys.exit(f"ERROR: the voice holdout ({path_for(args.wake_word)}) reserves no "
                  f"{engine} voices - nothing to render")
     if engine == "kokoro":
         offered = set(selection)
@@ -152,10 +153,10 @@ def _holdout_voices(args, engine, selection, holdout):
                               for p in selection)]
     if missing:
         what = "voice(s)" if engine == "kokoro" else "(voice, speaker) pair(s)"
-        sys.exit(f"ERROR: the voice holdout ({voice_holdout_path()}) names {engine} "
+        sys.exit(f"ERROR: the voice holdout ({path_for(args.wake_word)}) names {engine} "
                  f"{what} the live catalog does not carry: {missing}. Update the "
-                 f"tracked list to match the catalog, rather than rendering a set "
-                 f"whose holdout cannot be enforced.")
+                 f"recipe's `voice_holdout:` section to match the catalog, "
+                 f"rather than rendering a set whose holdout cannot be enforced.")
     shown = [e if not isinstance(e, tuple) else f"{e[0]}:{e[1]}"
              if e[1] is not None else e[0] for e in entries]
     print(f"  voice holdout: this set renders the {len(entries)} held-out {engine} "
@@ -176,7 +177,7 @@ def set_manifest(out, args, written, holdout):
     manifest = {
         "set": "voice-holdout synthetic ranking set (improvement.md P1.2)",
         "what_it_is": ("Positives rendered ONLY from the voices "
-                       "src/wordlists/voice_holdout.yaml holds out of every corpus "
+                       "the recipe's `voice_holdout:` section holds out of every corpus "
                        "build: voice-disjoint from training, every other axis "
                        "inside the training distribution (speeds 0.7-1.3, plain "
                        "phrase)."),
@@ -187,7 +188,7 @@ def set_manifest(out, args, written, holdout):
                            "the top sweep points go there, not here."),
         "wake_word": args.wake_word,
         "tts": args.tts,
-        "holdout_file": str(voice_holdout_path()),
+        "holdout_recipe": str(path_for(args.wake_word)),
         "holdout": {k: (v if not v or not isinstance(v[0], tuple)
                         else [x if not isinstance(x, tuple)
                              else (f"{x[0]}:{x[1]}" if x[1] else x[0])
@@ -353,8 +354,8 @@ def main():
     p.add_argument("--voice-holdout", action="store_true",
                    help="Render the voice-HOLDOUT synthetic ranking set instead of "
                         "the training-distribution sanity corpus: every clip from "
-                        "the voices src/wordlists/voice_holdout.yaml reserves out of "
-                        "every corpus build (the catalog is checked live, and a "
+                        "the voices the recipe's `voice_holdout:` section reserves out of "
+                        "this word's corpus builds (the catalog is checked live, and a "
                         "held-out voice it no longer offers is an error, not a "
                         "skip), at speeds inside the 0.7-1.3 training range. "
                         "Output goes to data/corpus/eval/voice_holdout_tts by "
@@ -408,17 +409,26 @@ def main():
 
     # Engine construction is offline (no I/O), so it happens before the dry-run
     # even though voice SELECTION for Piper needs the live catalog.
-    holdout = load_voice_holdout() if args.voice_holdout else None
-    if args.voice_holdout and not holdout:
-        # The no-op rule applies to the TRAINERS (no tracked file: train on the
-        # whole catalog, print a note). It does not apply here: with no reserved
-        # voices there is nothing to render, and falling back to the in-corpus
-        # VOICES list would be a training-distribution measurement wearing the
-        # holdout's label - the one outcome this whole item exists to prevent.
-        sys.exit(f"ERROR: --voice-holdout needs the tracked list at "
-                 f"{voice_holdout_path()}, which is absent or empty. The trainers "
-                 f"treat that as a no-op (a fresh checkout predating the file "
-                 f"still trains); the ranking set cannot - create the file first.")
+    # load_recipe_or_exit, not load(): a word with no recipe file must print the
+    # instruction recipe already wrote, not a traceback - this is a CLI stage, the
+    # same convention the trainers use for the same reason.
+    holdout = (voice_holdout(load_recipe_or_exit(args.wake_word))
+               if args.voice_holdout else None)
+    if args.voice_holdout and not any(holdout.values()):
+        # The no-op rule applies to the TRAINERS (a recipe without a
+        # `voice_holdout:` section: train on the whole catalog, print a note).
+        # It does not apply here: with no reserved voices there is nothing to
+        # render, and falling back to the in-corpus VOICES list would be a
+        # training-distribution measurement wearing the holdout's label - the
+        # one outcome this whole item exists to prevent.
+        # `any(holdout.values())`, not `holdout`: voice_holdout() always returns
+        # both engine keys, so an absent section is a truthy dict of empty lists.
+        # Testing the dict was the shape the deleted file API had ({} on a missing
+        # file); against the section API that guard could never fire.
+        sys.exit(f"ERROR: --voice-holdout needs a non-empty `voice_holdout:` section "
+                 f"in {path_for(args.wake_word)}. The trainers treat the missing "
+                 f"section as a no-op (a fresh word before its first reservation "
+                 f"still trains); the ranking set cannot - add the section first.")
     if args.tts == "piper":
         args.engine = TtsClient(args.piper_url)
         if args.dry_run:
@@ -429,7 +439,7 @@ def main():
                           f"pairs are taken as written; the live selection check happens on "
                           f"the real render")
                 else:
-                    sys.exit(f"ERROR: the voice holdout ({voice_holdout_path()}) reserves "
+                    sys.exit(f"ERROR: the voice holdout ({path_for(args.wake_word)}) reserves "
                              f"no Piper pairs - nothing to render for --tts piper")
             else:
                 args.voices = ["<live Piper catalog>"]
@@ -454,7 +464,7 @@ def main():
     else:
         args.engine = TtsClient(args.url)
         if holdout is not None and not holdout.get("kokoro"):
-            sys.exit(f"ERROR: the voice holdout ({voice_holdout_path()}) reserves no "
+            sys.exit(f"ERROR: the voice holdout ({path_for(args.wake_word)}) reserves no "
                      f"Kokoro voices - nothing to render for --tts kokoro")
         if holdout is not None and holdout.get("kokoro"):
             # The live catalog is the source of truth, but --dry-run's contract

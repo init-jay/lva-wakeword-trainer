@@ -46,7 +46,7 @@ should not need to name a script, a path, or a step.
 
 It will then:
 
-1. **Write the wordlists** for your phrase.
+1. **Write the recipe** for your phrase.
 2. **Stop and hand recording to you** — the recorder waits a real person
    at a microphone. It gives you the commands, then checks what comes back.
 3. **Train the model**, once you confirm which

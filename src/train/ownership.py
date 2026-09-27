@@ -33,7 +33,7 @@ from pathlib import Path
 
 # Mounted, git-tracked, and therefore created by the clone rather than by Docker.
 # Ordered by how certain that is.
-DEFAULT_REFERENCES = ("train", "wordlists", "eval", "scripts")
+DEFAULT_REFERENCES = ("train", "recipe", "eval", "scripts")
 
 
 def target_owner(work_dir, references=DEFAULT_REFERENCES):

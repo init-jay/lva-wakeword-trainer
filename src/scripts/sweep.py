@@ -88,9 +88,9 @@ YAML SHAPE
       python: <path>           # optional; the interpreter with the eval stack
       compare_against: <tag>   # optional; a previously filed run tag
       voice-holdout-set: <path>  # optional; the synthetic voice-holdout set
-                                # (src/wordlists/voice_holdout.yaml); passed to eval
-                                # as --voice-holdout-set so the filed eval block
-                                # carries the arm-ranking number
+                                # (the recipe's `voice_holdout:` section);
+                                # passed to eval as --voice-holdout-set so the
+                                # filed eval block carries the arm-ranking number
 """
 
 import argparse
@@ -104,7 +104,7 @@ from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-# The import root src/: `train`, `wordlists` and the eval modules import by
+# The import root src/: `train`, `recipe` and the eval modules import by
 # their pre-reorg names, and the trainer venvs do not install them, so every
 # `-m train.*` / eval subprocess below gets PYTHONPATH pointing here.
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -569,7 +569,7 @@ def eval_cmd(eval_python, artifact, json_path, voice_holdout_set=None):
     `voice_holdout_set` set, --voice-holdout-set is passed through and
     eval_model.py writes the voice_holdout_set block into the JSON, which the
     ledger stores verbatim (the synthetic arm-ranking number, low-variance
-    versus the real holdout - src/wordlists/voice_holdout.yaml).
+    versus the real holdout - the recipe's `voice_holdout:` section).
     """
     cmd = [str(eval_python), str(REPO_ROOT / "src" / "eval" / "src" / "eval_model.py"),
            "--model", str(artifact), "--json", str(json_path)]

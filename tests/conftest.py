@@ -5,7 +5,7 @@ src/train/corpus/__init__.py inserts src/tts-service/tts_protocol/ for the proto
 client, src/train/corpus/manifest.py inserts the root for `from train.provenance
 import ...`, and the eval tools are invoked from an image where src/eval/src is
 mounted AS the `eval` package - but a bare `import train.mww.config`,
-`import wordlists` or `import eval.*` still needs the repo ROOT on the path,
+`import recipe` or `import eval.*` still needs the repo ROOT on the path,
 and pytest does not add the rootdir for you. Each test file repeats the
 insertion so the same file also runs plain (`python tests/test_x.py`), where
 this file is never loaded.

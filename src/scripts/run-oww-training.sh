@@ -31,7 +31,7 @@ fi
 # downstream here derives paths from this string, so a bad one is cheap to catch
 # now and confusing to diagnose later.
 #
-# Letters, spaces, apostrophes and hyphens only. Deliberately narrow: the wordlists
+# Letters, spaces, apostrophes and hyphens only. Deliberately narrow: the recipe
 # and the TTS engines both take plain text, and no legitimate wake word has needed
 # more. Widen it if a real one does, not to make an error message go away.
 if [[ ! "$WAKE_WORD" =~ ^[A-Za-z][A-Za-z\'’-]*([[:space:]]+[A-Za-z][A-Za-z\'’-]*)*$ ]]; then

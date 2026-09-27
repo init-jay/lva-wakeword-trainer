@@ -4,7 +4,7 @@ A wake-word training pipeline for [Linux Voice Assistant]. It trains two models 
 one corpus: **openWakeWord** (`.onnx`/`.tflite`, server) and **microWakeWord**
 (`.tflite` + ESPHome `.json`, ESP32).
 
-Four skills carry the detail and trigger on their own — `write-wordlists`,
+Four skills carry the detail and trigger on their own — `write-recipes`,
 `record-samples`, `train-apple-silicon`, `eval-models`. This file is the
 orchestration between them.
 
@@ -13,9 +13,9 @@ orchestration between them.
 That single sentence is enough to start. Run the steps in this order, and stop at
 each **STOP** until the human has done their part.
 
-1. **Wordlists.** `src/wordlists/<x>.yaml`. Do this first: the adversarial phrases are
+1. **Recipes.** `recipes/<x>.yaml`. Do this first: the adversarial phrases are
    built from the wake word's own consonants and vowels, and nothing downstream is
-   meaningful without them. Use `write-wordlists`. Copy `src/wordlists/hey_seeree.yaml`
+   meaningful without them. Use `write-recipes`. Copy `recipes/hey_seeree.yaml`
    as the worked example.
 2. **STOP — recording.** You cannot do this. The recorder blocks on `input()` and
    needs a person at a microphone. Use `record-samples` to hand over the commands,
@@ -96,6 +96,11 @@ The route rationale and the measurements: SPEED.md.
   tree recursively. `src/eval/src/paths.py` enforces and explains it.
 - **`data/` is inputs and generated corpus; `output/` is models.** The trainers
   `rmtree` their corpus every run, so the split is what keeps that away from models.
+- **`recipes/` is the hand-written per-word input.** One file per wake word
+  (`recipes/hey_seeree.yaml` is the worked example), read by both the trainers
+  and the eval harness (`src/recipe/` loads and validates it); neither writes
+  to it, and a missing recipe is a load error, because its phrases are specific
+  to the wake word and cannot be defaulted.
 - **Never compare models at a fixed threshold.** Two runs of an identical config
   measured 77% and 67% at 0.5. Use matched false accepts.
 - **Never pool per-speaker results.** An average hides the voice that fails: 24% for

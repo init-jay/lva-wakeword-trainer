@@ -133,6 +133,11 @@ RUN python3 -c "import tensorflow as tf; print('tensorflow', tf.__version__)" \
 # services (src/tts-service/README.md).
 COPY src/train/ ./src/train/
 COPY src/tts-service/ ./src/tts-service/
+# The recipe LOADER too: train.corpus.negatives and train.corpus.piper import it
+# at module level, so the build-time check below cannot run without it. The per-word
+# data (recipes/ at the repo root) is NOT copied - importing the loader reads no
+# file, and docker-compose bind-mounts the data where the loader looks for it.
+COPY src/recipe/ ./src/recipe/
 
 # src/scripts/ IS NOT COPIED - docker-compose bind-mounts it, as it does src/train/ over the
 # copy above. The two are treated differently on purpose:

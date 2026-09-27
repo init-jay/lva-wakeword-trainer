@@ -33,11 +33,15 @@ services:
       # scripts add it to sys.path themselves (their REPO_ROOT is /app here) -
       # the engines are NOT in this image, same as the trainers: pure client.
       - ../../src/tts-service:/app/src/tts-service:ro
-      # The per-wake-word phrase lists the eval corpus is generated from. Read-only:
+      # The per-wake-word recipes the eval corpus is generated from. Read-only:
       # generate_negatives.py renders them, it does not edit them - they are written
-      # by hand or by the `write-wordlists` skill, and a corpus that silently stopped
-      # matching its wordlist would be untraceable.
-      - ../../src/wordlists:/app/src/wordlists:ro
+      # by hand or by the `write-recipes` skill, and a corpus that silently stopped
+      # matching its recipe would be untraceable.
+      - ../../recipes:/app/recipes:ro
+      # The loader beside it: REPO_ROOT inside this image is /app, and the loader
+      # resolves the data at <REPO_ROOT>/recipes - so a mount of src/recipe alone
+      # imports cleanly and then finds no recipe at all.
+      - ../../src/recipe:/app/src/recipe:ro
       - ../../output:/app/output
       - ../../data/recordings/holdout:/app/data/recordings/holdout:ro
       # Training positives, for the rare deliberate check against them. Scoring here

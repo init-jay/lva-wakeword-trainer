@@ -4,7 +4,7 @@
 After a corpus stage completes, this writes data/corpus/<wake_word_safe>/<target>/
 corpus.json: the wake word, the engines probed (name, URL, version), the voice list
 actually used, the per-bucket clip counts, EVERY corpus-shaping flag the build was
-run with, the wordlist hash, the seed, the wall time, and a content digest of the
+run with, the recipe hash, the seed, the wall time, and a content digest of the
 final wav tree. The file IS the corpus's identity.
 
     python -m train.corpus.manifest --corpus-dir data/corpus/hey_seeree/mww --show
@@ -14,7 +14,7 @@ WHY THIS EXISTS: DURING A SWEEP THE CORPUS IS A HELD-FIXED INDEPENDENT VARIABLE.
 Regenerating it per run means every comparison carries a fresh draw of TTS noise.
 The engines are NOT bit-reproducible — Piper's VITS samples noise per call — and
 this repo has measured the consequence: regenerating the eval corpus from an
-unchanged wordlist produced the same 100 filenames and shifted the scorecard
+unchanged recipe produced the same 100 filenames and shifted the scorecard
 (one category 0/12 -> 1/12). Two runs of an identical configuration then differ
 by more than the knob under test, which is exactly the confound the 77%/67%
 same-config observation shows is live here. The manifest makes the corpus an
@@ -95,16 +95,16 @@ def _normalize_engines(engines):
     return out
 
 
-def _wordlist_hash(wordlist_path):
-    """sha256-of-bytes of the wordlist yaml, or None when not provided / absent.
+def _recipe_hash(recipe_path):
+    """sha256-of-bytes of the recipe yaml, or None when not provided / absent.
 
-    The wordlist is the text the corpus renders, so it is corpus identity: a
-    different wordlist under the same shaping flags is a different corpus even
+    The recipe is the text the corpus renders, so it is corpus identity: a
+    different recipe under the same shaping flags is a different corpus even
     though every shaping key in the manifest still matches.
     """
-    if wordlist_path is None:
+    if recipe_path is None:
         return None
-    path = Path(wordlist_path)
+    path = Path(recipe_path)
     if not path.is_file():
         return None
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -112,7 +112,7 @@ def _wordlist_hash(wordlist_path):
 
 def write_manifest(corpus_dir, wake_word, target, seed, shaping,
                    engines=None, voices=None, per_voice_counts=None,
-                   wordlist_path=None, wall_time_s=None):
+                   recipe_path=None, wall_time_s=None):
     """Digest the corpus tree and write corpus.json beside it. Returns the path.
 
     corpus_dir is the <wake_word_safe>/<target> directory — one tree for oww,
@@ -160,7 +160,7 @@ def write_manifest(corpus_dir, wake_word, target, seed, shaping,
         # include_legacy_voices, no_trim, ... recorded as given so matches_requested()
         # can diff the requested flags against exactly what the build had.
         "shaping": dict(shaping) if shaping is not None else {},
-        "wordlist_hash": _wordlist_hash(wordlist_path),
+        "recipe_hash": _recipe_hash(recipe_path),
         "wall_time_s": wall_time_s,
         "content_digest": {"sha256": digest, "files": files, "bytes": total_bytes},
     }
@@ -312,7 +312,7 @@ def corpus_identity(corpus_dir):
     Not the content digest: the manifest names the audio as a named artefact,
     and the file's own bytes already incorporate the tree digest, the shaping
     and the engines — one number a run can consume instead of re-walking the
-    tree. A re-render of the same wordlist would change the tree digest (TTS is
+    tree. A re-render of the same recipe would change the tree digest (TTS is
     not bit-reproducible) and therefore this identity too. None when absent.
     """
     path = Path(corpus_dir) / MANIFEST_NAME

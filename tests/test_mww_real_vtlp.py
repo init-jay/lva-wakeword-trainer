@@ -44,7 +44,7 @@ import train.mww.corpus as mww_corpus  # noqa: E402
 from train.corpus import manifest as corpus_manifest  # noqa: E402
 from train.corpus.augment import CHILD_STRETCH, CHILD_STRETCH_FRACTION  # noqa: E402
 from train.corpus.real import copy_real_samples  # noqa: E402
-from wordlists import path_for  # noqa: E402
+from recipe import path_for  # noqa: E402
 
 SR = 16000
 WW = "zz test vtlp"   # made-up word: no on-disk corpus to entangle the tests with
@@ -223,7 +223,7 @@ def _mww_manifest(tmp, real_vtlp):
         engines={"piper": {"url": "tcp://127.0.0.1:8898", "version": None}},
         voices={"kokoro": [], "piper": [["en_US-lessac-medium", "S1"]]},
         per_voice_counts={"positives": 1, "negatives": 1},
-        wordlist_path=path_for(WW), wall_time_s=1.0)
+        recipe_path=path_for(WW), wall_time_s=1.0)
     return root
 
 
@@ -249,7 +249,10 @@ def test_manifest_records_real_vtlp_and_diffs_it():
 
 def _run_main(tmp, argv):
     """corpus.main() with the TTS probes stubbed: --skip needs the catalog to
-    resolve but never renders, and the probes are exactly the seam to patch."""
+    resolve but never renders, and the probes are exactly the seam to patch.
+    The recipe read is stubbed the same way (it is a file read, but the test
+    word is a made-up one with no recipe on disk, and the holdout is a
+    section of it, so the seam is the recipe load itself)."""
     samples = Path(tmp) / "samples"
     (samples / "ryan").mkdir(parents=True, exist_ok=True)
     (samples / "jay").mkdir(parents=True, exist_ok=True)
@@ -258,10 +261,10 @@ def _run_main(tmp, argv):
         (root / sub).mkdir(parents=True, exist_ok=True)
 
     old_argv = sys.argv
-    old_probes = (mww_corpus.select_piper_voices, mww_corpus.load_voice_holdout)
+    old_probes = (mww_corpus.select_piper_voices, mww_corpus.load_recipe_or_exit)
     sys.argv = ["train.mww.corpus"] + argv
     mww_corpus.select_piper_voices = lambda *a, **k: [("en_US-lessac-medium", "S1")]
-    mww_corpus.load_voice_holdout = lambda *a, **k: {}
+    mww_corpus.load_recipe_or_exit = lambda *a, **k: {"_path": "(test)", "wake_word": WW}
     buf = io.StringIO()
     code = None
     try:
@@ -275,7 +278,7 @@ def _run_main(tmp, argv):
     finally:
         sys.argv = old_argv
         (mww_corpus.select_piper_voices,
-         mww_corpus.load_voice_holdout) = old_probes
+         mww_corpus.load_recipe_or_exit) = old_probes
     return code, buf.getvalue()
 
 

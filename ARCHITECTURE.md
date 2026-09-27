@@ -61,11 +61,14 @@ far.
 │   └── MANUAL_RUN.md            the four steps by hand, if not using an agent
 ├── .claude/skills/               agent instructions, one per pipeline step
 │   ├── record-samples/SKILL.md   1 · how to get usable recordings, and verify them
-│   ├── write-wordlists/SKILL.md  2+3 · the phrases, the one part that does not transfer
+│   ├── write-recipes/SKILL.md    2+3 · the phrases, the one part that does not transfer
 │   └── eval-models/SKILL.md      3 · how to read a scorecard without misreading it
-├── src/wordlists/                    per-wake-word phrase lists
-│   ├── __init__.py               loader + the checks that keep eval and train disjoint
-│   └── hey_seeree.yaml           one file per wake word
+├── recipes/                      per-wake-word data, one YAML per wake word:
+│   └── hey_seeree.yaml           the phrases, the voice policy, the holdout -
+│                                 hand-written input, read by both trainers and
+│                                 the eval harness, never written by them
+├── src/recipe/                   the loader for those files (code, not data)
+│   └── __init__.py               validate() - the checks that keep eval and train disjoint
 ├── src/record/                       1 · record and check
 │   ├── record_samples.py
 │   ├── check_alignment.py
