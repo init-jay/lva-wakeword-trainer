@@ -1,43 +1,28 @@
-"""Piper sample generation for the wake-word corpus (policy layer over tts-protocol).
+"""Piper sample generation for the wake-word corpus - the training-policy layer
+over the shared corpus layer (exclusion tables, voice selection, generator),
+deliberately shaped like the Kokoro path so both trainers consume either
+engine's output, or both at once. A new engine does not get these tables; a
+new wake word does.
 
-microWakeWord generates its positives with Piper, so this is the second engine the
-shared corpus layer needs. Deliberately shaped like the Kokoro path in train.py -
-phrase at a spread of speeds across a spread of voices, 16 kHz mono WAVs into a
-directory - so both trainers can consume either engine's output, or both at once.
+Transport is the repo's TTS PROTOCOL (src/tts-service/tts_protocol/) over a
+`tcp://` URL - on a Mac the `uv` project at
+src/tts-service/engines/piper, in Docker the image that bakes in the same
+project: one code path, one G2P pin, only the URL differs. The engine-side
+justifications (WSOLA speed, stochastic output, the one-server-one-request
+constraint) live in that engine's docstring, because the code they explain
+lives there.
 
-SPLIT, 2026-09-08: the transport (the Wyoming framing, and since this same date
-the in-process variant - see below) moved out of this package. This module speaks
-the repo's TTS PROTOCOL (src/tts-service/tts_protocol/) as a TCP client: it points at
-a `tcp://` URL (the protocol port a Piper engine publishes) and does not care
-what the server runs behind it. What stays here is wake-word TRAINING POLICY:
-the exclusion tables, the sex table, voice selection, and the corpus generator.
-A new engine does not get these tables; a new wake word does.
-
-TWO MACHINES, ONE ENGINE: on a Mac it is the `uv` project
-(`uv run --project src/tts-service/engines/piper python -m piper_engine`, piper-tts
-1.7.0 loaded directly, no Wyoming at all); on the CUDA box the Docker image
-(docker/Dockerfile.piper) bakes in that SAME project - one code path, one G2P
-pin, both machines render from it. Both speak the identical protocol, so the
-code in this file is the same on both machines - only the URL differs. The
-protocol's own justifications (THE SPEED PROBLEM - why speed is WSOLA, not
-resampling; PIPER IS STOCHASTIC; the one-server-one-request constraint) live in
-that engine's docstring (src/tts-service/engines/piper), because the code they
-explain lives there.
-
-FLEETS, 2026-09-21: the `tcp://` URL above is also a COMMA-SEPARATED list of
-them (the --piper-url shape on both trainers, P2.1 in improvement.md). One
-instance is one resident model and one serial lane, so client threads against
-a single instance queue rather than run (tts_protocol/server.py takes every
-engine call under one lock; the single instance measures 21.66 clips/s in
-src/scripts/bench_tts.py, and the corpus stage ran at ~16 against it, P2.1's fact
-10). Throughput therefore scales with PROCESSES, and PiperFleet shards the
-corpus BY VOICE - each model, all of its speakers, pinned to ONE instance for
-the whole run. Never round-robin: round-robin would make every instance
-reload a model on most of its requests, and a reload is 0.6 s against the
-hundreds of milliseconds a clip costs (the engine's docstring). scripts/
-start-tts-fleet.sh N starts such a fleet on this Mac; the probe below refuses
-a fleet whose instances do not serve the same catalog, because a sharded voice
-an instance lacks fails per-clip and shrinks the corpus silently.
+The URL is also a COMMA-SEPARATED fleet list (the --piper-url shape). One
+instance is one resident model and one serial lane (tts_protocol/server.py
+locks every engine call), so throughput scales with PROCESSES: PiperFleet
+shards the corpus BY VOICE - each model, all of its speakers, pinned to ONE
+instance for the whole run. Never round-robin: round-robin reloads a model on
+most requests (a 0.6 s reload against a clip costing hundreds of ms, the
+engine's docstring). Fleet measurement: docs/SPEED.md - on ONE machine a
+fleet does not help; the fleet is the only route to a multi-machine corpus.
+The probe refuses a fleet whose instances serve different catalogs, because a
+sharded voice an instance lacks fails per-clip and shrinks the corpus
+silently.
 """
 
 import json
@@ -76,32 +61,20 @@ def _client(piper_url: str) -> TtsClient:
 
 
 class PiperFleet:
-    """N Piper protocol instances, addressed as one comma-separated `tcp://`
-    list - the --piper-url shape.
+    """N Piper protocol instances, addressed as one comma-separated `tcp://` list -
+    the --piper-url shape. One instance holds one model resident and serves
+    one request at a time, so N instances are N independent serial lanes.
+    shard() runs after the voices round-trip (probe) and is memoised for the
+    object's life - which is the run - so a model always hits the same
+    instance from its first clip to its last, and each instance loads each of
+    its models once rather than per request.
 
-    A Piper instance holds one model resident and serves one request at a
-    time (the engine's docstring, and the lock in tts_protocol/server.py),
-    so N instances are N independent serial lanes. This class owns the one
-    decision a sharded run must make exactly once: which model goes to which
-    lane. That decision (shard) runs after the voices round-trip (probe) and
-    is memoised for the object's life - which is the run - so a voice always
-    hits the same instance from its first clip to its last, and an instance
-    loads each of its models once rather than per request.
-
-    Disposition (C4, bug.md): on ONE machine a fleet does not help, and this
-    is measured, not assumed - docs/SPEED.md "Piper fleet" (2026-09-22, re-measured
-    the same evening, 3-6 trials per size with the load average recorded per
-    trial): one instance 15.49-16.51 clips/s at 462% mean CPU (4.6 of the box's
-    10 cores; no fleet of 2-8 instances passes ~18 clips/s total, and N=2 is a
-    reproducible 0.54x loss, N=4-8 0.75-1.16x with no N>1 mean above N=1's).
-    Do not reach for a local fleet to speed up a corpus stage on one machine
-    - it is not the fast path, and N=2 makes it slower. It is kept because it is the only route to
-    a MULTI-machine corpus (across machines there is no single-box ceiling to
-    run into, and this is the only code that treats N processes as one
-    sharded engine), and the sharding is the non-obvious part: a model must
-    hit the same instance for the whole run or nearly every request pays the
-    0.6 s reload, and a fleet whose instances serve different catalogs would
-    silently shrink the corpus (probe).
+    On ONE machine a fleet does not help - measured, not assumed:
+    docs/SPEED.md "Piper fleet". It is the only route to a MULTI-machine
+    corpus; the sharding is the non-obvious part (a model must hit the same
+    instance for the whole run or nearly every request pays the 0.6 s
+    reload), and the probe catches a fleet whose instances serve different
+    catalogs, which would silently shrink the corpus.
     """
 
     def __init__(self, spec):
@@ -122,18 +95,13 @@ class PiperFleet:
         return self._urls
 
     def probe(self, languages=None, max_speakers=None) -> list:
-        """A `voices` round trip against EVERY instance, not a connect: a
-        bound port owned by a dead or foreign listener answers a connect and
-        still fails the corpus stage (the run scripts' preflight probes ask
-        the same question, for the same reason).
+        """A `voices` round trip against EVERY instance, not a connect: a bound port
+        owned by a dead or foreign listener answers a connect and still fails
+        the corpus stage.
 
-        Returns the catalog the selection runs against (all instances agree
-        on it, below). The fleet must all serve the SAME catalog: shard pins
-        a voice to an instance, and a voice the instance lacks fails per
-        clip, silently shrinking the corpus instead of failing the run. A
-        Mac fleet shares data/external/piper/voices by construction; a mixed
-        fleet (a Docker instance with a different voice download than a host
-        one) is the composition this check names, at the top of the run.
+        The fleet must all serve the SAME catalog: shard pins a voice to an
+        instance, and a voice the instance lacks fails per clip, silently
+        shrinking the corpus instead of failing the run.
         """
         kwargs = {}
         if languages:
@@ -176,21 +144,16 @@ class PiperFleet:
         return ref_catalog
 
     def shard(self, voices) -> dict:
-        """(voice, speaker) -> URL, decided ONCE and memoised: for the life
-        of this object - which is the run - a voice always hits the same
-        instance.
+        """(voice, speaker) -> URL, decided ONCE and memoised: for the life of this
+        object - which is the run - a voice always hits the same instance.
 
-        The unit of placement is the MODEL, not the speaker pair. The engine
+        The unit of placement is the MODEL, not the speaker pair: the engine
         reloads when the model NAME changes and reuses the loaded session
-        when only the speaker does (~28 ms, the engine's docstring), so
-        splitting one model's speakers across instances would make every one
-        of them load it. Weight is the model's pair count, and placement is
-        least-loaded, ties to the lower index: a 12-speaker model costs 12x
-        a single-speaker one, and plain round-robin over the voice list would
-        hand the slowest instance the slowest models by accident. The input
-        order (the server's catalog order, stable within a run) plus the
-        deterministic tie-break make the mapping reproducible for a given
-        fleet size and voice list.
+        when only the speaker does, so splitting one model's speakers across
+        instances makes every one of them load it. Weight is the model's pair
+        count, placement is least-loaded, ties to the lower index. Input
+        order (the server's catalog order) plus the deterministic tie-break
+        make the mapping reproducible for a given fleet size and voice list.
         """
         if self._assignment is not None:
             return self._assignment
@@ -227,39 +190,26 @@ def _piper_render(piper_url, voice, speaker, text, speed=1.0):
     return audio
 
 
-# The per-word Piper exclusions - voices that render the wake word wrong, and
+# Per-word Piper exclusions - voices that render the wake word wrong, and
 # voices nobody has audited - live in recipes/<word>.yaml under
 # `voices.piper.{mispronouncing,unaudited}`, read through
-# recipe.voice_exclusions(). They were dicts keyed by wake word here, which put
-# one word's audit results in a module every word shares; the measurements that
-# justify each entry (agreement percentages, what the voices actually said, why the
-# exclusion unit is the speaker rather than the model) moved into that file beside
-# the entries. PIPER_VOICE_SEX below stays here: F0 is a property of the voice, not
-# of the phrase it renders, so it is the same table for every wake word.
+# recipe.voice_exclusions(). PIPER_VOICE_SEX below stays here: F0 is a
+# property of the voice, not of the phrase it renders.
 
 # Voice sex, for the child-range lever (corpus/augment.py). Keys are the voice name,
 # or "voice:speaker" for a multi-speaker model.
 #
 # MEASURED, NOT LISTENED TO. Generated by measure_voice_f0.py from the 1.0x audit
-# clips: median F0 per voice, split at 185 Hz. Regenerate it for a new engine or
-# voice set rather than extending by ear - 96 entries is more listening than anyone
-# will actually do, and skipping it silently costs the run-13 lever its reach.
+# clips: median F0 per voice, split at 185 Hz (validated against the ten voices
+# whose NAME states the answer - all ten agree). Regenerate it for a new engine
+# or voice set rather than extending by ear.
 #
-# Validated against the ten voices whose NAME states the answer (hfc_male 147 Hz,
-# hfc_female 268, northern_english_male 117, southern_english_female 248, joe 116,
-# ryan 162, amy 195, alba 190, jenny 205, lessac 231 Hz). All ten agree with the split.
-#
-# THE 160-200 Hz BAND IS GENUINELY AMBIGUOUS (vctk:p239 184, p288 184, p293 182,
-# kathleen 177) and it does not matter much: sex is only a proxy for F0, and the two
-# ratio ranges nearly coincide at the boundary (at 177 Hz the male range gives
-# 204-230 Hz, the female 212-239). The ranges were calibrated against am_adam at
-# 132 Hz and af_bella at 227 Hz, so they are least distinguishable exactly where the
-# classification is least certain.
+# The 160-200 Hz band is genuinely ambiguous and does not matter much: sex is a
+# proxy for F0, and the two ratio ranges nearly coincide at the boundary.
 #
 # A voice absent from this map is written piper_pu_* and gets NO child-range copy.
-# Deliberate: run 12 measured male voices as "useless above R1.30 (chipmunk)", so a
-# wrongly-shifted clip is worse than an absent one - training on an artefact teaches
-# the artefact.
+# Deliberate: a wrongly-shifted clip is worse than an absent one - training on an
+# artefact teaches the artefact.
 PIPER_VOICE_SEX: dict[str, str] = {
     "en_GB-alan-low": "m",  # 98 Hz
     "en_GB-alan-medium": "m",  # 93 Hz
@@ -361,11 +311,9 @@ PIPER_VOICE_SEX: dict[str, str] = {
 
 
 def voice_sex(voice: str, speaker=None) -> str:
-    """'f', 'm', or 'u' (unknown) for the child-range lever.
-
-    Checked most specific first: a multi-speaker model can hold both sexes, so a
-    "voice:speaker" entry must win over the model-wide one.
-    """
+    """'f', 'm', or 'u' (unknown) for the child-range lever. Checked most specific
+    first: a multi-speaker model can hold both sexes, so a "voice:speaker"
+    entry must win over the model-wide one."""
     if speaker is not None:
         specific = PIPER_VOICE_SEX.get(f"{voice}:{speaker}")
         if specific:
@@ -377,54 +325,43 @@ def generate_piper_samples(piper_url, voices, output_dir: Path,
                            samples_per_voice: int, texts, speeds, desc="Piper"):
     """Render `samples_per_voice` clips for each voice into `output_dir`.
 
-    `piper_url` is a `tcp://` protocol URL - the port a Piper engine publishes
-    (the in-process server on a Mac, the wrapped Wyoming service in Docker) -
-    or a comma-separated list of them (a fleet, the --piper-url shape):
-    PiperFleet.shard pins every model to ONE instance for the whole run, so
-    each instance loads each of its models once and then only synthesises -
-    the property the next paragraph exists to protect. A fleet's instances
-    must serve the same catalog; select_piper_voices enforces that before any
-    clip is rendered, and an instance that dies mid-run surfaces as per-clip
-    errors naming the voice, not as a shrunken corpus nobody explains.
+    `piper_url` is a `tcp://` protocol URL or a comma-separated fleet list
+    (the --piper-url shape): PiperFleet.shard pins every model to ONE instance
+    for the whole run, so each instance loads each of its models once and
+    then only synthesises. select_piper_voices enforces the same catalog on
+    every instance before any clip is rendered; an instance that dies mid-run
+    surfaces as per-clip errors naming the voice, not as a shrunken corpus
+    nobody explains.
 
-    Signature and sampling deliberately mirror train.py's generate_kokoro_samples,
-    so the two are substitutable clip-for-clip: same per-voice budget, same
-    text-offset-per-voice (without which every voice renders texts[0:n] and a list
-    longer than the budget never gets past its own beginning), and the speed drawn
-    from the same grid, in the job-building loop rather than a worker, so the corpus
-    does not depend on thread scheduling.
+    Signature and sampling deliberately mirror generate_kokoro_samples, so
+    the two are substitutable clip-for-clip: same per-voice budget, same
+    text-offset-per-voice (without which every voice renders texts[0:n]), and
+    the speed drawn from the same grid, in the job-building loop rather than
+    a worker, so the corpus does not depend on thread scheduling. `speeds` is
+    passed in rather than imported: the speed grid lives in train.py and this
+    package must not depend on it.
 
-    `speeds` is passed in rather than imported: PLAIN_SPEED_GRID lives in train.py
-    and this package must not depend on it.
+    Filenames are `piper_p{sex}_{voice}[_{speaker}]_{uuid}.wav`. This does NOT
+    match the `kokoro_`/`runon_` prefixes add_child_range_copies looks for, so
+    Piper clips are skipped by the child-range lever rather than mis-shifted.
+    See corpus/augment.py.
 
-    Filenames are `piper_p{sex}_{voice}[_{speaker}]_{uuid}.wav`. This does NOT match
-    the `kokoro_`/`runon_` prefixes add_child_range_copies looks for, so Piper clips
-    are skipped by the child-range lever rather than mis-shifted - Piper voice names
-    carry no sex marker to pick a ratio from. See corpus/augment.py.
-
-    VOICE IS THE OUTER LOOP ON PURPOSE - DO NOT REORDER. Every Piper server holds
-    exactly one loaded voice at a time and reloads it when a request names a
-    different one: the Wyoming server in a module-level global (handler.py:333-346,
-    `if voice_name != _VOICE_NAME`), the in-process server in its single kept model.
-    Iterating texts or speeds outside voices would rebuild the InferenceSession on
-    every request - under --use-cuda a fresh CUDA session each time, far more
-    expensive than the synthesis itself.
-
-    The same one-voice-at-a-time property is why one server serves strictly one
-    request at a time, and why a multi-voice corpus is parallelised by running
-    SEPARATE INSTANCES, each with its own voice - and why the sharding across a
-    fleet is BY VOICE, never round-robin. One job per model, one job per instance
-    lane at a time (workers = fleet size, run_jobs' small pool: extra workers
-    queue at the engine's lock and add no throughput, the KokoroPool measurement
-    applies verbatim).
+    VOICE IS THE OUTER LOOP ON PURPOSE - DO NOT REORDER. Every Piper server
+    holds exactly one loaded voice at a time and reloads it when a request
+    names a different one; iterating texts or speeds outside voices would
+    rebuild the InferenceSession on every request - under --use-cuda a fresh
+    CUDA session each time. The same one-voice-at-a-time property is why the
+    sharding across a fleet is BY VOICE, never round-robin. One job per
+    model, one job per instance lane at a time (workers = fleet size: extra
+    workers queue at the engine's lock and add no throughput).
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     fleet = PiperFleet(piper_url)
     assignment = fleet.shard(voices)
 
-    # The per-clip computation is unchanged from the serial loop - same
-    # text-offset-per-voice, speed drawn HERE in the build loop, never in a
-    # worker, so the corpus does not depend on thread scheduling.
+    # Same text-offset-per-voice as the serial loop; speed drawn HERE in the
+    # build loop, never in a worker, so the corpus does not depend on thread
+    # scheduling.
     clips = []  # (voice, speaker, text, speed)
     for v, pair in enumerate(voices):
         voice, speaker = (pair if isinstance(pair, (tuple, list))
@@ -435,9 +372,8 @@ def generate_piper_samples(piper_url, voices, output_dir: Path,
             clips.append((voice, speaker, text, speed))
 
     # Group clips by MODEL, in first-seen order: one job per model keeps every
-    # model's clips contiguous on its pinned instance, which is the voice-outer
-    # property above (the catalog lists a model's speakers contiguously, so
-    # with one URL this is the exact order the serial loop used to render in).
+    # model's clips contiguous on its pinned instance (the catalog lists a
+    # model's speakers contiguously, so with one URL this is the serial order).
     by_model = {}
     for clip in clips:
         by_model.setdefault(clip[0], []).append(clip)
@@ -461,11 +397,9 @@ def generate_piper_samples(piper_url, voices, output_dir: Path,
             if audio is None or audio.size < 480:
                 continue
 
-            # piper_p{sex}_{voice}[_{speaker}]_{uuid}.wav
-            #
-            # The `p{sex}` group is second on purpose: add_child_range_copies reads the
-            # sex from parts[1][1], which is where Kokoro's af_/am_ prefix puts it. Same
-            # position, same code, no special case for the engine.
+            # piper_p{sex}_{voice}[_{speaker}]_{uuid}.wav - the `p{sex}` group is
+            # second on purpose: add_child_range_copies reads the sex from parts[1][1],
+            # where Kokoro's af_/am_ prefix puts it. Same position, same code.
             sex = voice_sex(voice, speaker)
             if sex == "u":
                 with sex_lock:
@@ -480,8 +414,7 @@ def generate_piper_samples(piper_url, voices, output_dir: Path,
                         weights=weights)
     # The job manifest: which instance carried which (model, speaker) pair and
     # how many clips - the fleet's provenance, written into the tree it was
-    # rendered in rather than only the run log that scrolls away. One URL per
-    # row: a model's pairs all ride the instance its shard picked.
+    # rendered in rather than only the run log.
     per_pair = {}
     for clip in clips:
         pair = clip[:2]
@@ -511,18 +444,15 @@ def select_piper_voices(piper_url: str, wake_word: str, languages=("en_US", "en_
     see PiperFleet.probe), drop the ones that say the wrong thing, report
     cover.
 
-    The exclusion step is the whole point, and it is per wake word: the lists come
-    from `voices.piper` in recipes/<word>.yaml. On the example word, six of
-    42 Kokoro voices mispronounced the phrase and that was ~14% of the synthetic
-    corpus mislabelled as positives for eleven runs before anyone noticed. Piper is
-    not exempt, and with a larger catalog an unaudited list is a bigger exposure,
-    not a smaller one.
+    The exclusion step is the whole point, and it is per wake word: the lists
+    come from `voices.piper` in recipes/<word>.yaml. An unaudited list is a
+    bigger exposure, not a smaller one.
     """
     found = PiperFleet(piper_url).probe(languages=languages,
                                         max_speakers=max_speakers)
 
-    # A word with no recipe cannot build a corpus that means anything, so this is
-    # the same hard stop build_negative_phrases makes rather than a traceback.
+    # A word with no recipe cannot build a corpus that means anything - the same
+    # hard stop build_negative_phrases makes rather than a traceback.
     try:
         data = recipe.load(wake_word)
     except recipe.RecipeError as exc:
@@ -543,9 +473,9 @@ def select_piper_voices(piper_url: str, wake_word: str, languages=("en_US", "en_
         print("           listen to the shortlist, and paste what it prints into")
         print(f"           {recipe_name}.")
 
-    # Match both forms. The audit scores SPEAKERS - en_US-l2arctic-medium ran from
-    # :ASI at 0% to :PNV at 100% on identical phonemes - so most entries are
-    # "voice:speaker". A bare voice name still excludes the whole model.
+    # Match both forms. The audit scores SPEAKERS - the l2arctic model ran from
+    # 0% to 100% across its speakers - so most entries are "voice:speaker".
+    # A bare voice name still excludes the whole model.
     def is_excluded(v, s):
         return v in excluded or f"{v}:{s}" in excluded
 
@@ -557,10 +487,9 @@ def select_piper_voices(piper_url: str, wake_word: str, languages=("en_US", "en_
     print(f"  Piper voices: {len(kept)} of {len(found)} "
           f"({n_bad} mispronouncing, {n_unaudited} unaudited)")
 
-    # A voice the service offers that appears in NEITHER list has never been checked
-    # and is not being excluded - which is the exact hole the example word's audit
-    # found ten voices in, contributing 600 of 5520 synthetic positives. Say so
-    # loudly rather than letting it show up later as a child-range coverage number.
+    # A voice the service offers that appears in NEITHER list has never been
+    # checked and is not being excluded. Say so loudly rather than letting it
+    # show up later as a child-range coverage number.
     unknown = sum(1 for v, s in kept if voice_sex(v, s) == "u")
     if unknown:
         names = sorted({v if s is None else f"{v}:{s}"

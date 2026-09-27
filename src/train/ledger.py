@@ -3,43 +3,28 @@
 
     python -m train.ledger --wake-word "hey seeree" [--show] [--grid-keys K [K...]]
 
-WHAT A RECORD IS. One line per COMPLETED training run: the target (oww/mww), the
-full run tag (src/train/provenance.py: code + corpus + config, the same string the
-model directory is named after), the corpus id (the manifest's short-7 identity,
-so a record says WHICH frozen corpus it trained on), the seed, the resolved
-config the trainer filed as <tag>.config.json, wall time per stage, and the
-eval block. The grid values a sweep varied sit in "grid", so summarise() can
-reconstruct the comparison the sweep was meant to answer.
+One line per COMPLETED training run: target, the full run tag (code + corpus +
+config; the name of the model directory), the corpus id (the manifest's short-7
+identity - which frozen corpus this trained on), seed, the resolved config filed
+as <tag>.config.json, wall time per stage, and the eval block, which is the
+src/eval/src/eval_model.py --json output for this model VERBATIM - never
+recomputed here, or the ledger becomes a second scorer that can drift. The grid
+values a sweep varied sit in "grid".
 
-APPEND-ONLY, NEVER REWRITTEN. A ledger you can rewrite is a ledger you can lie
-in: the moment a "not better" result can be edited away, the record of which
-settings were tried and what they did stops being usable as the answer to
-"why do we still ship the one we ship". record() therefore refuses to append a
-second record with the same (target, tag) and exits - the ledger is HISTORY,
-not a cache. A run that should be re-measured is a NEW run with a new tag
-(different seed or config); the old record stays, which is the whole point.
-Nothing in this module opens the file for writing except one append per
-record, and existing lines are never touched.
+APPEND-ONLY, NEVER REWRITTEN. record() refuses a second record with the same
+(target, tag) and exits; the ledger is history, not a cache, so a
+not-better result cannot be edited away. Re-measure as a NEW run (new seed or
+config, new tag); the old record stays. Nothing here opens the file except one
+append per record.
 
-THE EVAL BLOCK IS VERBATIM, NOT RECOMPUTED. It is the JSON that
-src/eval/src/eval_model.py --json wrote for exactly this model (same numbers,
-same run of the scoring code). Recomputing any of it here - "for convenience"
-- would make the ledger a second scorer that can drift from the first, and a
-drifted scorer is how a 10-point difference (measured twice, at an IDENTICAL
-config: 77% and 67%) stops being readable as noise. If the eval JSON moves,
-the ledger says so by not having it, not by showing a different number.
+summarise() prints MIN/MAX across repeats beside the mean: a difference
+smaller than the repeat-to-repeat spread is not a result.
 
-SPREAD IS THE POINT. summarise() prints MIN/MAX across repeats beside the
-mean, because a difference smaller than the repeat-to-repeat spread is not a
-result - the 10-point measurement above is the noise floor this repo has
-directly observed, at an unchanged configuration.
-
-SINCE BUG.MD C3 STEP 2 (2026-09-22) the eval block also carries
-threshold_sweep: a fixed-grid re-threshold of that one run's own per-clip
-peaks (the model ran once; the threshold is a filter). summarise() reads
-those curves to report detection at a COMMON matched-FA budget across
-groups, instead of beside one threshold - the 40-eval manual 0.25-0.85 job
-is what this exists to stop happening.
+Eval blocks also carry threshold_sweep: a fixed-grid re-threshold of that run's
+own per-clip peaks (the model ran once; the threshold is a filter). summarise()
+reads those curves to report detection at a COMMON matched-FA budget across
+groups - the 40-eval manual 0.25-0.85 re-thresholding job is what this stops
+happening.
 """
 
 import argparse
@@ -50,13 +35,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# The GIT root: data/ and output/ live there, one level above the (now nested)
-# train/ package - the pre-reorg parents[1] now points at src/.
+# The GIT root: data/ and output/ live there, not under src/.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Reserved record fields; record()'s **extra may not shadow them, or two
-# writers could disagree about what a field means and the file would parse
-# but no longer be honest.
+# Reserved record fields; record()'s **extra may not shadow them.
 RESERVED = ("wake_word", "target", "tag", "corpus_id", "seed", "config",
             "wall_time", "eval_block")
 
@@ -67,19 +49,13 @@ def safe_name(wake_word):
 
 
 def ledger_path(wake_word):
-    """output/<wake_word_safe>/runs.jsonl - beside output/<safe>/, never in data/.
-
-    data/ is inputs and generated corpus; models and their history live in
-    output/. The trainers rmtree their own corpus every run but never this
-    file, so a sweep interrupted mid-point still leaves what was filed intact.
-    """
+    """output/<wake_word_safe>/runs.jsonl - beside output/<safe>/, never in data/."""
     return REPO_ROOT / "output" / safe_name(wake_word) / "runs.jsonl"
 
 
 def load(wake_word):
-    """Every record as a list of dicts, in file order (= the order runs were
-    filed). An absent file is an empty ledger, not an error: the first record
-    creates it."""
+    """Every record, in file order (= the order runs were filed). An absent file
+    is an empty ledger, not an error: the first record creates it."""
     path = ledger_path(wake_word)
     if not path.is_file():
         return []
@@ -92,10 +68,8 @@ def load(wake_word):
 
 def by_tag(wake_word):
     """{target: {tag: record}} - the resumability check the sweep runner uses.
-
-    Keyed by target as well as tag: the oww and mww trees are separate, and a
-    tag computed for one could in principle collide with the other's (the code
-    and corpus halves do not encode the target)."""
+    Keyed by target as well as tag: a tag's code and corpus halves do not
+    encode the target, so the two trees' tags could collide."""
     out = {}
     for rec in load(wake_word):
         out.setdefault(rec.get("target"), {})[rec.get("tag")] = rec
@@ -104,12 +78,9 @@ def by_tag(wake_word):
 
 def record(wake_word, *, target, tag, corpus_id, seed, config,
            wall_time=None, eval_block=None, **extra):
-    """Append one record and return it.
-
-    Refuses a duplicate (target, tag) and exits 1: the ledger is history, not
-    a cache (module docstring). The write is a single append; nothing existing
-    is rewritten.
-    """
+    """Append one record and return it. Refuses a duplicate (target, tag) and
+    exits 1: the ledger is history, not a cache. Single append; nothing
+    existing is rewritten."""
     for key in extra:
         if key in RESERVED:
             sys.exit(f"record() extra key {key!r} shadows a reserved field - "
@@ -150,13 +121,10 @@ def _fmt(value):
 
 
 def _unwrap(value):
-    """A single-element list as its element.
-
-    mww files its multi-value knobs as lists (src/train/mww/config.py build():
-    training_steps: [50000]) even when the sweep's grid passed a scalar, so
-    the label 50000 and the config [50000] must compare equal or the drift
-    warning (below) fires on every mww record. Multi-element lists keep
-    their shape: that is a genuinely different configuration.
+    """A single-element list as its element: mww files multi-value knobs as
+    lists even when the grid passed a scalar, so 50000 and [50000] must
+    compare equal or the drift warning fires on every mww record.
+    Multi-element lists keep their shape: a genuinely different configuration.
     """
     if isinstance(value, list) and len(value) == 1:
         return value[0]
@@ -164,19 +132,10 @@ def _unwrap(value):
 
 
 # Grid key (the trainer's CLI spelling, what the sweep's YAML says) -> the
-# key the RESOLVED config files it under (src/train/oww/train.py create_config /
-# src/train/mww/config.py build). bug.md C1 (2026-09-22): the 094e414 sweep ran
-# before the grid was threaded into the command, so four rows carried 25k
-# labels around runs that were filed at 50k, and grouping on the label
-# printed an 80.9% "25k" mean that was really a 25k/50k mix - contradicting
-# the hand-built 73.5% verdict in improvement.md. The map is keyed by target
-# because the two trainers file the same CLI option under different names:
-# oww --training-steps lands in config["steps"] (src/train/oww/train.py:438),
-# mww's in config["training_steps"] as a list (src/train/mww/config.py:222) -
-# a map that is not target-aware is the same bug wearing a different coat.
-# Keys that spell the same in both (e.g. lr) need no entry: the
-# hyphen-to-underscore fallback in _resolved_value covers them, and a grid
-# key that maps to no config key falls back to the label, as before.
+# key the RESOLVED config files it under (oww create_config / mww build).
+# Keyed by target: the two trainers file the same CLI option under different
+# names (oww --training-steps -> config["steps"], mww -> config["training_steps"]
+# as a list). Keys that map to no config key fall back to the label.
 GRID_TO_CONFIG_KEY = {
     "oww": {
         "training-steps": "steps",
@@ -214,18 +173,14 @@ GRID_TO_CONFIG_KEY = {
 
 def _resolved_value(rec, key):
     """What the run ACTUALLY used for grid key `key`: (value, has_config).
+    The grid label is what the sweep SAID it would run; the filed resolved
+    config is what it DID run, so a key present in the config wins - grouping
+    stays correct through any label/config drift. A record with no resolved
+    config (config: null) keeps its label.
 
-    The record's grid label is what the sweep SAID it would run; the
-    resolved config it filed is what it DID run, so a value that exists in
-    the config wins (C1: this makes the grouping self-correcting for any
-    future label/config drift, not just the 094e414 rows). A record that
-    filed no resolved config (config: null - predates the config half) has
-    no better evidence than its label, and keeps it.
-
-    One shape exception: oww's --batch-n-per-class is the ACAV100M draw, but
-    create_config files the whole per-class DICT around it, so comparing
-    the label 1024 against that dict would warn on every record - compare
-    against the ACAV100M entry instead.
+    Shape exception: oww's --batch-n-per-class is the ACAV100M draw, but
+    create_config files the whole per-class DICT - compare against the
+    ACAV100M entry, or the label drifts on every record.
     """
     cfg = rec.get("config") or {}
     if rec.get("target") == "oww" and key == "batch-n-per-class":
@@ -243,22 +198,15 @@ def _resolved_value(rec, key):
 
 def _config_hash(rec):
     """The tag's h-half: the resolved-config hash (src/train/provenance.py).
+    Two records sharing the h-half AND the seed are the same run measured
+    twice. Tags without an h-half (legacy d-format, smoke runs) have no
+    config half to compare, so the whole tag is the identity and nothing
+    can collapse.
 
-    bug.md C2 (2026-09-22): the 50k group printed n=4 when its four records
-    were two (config-hash, seed) pairs, each run at two commits - h94736bd/
-    1042 and h642a48d/1043, agreeing to the last digit across a week of
-    code change, which is P0.1's determinism holding, not four draws from
-    a distribution. Two records sharing the h-half AND the seed are the
-    same run measured twice. Tags without an h-half (legacy d-format, smoke
-    runs) have no config half to compare, so the whole tag is the identity
-    and nothing can collapse.
-
-    The h-half and the seed are NOT the whole identity: the duplicate key below
-    is (config-hash, seed, corpus_id), because a corpus_axes sweep holds the
-    trainer fixed and redraws the TTS per arm, so one (config, seed) legitimately
-    spans two corpora whose evals differ by design. Treating that pair as one run
-    measured twice is what shouted a determinism regression at the variable under
-    test.
+    The h-half and seed are NOT the whole identity: the duplicate key below
+    is (config-hash, seed, corpus_id), because a corpus-axes sweep holds the
+    trainer fixed and redraws the TTS per arm - one (config, seed)
+    legitimately spans two corpora whose evals differ by design.
     """
     parts = (rec.get("tag") or "").split("-")
     if parts and len(parts[-1]) > 1 and parts[-1].startswith("h"):
@@ -267,11 +215,11 @@ def _config_hash(rec):
 
 
 def _eval_signature(rec):
-    """The headline eval numbers, to compare two records of one
-    (config-hash, seed) pair. A pair whose signatures differ is a
-    determinism regression (C2): the same run, computed twice, disagreeing
-    - the byte-identity bar has moved, and the table says so instead of
-    averaging over it."""
+    """The headline eval numbers (adversarial rate, positives rate, threshold)
+    to compare two records of one (config-hash, seed) pair. A pair whose
+    signatures differ is a determinism regression: the same run, computed
+    twice, disagreeing - the byte-identity bar has moved, and the table says
+    so instead of averaging over it."""
     eb = rec.get("eval_block") or {}
     return ((eb.get("adversarial") or {}).get("rate"),
             (eb.get("positives") or {}).get("rate"),
@@ -280,20 +228,15 @@ def _eval_signature(rec):
 
 def _sweep_curve(rec):
     """The record's eval threshold sweep as [(fa%, det%, threshold)], or None.
+    The curve is a step function in the FA axis; every reading of it is a
+    POINT PICK, never an interpolation. The FA axis is the extend+hey_other
+    subset, never pooled with the other categories (the 'never pool'
+    invariant applies to the curve as to the gate).
 
-    bug.md C3 step 2 (2026-09-22): eval_model.py records threshold_sweep -
-    a fixed-grid re-threshold of its own per-clip peaks (the model ran once)
-    - so a sweep can be concluded from the ledger instead of a human driving
-    40 single-threshold evals. The curve is a step function in the FA axis;
-    every reading of it is a POINT PICK, never an interpolation. The FA axis
-    is the extend+hey_other subset, never pooled with the other categories
-    (the 'never pool' invariant applies to the curve as to the gate).
-
-    A record with no sweep (every pre-sweep one on file) or with a
-    structurally inconsistent block (mismatched lengths, missing rates)
-    returns None: the ledger does not repair or recompute the eval block
-    (module docstring), it says what it has and falls back to the
-    one-threshold reading.
+    No sweep (pre-sweep records) or a structurally inconsistent block
+    (mismatched lengths, missing rates) returns None: the ledger does not
+    repair or recompute the eval block - it says what it has and falls back
+    to the one-threshold reading.
     """
     ts = (rec.get("eval_block") or {}).get("threshold_sweep") or {}
     thr, adv, det = (ts.get("thresholds"), ts.get("adv_rate"),
@@ -310,16 +253,13 @@ def _at_most_budget(curve, budget_pct):
     """(det%, fallback, fa%) - a curve's reading at a common FA budget B.
 
     'Detection at AT-MOST-B false accepts' = the max detection over the
-    curve's points with FA <= B. The curve is a step function, so this is a
-    pick among measured points, never a parametric interpolation: an
-    interpolated point is a number no run ever produced, and a number no run
-    produced is how a fixed-threshold verdict (77% vs 67% at 0.5, same
-    config) gets dressed up as a comparison. Ties in detection go to the
-    point with FEWER false accepts - the higher threshold, the safer
-    operating point of the two. When no point meets the budget (B below
-    the curve's best FA) the best-reachable point comes back with
-    fallback=True: the table prints it, marked, as a floor at its own FA
-    rather than a reading at B.
+    curve's points with FA <= B. A step function: a pick among measured
+    points, never an interpolation - an interpolated point is a number no run
+    ever produced. Ties in detection go to the point with FEWER false
+    accepts - the higher threshold, the safer operating point of the two.
+    No point meeting the budget (B below the curve's best FA) returns the
+    best-reachable point with fallback=True: printed, marked, as a floor at
+    its own FA rather than a reading at B.
     """
     eligible = [pt for pt in curve if pt[0] <= budget_pct]
     if not eligible:
@@ -345,41 +285,30 @@ def _stat(rates):
 
 def summarise(wake_word, grid_keys=None):
     """A compact human table over the whole ledger, one row per configuration.
-
     For each distinct combination of the given config keys (default: the keys
-    any record's "grid" carries), the eval headline - adversarial false-accept
-    rate and pooled detection rate from each record's eval block - with
-    MIN/MAX across repeats beside the mean: a difference smaller than the
-    repeat-to-repeat spread is not a result (module docstring). Records that
-    carry no eval block show their config and tag only.
+    any record's "grid" carries), the eval headline - adversarial
+    false-accept rate and pooled detection - with MIN/MAX across repeats
+    beside the mean: a difference smaller than the repeat-to-repeat spread is
+    not a result. Records with no eval block show config and tag only.
 
-    Three honesty rules, each the shape of an incident (bug.md, 2026-09-22):
-    GROUP ON WHAT RAN (C1) - a key present in the record's resolved config is
-    grouped on that value, not on the grid label, and a label that disagrees
-    with it warns on stderr by name; the 094e414 rows were the 25k/50k mix
-    that made this table contradict improvement.md. HONEST N (C2) - n counts
-    distinct (config-hash, seed) pairs, because two records sharing both are
-    the same run at two commits, not two draws; exact duplicates collapse,
-    and duplicates whose evals differ are printed as a determinism regression
-    rather than averaged over. THRESHOLD LABELS (C3 step 1) - the columns
-    carry the recorded eval threshold (@0.5, or `mixed`), because the rates
-    are one-threshold readings and a detection difference beside a different
-    FA rate is the comparison CLAUDE.md forbids.
-    MATCHED FA (C3 step 2) - when any record carries the eval threshold
-    sweep (threshold_sweep in the eval block), the table gains a
-    det@FA<=B column. B is ONE common budget for every swept group, computed
-    as the median across swept groups of each group's own median
-    recorded-threshold FA, and printed above the table with that derivation:
-    every group is then read AT B - the best detection on its OWN curve with
-    FA <= B, a step-function point pick, never an interpolation. B anchored
-    to where the groups were each measured keeps them honestly comparable:
-    no group is forced to a corner of its curve the comparison never asked
-    for. A group whose curve cannot reach B prints its best-reachable point,
-    marked '*', with the derivation in a footnote. Groups with no sweep on
-    file (every pre-sweep record) keep the @-threshold columns and caveat;
-    the two readings appear together, labelled apart. When NO record carries
-    a sweep the output is byte-identical to the pre-sweep table: the ledger
-    is append-only and holds both vintages, so the fallback path must not
+    GROUP ON WHAT RAN: a key present in the record's resolved config is
+    grouped on that value, not the grid label, and a label that disagrees
+    warns on stderr by name. HONEST N: n counts distinct (config-hash, seed,
+    corpus) triples - records sharing all three are the same run re-filed at
+    another commit, not separate draws; agreeing duplicates collapse, and
+    duplicates whose evals differ print as a determinism regression.
+    THRESHOLD LABELS: columns carry the recorded eval threshold (@0.5, or
+    `mixed`) - the rates are one-threshold readings, and a detection
+    difference beside a different FA rate is the comparison CLAUDE.md
+    forbids. MATCHED FA: when any record carries a threshold sweep the table
+    gains a det@FA<=B column. B is ONE common budget for every swept group -
+    the median across swept groups of each group's own median
+    recorded-threshold FA, printed above the table with that derivation - and
+    every group is read AT B: the best detection on its OWN curve with FA <=
+    B, a step-function point pick, never an interpolation. A group whose
+    curve cannot reach B prints its best-reachable point, marked '*'. When NO
+    record carries a sweep the output is byte-identical to the pre-sweep
+    table - the ledger holds both vintages, so the fallback path must not
     move a single character of the old reading.
     """
     path = ledger_path(wake_word)
@@ -397,14 +326,14 @@ def summarise(wake_word, grid_keys=None):
         for k in grid_keys:
             resolved, has_cfg = _resolved_value(rec, k)
             value = _unwrap(resolved)
-            # C1: the run used a different value than its label claims. Name
-            # it - a warning without a tag is a rumour.
+            # The run used a different value than its label claims. Name it -
+            # a warning without a tag is a rumour.
             if k in grid and has_cfg and _fmt(_unwrap(grid[k])) != _fmt(value):
                 print(f"  WARNING: {rec.get('target')} {rec.get('tag')}: grid label "
                       f"{k}={_fmt(_unwrap(grid[k]))} but the run's resolved config has "
-                      f"{k}={_fmt(value)} - grouped under the config value (bug.md C1, "
-                      f"2026-09-22: the 094e414 sweep ran before the grid was threaded "
-                      f"into the command)", file=sys.stderr)
+                      f"{k}={_fmt(value)} - grouped under the config value; the "
+                      f"grid label is stale (the run used the config's value) - "
+                      f"check the sweep that filed this record", file=sys.stderr)
             values.append(value)
         if not rec.get("eval_block"):
             no_eval.append((rec, values))
@@ -412,15 +341,9 @@ def summarise(wake_word, grid_keys=None):
         combo = tuple(_fmt(v) for v in values)
         groups.setdefault((rec.get("target"), combo), []).append(rec)
 
-    # A group whose records were trained on DIFFERENT frozen corpora (more
-    # than one corpus_id) averages DATA, not seeds: part of its [min-max]
-    # spread is TTS redraw, not repeat-to-repeat noise, and a reader treats
-    # the pooled spread as seed noise unless told otherwise. Grouping on the
-    # resolved config (C1) stays - a sweep across corpus axes exposed the
-    # hole: it filed config-equal rows across several corpus ids, and
-    # src/scripts/compare_arms.py (the per-corpus view this warning points to) was
-    # already saying it per arm; the summariser - the table a reader sees
-    # first - had to say it too.
+    # A group whose records were trained on DIFFERENT frozen corpora
+    # (more than one corpus_id) averages DATA, not seeds: part of its
+    # [min-max] spread is TTS redraw, not repeat-to-repeat noise.
     for (target, combo), recs in sorted(groups.items(),
                                         key=lambda kv: (kv[0][0] or "", kv[0][1])):
         corpora = sorted({str(r.get("corpus_id")) for r in recs
@@ -437,10 +360,9 @@ def summarise(wake_word, grid_keys=None):
 
     lines = [f"ledger: {path}  ({len(records)} record(s))", ""]
 
-    # C3 step 2: per-group sweep curves from the records that carry one, with
-    # each record's own recorded-threshold FA (its eval block's adversarial
-    # rate) for the budget derivation. Groups without a sweep on file are
-    # simply absent here and keep the @-threshold rendering below.
+    # Per-group sweep curves from the records that carry one, with each
+    # record's own recorded-threshold FA (its eval block's adversarial rate)
+    # for the budget derivation. Groups without a sweep are absent here.
     group_sweep = {}
     for (target, combo), recs in groups.items():
         entries = []
@@ -453,11 +375,11 @@ def summarise(wake_word, grid_keys=None):
         if entries:
             group_sweep[(target, combo)] = entries
 
-    # The common FA budget, or None when no record carries a sweep (all
-    # existing records). The median of medians is deterministic and sits at
-    # the heart of the swept groups' operating region: tight enough that the
-    # reading discriminates, derived from each group's own measured point so
-    # no group is forced to a corner of its curve it never reached.
+    # The common FA budget, or None when no record carries a sweep. The
+    # median of medians sits at the heart of the swept groups' operating
+    # region: tight enough that the reading discriminates, derived from each
+    # group's own measured point so no group is forced to a corner of its
+    # curve.
     matched = None
     n_swept = 0
     if group_sweep:
@@ -475,21 +397,18 @@ def summarise(wake_word, grid_keys=None):
             f"  {n_swept} swept group(s), of each group's own median adv FA at its recorded",
             "  threshold. Every swept group is read AT that budget: the best detection on its",
             "  own curve with FA <= B - a step-function point pick, never interpolated",
-            "  (CLAUDE.md: never compare models at a fixed threshold; bug.md C3, 2026-09-22).",
+            "  (CLAUDE.md: never compare models at a fixed threshold).",
             "",
         ]
     fallback_notes = []
     for (target, combo), recs in sorted(groups.items(),
                                         key=lambda kv: (kv[0][0] or "", kv[0][1])):
         label = "  ".join(f"{k}={v}" for k, v in zip(grid_keys, combo)) or "-"
-        # C2: distinct (config-hash, seed, corpus) triples are the samples; records
-        # that share all three are the same run re-computed at another commit.
-        # The corpus belongs in the key: the h-half is the config only, so a flat and
-        # a balanced corpus at one config+seed used to collapse into one "duplicated
-        # run" and shout a determinism regression at a difference that was the
-        # variable being tested (a corpus-axes sweep pooled the flat and the
-        # balanced arm at one config+seed into one "duplicated run"). Agreements
-        # collapse to one statistic; disagreements do not.
+        # Distinct (config-hash, seed, corpus) triples are the samples; records
+        # that share all three are the same run re-filed at another commit.
+        # The corpus belongs in the key: the h-half is the config only, so two
+        # corpora at one config+seed must not collapse into one "duplicated run".
+        # Agreements collapse to one statistic; disagreements do not.
         pairs = {}
         for r in recs:
             pairs.setdefault((_config_hash(r), r.get("seed"), r.get("corpus_id")), []).append(r)
@@ -508,9 +427,9 @@ def summarise(wake_word, grid_keys=None):
                 for a, b in itertools.combinations(dups, 2):
                     print(f"  DETERMINISM REGRESSION: {a.get('tag')} and "
                           f"{b.get('tag')} are the same (config, seed, corpus) run but their "
-                          f"evals differ - {', '.join(differing)}. P0.1's byte-identity "
+                          f"evals differ - {', '.join(differing)}. The byte-identity "
                           f"bar is not holding; the pair does not collapse, so both "
-                          f"values stay in the row (bug.md C2, 2026-09-22)",
+                          f"values stay in the row",
                           file=sys.stderr)
             for r in (dups[:1] if collapsed else dups):
                 if (r["eval_block"].get("adversarial") or {}).get("rate") is not None:
@@ -520,17 +439,16 @@ def summarise(wake_word, grid_keys=None):
                 curve = _sweep_curve(r)
                 if curve is not None:
                     pair_curves.setdefault((chash, seed, corpus), []).append(curve)
-        # C3 step 1: name the threshold the rates were read at, or say mixed
-        # when the group's records do not agree on one.
+        # Name the threshold the rates were read at, or say mixed when the
+        # group's records do not agree on one.
         thresholds = {_fmt((r.get("eval_block") or {}).get("threshold")) for r in recs}
         th = thresholds.pop() if len(thresholds) == 1 else "mixed"
         n_str = f"n={n}" if n_runs == n else f"n={n} ({n_runs} runs)"
         line = f"  {target or '?':<5} {label:<38} {n_str}"
         line += f"  adv FA@{th}  {_stat(adv)}".rstrip()
         line += f"  detection@{th}  {_stat(det)}".rstrip()
-        # C3 step 2: the matched-FA column - only when some record carries a
-        # sweep, so a ledger with none (all existing records) renders exactly
-        # as before, byte for byte.
+        # The matched-FA column - only when some record carries a sweep, so a
+        # ledger with none renders exactly as before, byte for byte.
         if matched is not None:
             vals, fbs = [], []
             for curves in pair_curves.values():
@@ -558,30 +476,26 @@ def summarise(wake_word, grid_keys=None):
     if fallback_notes:
         lines.append("")
         lines += [f"  {note}" for note in fallback_notes]
-    # Records that carry no eval block show their config and tag only: there is
-    # no number to put in the table, and pretending there was would be a lie.
+    # No eval block: config and tag only - there is no number to put in the
+    # table, and pretending there was would be a lie.
     for rec, values in no_eval:
         label = "  ".join(f"{k}={_fmt(v)}" for k, v in zip(grid_keys, values)) or "-"
         lines.append(f"  {rec.get('target') or '?':<5} {label:<38} "
                      f"(no eval)  {rec.get('tag', '?')}")
     if any(len(recs) > 1 for recs in groups.values()):
         lines.append("")
-        lines.append("  [min-max] is the repeat-to-repeat spread. The noise floor in")
-        lines.append("  this repo is 10 points, measured at an identical config (77% and")
-        lines.append("  67% on the same holdout) - a difference inside that band is not")
-        lines.append("  a result, no matter which side of it the mean lands on.")
+        lines.append("  [min-max] is the repeat-to-repeat spread. A difference inside")
+        lines.append("  it is not a result, no matter which side of it the mean lands on.")
     if groups:
         lines.append("")
         lines.append("  The @ value is the threshold the column was READ at. These are")
         lines.append("  one-threshold readings, not a matched-FA comparison: a detection")
         lines.append("  difference between rows is not a verdict - 'Never compare models")
-        lines.append("  at a fixed threshold' (CLAUDE.md); 77% vs 67% at 0.5 was the")
-        lines.append("  SAME config (bug.md C3, 2026-09-22).")
+        lines.append("  at a fixed threshold' (CLAUDE.md).")
     if matched is not None:
         lines.append("")
         lines += [
-            "  det@FA<=B: the matched-FA reading (bug.md C3 step 2, 2026-09-22 - the",
-            "  40-eval manual 0.25-0.85 job this exists to stop). One budget for every",
+            "  det@FA<=B: the matched-FA reading. One budget for every",
             "  swept group; each reads its OWN curve, never another group's.  '-': the",
             "  records predate the sweep - @-threshold columns only, not comparable at B.",
             "  '*': the group's curve never reaches FA <= B; the marked value is its best",

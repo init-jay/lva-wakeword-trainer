@@ -408,24 +408,20 @@ _PINNED_STDOUT_BODY = """
   1 swept group(s), of each group's own median adv FA at its recorded
   threshold. Every swept group is read AT that budget: the best detection on its
   own curve with FA <= B - a step-function point pick, never interpolated
-  (CLAUDE.md: never compare models at a fixed threshold; bug.md C3, 2026-09-22).
+  (CLAUDE.md: never compare models at a fixed threshold).
 
   oww   training-steps=25000                   n=1  adv FA@0.5  2.0%  detection@0.5  85.0%  det@FA<=2.0%  85.0%
   oww   training-steps=50000                   n=2  adv FA@0.5  3.0% [3.0-3.0]  detection@0.5  79.0% [78.0-80.0]  det@FA<=2.0%  -  (no sweep on file; @-threshold reading only)
 
-  [min-max] is the repeat-to-repeat spread. The noise floor in
-  this repo is 10 points, measured at an identical config (77% and
-  67% on the same holdout) - a difference inside that band is not
-  a result, no matter which side of it the mean lands on.
+  [min-max] is the repeat-to-repeat spread. A difference inside
+  it is not a result, no matter which side of it the mean lands on.
 
   The @ value is the threshold the column was READ at. These are
   one-threshold readings, not a matched-FA comparison: a detection
   difference between rows is not a verdict - 'Never compare models
-  at a fixed threshold' (CLAUDE.md); 77% vs 67% at 0.5 was the
-  SAME config (bug.md C3, 2026-09-22).
+  at a fixed threshold' (CLAUDE.md).
 
-  det@FA<=B: the matched-FA reading (bug.md C3 step 2, 2026-09-22 - the
-  40-eval manual 0.25-0.85 job this exists to stop). One budget for every
+  det@FA<=B: the matched-FA reading. One budget for every
   swept group; each reads its OWN curve, never another group's.  '-': the
   records predate the sweep - @-threshold columns only, not comparable at B.
   '*': the group's curve never reaches FA <= B; the marked value is its best
