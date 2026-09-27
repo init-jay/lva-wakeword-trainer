@@ -147,13 +147,16 @@ corpus and needs only the Piper engine.
 The setup script pins the `src/train/microwakeword/` clone to one commit of
 the fork, builds `src/train/train-mww-applesilicon/.venv` (Python 3.12, tensorflow
 2.21.0 — the version the image installs — numpy 2, which is why this cannot
-share the openWakeWord venv), and verifies the imports. It installs the clone
+share the openWakeWord venv), applies `src/train/patches/per-clip-stream-reset.py`
+to the clone (so the in-run streaming ROC resets per clip, as deployment does), and
+verifies the imports. It installs the clone
 **editable `--no-deps`**; a non-editable build is a verified failure, because
 `microwakeword/audio/` has no `__init__.py` and `find_packages()` silently
 drops it from the wheel. The run script preflights a real `describe` / voices
 round trip to each TTS server it will use before spending the run, checks the shared `data/corpus`/`output`
 directories are writable (the Docker trainers run as root), and verifies the
-clone is still at the pinned commit. Same knobs as the container path:
+clone is still at the pinned commit and still carries that patch — if either
+check fails, re-run the setup script (it forces the pin and re-applies). Same knobs as the container path:
 `SKIP_CORPUS=1`, `SKIP_FEATURES=1`, `MAX_FAPH=…`. The log lands in the repo's
 logs/ dir as `training-<word>-macos-<stamp>.log`.
 
