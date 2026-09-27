@@ -1,45 +1,28 @@
 """
 Kokoro voice model for the generated corpus.
 
-The Kokoro-FastAPI server (https://github.com/gabrimatic/kokoro-fastapi) has
-two endpoints that produce *different audio* for the same text:
-
-  /dev/speech             - plain PCM, no word timestamps
-  /dev/captioned_speech   - PCM + word timestamps (start/end in seconds)
-
-This module keeps both: `kokoro_tts` renders without timestamps (used for
-the negative/positional-audio paths where word timing is irrelevant), and
-`kokoro_tts_timed` returns (audio, timestamps) for the wake-word path, where
-the timestamps are what lets run-on samples be cut at the exact end of the
-wake word.
-
-TRANSPORT (since the tts-service split, 2026-09-08): this module no longer
-talks to any HTTP API itself. Both server families - Kokoro-FastAPI (Docker,
-cuda/cpu box) and kokoro-mlx (Apple Silicon, in-process MLX) - run a
-tts-protocol server (src/tts-service/) in front of the actual engine and speak
-one small line-based protocol over a plain TCP port. This module is a thin
-TCP client over `tcp://` URLs, and it is the ONLY transport code left in the
-trainer: no `requests`, no OpenAI-compatible JSON, no engine-specific
-response shapes.
-
-The URL is therefore a `tcp://` spec, not an HTTP URL:
+Transport is a thin TCP client over `tcp://` URLs (src/tts-service/
+tts-protocol): both engine families - Kokoro-FastAPI (Docker) and kokoro-mlx
+(Apple Silicon) - run a tts-protocol server in front of the engine, and this
+is the ONLY transport code left in the trainer. Non-`tcp://` URLs are
+deliberately rejected by the client: they used to mean different backends
+with different audio, and a silent misread would render a corpus from the
+wrong engine.
 
   KOKORO_URL=tcp://127.0.0.1:8899,tcp://127.0.0.1:8901 python src/train/oww/train.py ...
 
-The old `http://...` / `mlx://...` forms are deliberately rejected by the
-client - they used to mean different backends with different audio, and a
-silent misread would render a corpus from the wrong engine. The `probe`
-function verifies that a `tcp://` URL is actually a tts-protocol server and
-that it supports word timestamps, and it prints which engine is behind it.
+`probe` verifies each URL is a tts-protocol server that supports word
+timestamps, and prints which engine is behind it.
 
-One batch of text shares one voice and one speed - that is what makes it a
-single forward pass. The `batch` helper groups jobs accordingly and splits
-the joined rendering back into per-utterance clips using the word timestamps
-(`kokoro_tts_timed`), so coarticulation between texts does not leak across
-utterance boundaries in the saved files.
+`kokoro_tts` renders without word timestamps; `kokoro_tts_timed` returns
+(audio, timestamps) - the timestamps are what lets run-on samples be cut at
+the exact end of the wake word. One batch of text shares one voice and one
+speed (a single forward pass); `kokoro_tts_batch` splits the joined rendering
+back into per-utterance clips on those timestamps, so coarticulation between
+texts does not leak across utterance boundaries in the saved files.
 
-Kokoro returns 16 kHz mono int16, which is exactly what openWakeWord's
-feature pipeline expects, so no resampling happens here.
+Kokoro returns 16 kHz mono int16, exactly what openWakeWord's feature
+pipeline expects - no resampling here.
 """
 
 import concurrent.futures as cf
@@ -89,8 +72,7 @@ def _client(url: str) -> TtsClient:
 
 
 # ---------------------------------------------------------------------------
-# URL-named render helpers (same signatures as the old HTTP/MLX adapters,
-# now speaking the protocol)
+# URL-named render helpers (speaking the protocol)
 # ---------------------------------------------------------------------------
 
 def get_kokoro_voices(url: str):
@@ -135,21 +117,14 @@ def kokoro_tts_batch(url: str, voice: str, texts: list, speed: float):
 
 
 # ---------------------------------------------------------------------------
-# Pool / probe / parallel runner (verbatim from the 2026-08-20 generator;
-# see probe's docstring for what the protocol probe checks instead of the
-# old per-server test render)
+# Pool / probe / parallel runner
 # ---------------------------------------------------------------------------
 
 class KokoroPool:
-    """Round-robin over several KOKORO_URL entries, so N Kokoro-FastAPI
-    processes (Docker services, or a Mac host running several mlx
-    processes) split the corpus generation.
-
-    The old per-entry engine dispatch (mlx:// -> in-process kokoro-mlx,
-    anything else -> requests) is gone: every entry is now a `tcp://`
-    tts-protocol server, and the engines (which one wraps FastAPI, which
-    wraps kokoro-mlx) are the server's business, not this module's.
-    """
+    """Round-robin over several KOKORO_URL entries, so N Kokoro processes (Docker
+    services, or a Mac host running several mlx processes) split the corpus
+    generation. Every entry is a `tcp://` tts-protocol server; which engine
+    it wraps is the server's business, not this module's."""
 
     def __init__(self, urls: list):
         if not urls:
@@ -174,27 +149,22 @@ class KokoroPool:
 
 def probe_kokoro_servers(urls, max_speakers: int = 4,
                          min_english_voices: int = 5):
-    """Probe the `tcp://` tts-protocol servers behind KOKORO_URL and exit
-    with a clear message if any is unreachable, or if none of them exposes
-    the word timestamps the corpus actually needs.
+    """Probe the `tcp://` tts-protocol servers behind KOKORO_URL and exit with a
+    clear message if any is unreachable, or if none of them exposes the word
+    timestamps the corpus actually needs. `urls` is a list of `tcp://` specs
+    or a KokoroPool (iterated via .urls).
 
-    `urls` is a list of `tcp://` specs or a KokoroPool (iterated via .urls).
-
-    This runs at the top of train.py BEFORE any corpus work. Without it, an
-    operator who pointed KOKORO_URL at a dead port, or at a tts-protocol
-    server fronting an engine with no word timestamps (a Piper server, say),
-    would discover the problem at the end of a multi-hour corpus render:
+    Runs at the top of train.py BEFORE any corpus work: without it, a dead
+    port, or a tts-protocol server fronting an engine with no word timestamps
+    (a Piper server, say), is discovered at the end of a multi-hour render -
     zero run-on samples, and no explanation.
 
-    The old probe did a test render against each reachable server to confirm
-    the timestamps came back shaped correctly. The protocol makes that
-    redundant: the `voices` op declares the engine's capabilities in the
+    The probe checks reachability and declared capabilities, not a test
+    render: the `voices` op declares the engine's capabilities in the
     response envelope (wire.py - `timestamps`, `speaker`), and a miswired or
-    stale server answers that op with an error, which is exactly the failure
-    the test render was catching. So the probe now checks reachability and
-    declared capabilities, and prints which engine the server reports -
-    which is also the first line of defense against pointing the corpus at
-    the wrong engine by accident.
+    stale server answers that op with an error. It also prints which engine
+    each server reports - the first line of defense against pointing the
+    corpus at the wrong engine by accident.
     """
     urls = getattr(urls, "urls", urls)  # accept a KokoroPool
     print(f"[probe] {len(urls)} KOKORO_URL server(s):")
@@ -244,21 +214,16 @@ def probe_kokoro_servers(urls, max_speakers: int = 4,
 
 def run_jobs(jobs, job_func, desc: str = "kokoro", workers: int = 2,
              weights=None):
-    """Run a list of independent jobs with a thread pool, in order of
-    completion, with a progress bar.
-
-    `jobs` is an iterable of opaque job arguments; `job_func(job)` is called
-    for each. If `job_func` returns an int it is treated as the number of
-    items the job produced and the sum is returned - callers report
-    "N/M written" from it. `weights` (same order as jobs) scales the
-    progress bar per job, so a job covering 20 clips advances it 20 rather
-    than 1. Exceptions inside `job_func` are caught and reported - one bad
-    voice must not abort the whole corpus run. The pool is deliberately
-    small: each Kokoro request already occupies the whole GPU/CPU for the
-    duration of the render, so extra workers just queue at the server side
-    and add no throughput (measured: 2 workers == 4 workers against a single
-    Kokoro-FastAPI process).
-    """
+    """Run a list of independent jobs with a thread pool, in order of completion,
+    with a progress bar. `jobs` is an iterable of opaque job arguments;
+    `job_func(job)` is called for each, and a returned int is treated as the
+    number of items the job produced (the sum is returned). `weights` (same
+    order as jobs) scales the progress bar per job. Exceptions inside
+    `job_func` are caught and reported - one bad voice must not abort the
+    whole corpus run. The pool is deliberately small: each Kokoro request
+    already occupies the whole GPU/CPU for the render, so extra workers just
+    queue at the server side and add no throughput (measured: 2 workers ==
+    4 workers against a single Kokoro-FastAPI process)."""
     jobs = list(jobs)
     if not jobs:
         return 0
@@ -294,17 +259,14 @@ def generate_kokoro_samples(pool: KokoroPool, voices, output_dir: Path,
                             samples_per_voice: int, texts, desc: str = "kokoro",
                             speeds=(1.0,), workers: int = 2,
                             batch: int = 16):
-    """Render the TTS corpus for `voices` from `texts`, distributed round-
-    robin across the pool's `tcp://` servers, into `output_dir`.
+    """Render the TTS corpus for `voices` from `texts`, round-robin across the
+    pool's `tcp://` servers, into `output_dir`.
 
-    Each (voice, speed) pair is rendered `samples_per_voice` times by
-    cycling through `texts` (so the same text is rendered several times at
-    slightly different delivery rates when `speeds` has more than one
-    entry - the extra diversity is what makes the negatives harder).
-
-    Clips shorter than ~0.5 s are discarded: they are too short for the
-    feature pipeline to be meaningful, and Kokoro occasionally produces a
-    runt when a very short text is rendered at a high speed.
+    Each (voice, speed) pair is rendered `samples_per_voice` times by cycling
+    through `texts` (the extra delivery rates are what makes the negatives
+    harder). Clips shorter than ~0.5 s are discarded - too short for the
+    feature pipeline, and Kokoro occasionally produces a runt on a very short
+    text at a high speed.
 
     Batching: texts for the same (voice, speed) are rendered in groups of
     `batch` via `kokoro_tts_batch` (one joined request, split on word
@@ -342,10 +304,9 @@ def generate_kokoro_samples(pool: KokoroPool, voices, output_dir: Path,
         out = kokoro_tts_batch(url, voice, chunk, speed)
         for text, (audio, _ts) in zip(chunk, out):
             if audio is None:
-                # The split could not locate this utterance's words.
-                # Re-render it alone - a single-utterance render either
-                # works or it does not, and if it does not we simply
-                # skip it (a transient miss, not a data problem).
+                # The split could not locate this utterance's words. Re-render
+                # it alone; if that fails too, skip it (a transient miss, not
+                # a data problem).
                 audio2, _ = kokoro_tts_timed(url, voice, text, speed)
                 if audio2 is None:
                     continue
@@ -355,9 +316,9 @@ def generate_kokoro_samples(pool: KokoroPool, voices, output_dir: Path,
             name = f"{uuid.uuid4().hex}.wav"
             scipy.io.wavfile.write(output_dir / name, SR, audio)
             with lock:
-                # Only the counter needs the lock. The network re-render and
-                # the wav write ran under it before and at workers=2 one miss
-                # stalled the other worker for a full render.
+                # Only the counter needs the lock: the network re-render and
+                # the wav write ran under it before, and at workers=2 one
+                # miss stalled the other worker for a full render.
                 counts[voice] += 1
 
     run_jobs(jobs, _job, desc=desc, workers=workers)

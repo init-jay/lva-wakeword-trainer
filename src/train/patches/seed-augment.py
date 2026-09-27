@@ -1,12 +1,12 @@
 """Patch openwakeword's train.py so every RNG it draws from is seeded from config["seed"].
 
-The tuning loop this repo is building (improvement.md P0) only means anything if two
+The tuning loop this repo is building only means anything if two
 runs differing in one hyperparameter differ in nothing else. Upstream seeds NOTHING:
 the model's initial weights come from an unseeded torch generator, the augmentation
 draws background / RIR / gain from the unseeded global numpy RNG, and Python's hash
-randomization is on. This repo has already measured 10 points of run-to-run variance
-at an IDENTICAL config (SPEED.md, CLAUDE.md) - until this patch lands, a sweep point
-measures the seed, not the hyperparameter.
+randomization is on. Run-to-run variance at an IDENTICAL config is what CLAUDE.md's
+never-compare-at-a-fixed-threshold invariant exists for - until this patch lands, a sweep
+point measures the seed, not the hyperparameter.
 
 The patch does ONE thing, keyed on config["seed"] (absent or 0 = untouched, so a
 config written by unpatched code behaves exactly as before): right after the

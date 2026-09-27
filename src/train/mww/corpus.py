@@ -1,113 +1,40 @@
 #!/usr/bin/env python3
 """Build the microWakeWord corpus at data/corpus/<wake_word>/mww/.
 
-Sibling to the openWakeWord corpus at .../oww/, and deliberately not the same
-directory: train.py rmtree's its own at the start of every run, so a shared corpus
-would be destroyed by whichever pipeline ran next.
-
-WHAT IS SHARED IS THE CODE, NOT THE OUTPUT. Everything here comes from corpus/ - the
-same trimming, the same child-range copies, the same audited Piper voices, the same
-tuned phrase texts and speed grid. Two corpora built by one set of rules.
+Not the same directory as the openWakeWord corpus: train.py rmtree's its own
+corpus at the start of every run. The build code is shared (corpus/) - same
+trimming, child-range copies, audited voices, phrase texts, speed grid.
 
     python -m train.mww.corpus --wake-word "hey seeree" \
-        --piper-url tcp://127.0.0.1:8898 \
-        --kokoro-url tcp://127.0.0.1:8900 --kokoro-fraction 0.3
+        --piper-url tcp://127.0.0.1:8898 [--kokoro-url ... --kokoro-fraction 0.3]
 
-A Piper FLEET is one comma-separated --piper-url
-(tcp://127.0.0.1:8898,tcp://127.0.0.1:8899,... - the list scripts/
-start-tts-fleet.sh prints): the corpus shards it BY VOICE, each model pinned to
-one instance for the whole run, so an instance loads each of its models once
-rather than reloading on most requests (corpus/piper.py, PiperFleet). One
-instance is one serial lane - the lane is the engine's lock, not the client's -
-so throughput scales with instances, and this is the fast path for the corpus
-stage (improvement.md P2.1).
+--piper-url is a comma-separated FLEET: the corpus shards BY VOICE, each model
+pinned to one instance (one instance is one serial lane), so throughput scales
+with instances.
 
-DIFFERENCES FROM THE openWakeWord CORPUS, all deliberate:
-
-1. REAL RECORDINGS ARE COPIED ONCE BY DEFAULT - and 10x is the candidate, not the
-   rule. openWakeWord's --real-copies 10 exists because it augments by globbing the
-   directory once, so N copies become N independently augmented variants - the largest
-   single lever measured there (run 10, run-on 53% -> 77%). microWakeWord generates its
-   feature rows UP FRONT (features.py) and augments on every read instead, so raw copies
-   only bias sampling - and for as long as the split was per FILE they were worse than
-   useless: N copies of one recording scattered that speaker across train, validation
-   and testing, and mWW SELECTS the weights it ships on validation
-   average_viable_recall. That obstacle is gone: train/mww/features.py's group_partition
-   splits by the identity of the underlying recording, so copies and vocal-tract
-   variants of one utterance always land together. What 10x is worth here is a
-   measured question, not a settled one, and the default stays at 1 until a
-   leak-free run says what the openWakeWord measurement said there.
-   What also ported from the oww clean-detection work is --real-vtlp:
-   formant-shifted copies of the named speakers' real clips. A shifted wav is a DISTINCT
-   feature row, not another draw of the same voice, so it buys the diversity the weak
-   voice needs without the cost raw repetition pays - repetition buys that voice
-   presence at the cost of diluting the voices that were already detected. The variants
-   land here as new rows, not dilution - and they never needed the split fix, which is
-   why this is what ported first.
-
-2. PIPER-MAJORITY, WITH KOKORO AS A SUPPLEMENT. --kokoro-fraction renders that
-   share of the PHRASE-ALONE positive budget with Kokoro instead of Piper. It
-   SUBSTITUTES rather than adds, the same discipline the openWakeWord side applies
-   to its --piper-fraction: total clip count, real-clip share of the positive set,
-   and the negative set all stay fixed, so a comparison against an all-Piper run
-   means exactly one thing - where part of the phrase-alone budget came from. Run 17
-   measured two engines beating one on the openWakeWord side by the largest margin
-   since run 10; this is that lever, engines swapped (that corpus is Kokoro-primary
-   with a Piper fraction, this one the mirror image). The module default is 0.0 (all
-   Piper, the historical behaviour); the Apple Silicon run script defaults to 0.3,
-   mirroring the 30% its oWW sibling already runs. Negatives stay Piper-only on
-   purpose: that is where the per-category signal (extend, hey_other) lives, and a
-   second engine would blur attribution of a false accept to an engine. The Kokoro
-   voices get the same exclusions the oWW corpus applies (the recipe's
-   voices.kokoro.mispronouncing and the v0 legacy set) and the shared speed grid, so
-   the two
-   engines differ in timbre, not in speed or text. Both URLs are tcp://
-   tts-protocol servers (src/tts-service/): on a Mac that is the in-process
-   kokoro-mlx engine (`uv run --project src/tts-service/engines/kokoro_mlx
-   python -m kokoro_mlx_engine`), in Docker the wrapped Kokoro-FastAPI service.
-
-3. NO RUN-ON POSITIVES YET. Their cut point comes from Kokoro's word timestamps, and
-   Wyoming exposes no equivalent - the fallback estimate measured a median +153 ms
-   late, against a RUNON_TAIL_MS of 150-300 ms. On the openWakeWord side run-ons took
-   held-out run-on detection from 5% to the 80s, so this is the most valuable gap
-   here, and it needs solving properly rather than with the degraded estimate.
-   The client that would solve it (corpus/kokoro.py, with phrase_end_sample) is now
-   importable from here; the constants it needs (RUNON_TAIL_MS) stay
-   openWakeWord-local until this gap is closed.
-
-4. DEPTH IS NOT THE LEVER. The default is 60 phrase-alone clips per voice.
-   Doubling that to 120 (2026-09-08, both runs trained 20,000 steps so the extra
-   data was actually seen) never produced a deployable gain, and the two 2x runs
-   failed in opposite ways. The 30% mix collapsed on held-out detection: at
-   12/32 adversarial false accepts, plain 86 -> 59 and run-on 93 -> 28 against the
-   1x mix, 17/32 adversarial false accepts at the 0.5 reference. The all-Piper 2x
-   kept the best held-out detection of any run (84% plain / 87% run-on at 0.5,
-   ceilings 86/90) but lost its operating point entirely: 37.5% of its own training
-   negatives score above 0.99 (training-ROC AUC 0.295, below chance) and no cutoff
-   meets the 0.2 FAPH budget, so the manifest stage refused to write. So: the
-   Kokoro share has a sweet spot at 1x (the mix's run-on win came from the engines,
-   not the volume), and at doubled depth the mix was the poison while Piper-only
-   depth was neutral-to-harmful. The remaining levers are the ones depth cannot
-   touch: more REAL recordings (the per-speaker spread - jen at 0-30% against jay
-   at 69-89% - is the standing failure in every configuration) and the run-on
-   positives in point 3.
-
-5. REJECTION IS TRAINED, NOT FREE. The negative set is small on purpose in this
-   module's history (12 adversarial clips per voice, 984 total against ~8,000
-   positives), and the 2026-09-08 doubled-depth runs showed what that leaves out:
-   a model trained on 15,156 positives and 984 adversarial clips became a firehose
-   - 37.5% of its own training negatives above 0.99, no FAPH operating point,
-   manifest unwritable. Doubling the negatives to 24 per voice (1,968 total; tag
-   ecbf160-dirty-da01854d, all-Piper 1x depth, 15m54s on the Apple Silicon host)
-   fixed exactly that and nothing else: at its calibrated 0.09 cutoff it passed the
-   extend+hey_other gate for the first time in this repo (1/32, versus 5-17/32 for
-   every earlier run) with zero training false accepts at 0.81, and per-speaker
-   plain detection became the best measured (jay 94, jen 40, ryan 83 at 4/32
-   matched). The price was recall, not rejection: run-on 37 (against 65-93 for the
-   1x runs), detection-with-command 57%, median latency 261 ms - the conservative
-   model fires late - and the per-speaker wall (jen 20-40%) survived it, as it has
-   every lever so far. If a run stops rejecting things that used to be rejected,
-   reach for this knob before reaching for depth.
+Differences from the openWakeWord corpus, all deliberate:
+1. REAL RECORDINGS ARE COPIED ONCE BY DEFAULT; 10x is the candidate, not the
+   rule. openWakeWord's 10x works because it augments by globbing the directory
+   once (measured 53% -> 77%); microWakeWord augments every read, so raw copies
+   only bias sampling. The per-file split that made copies leak across splits -
+   biasing the weights mWW SELECTS on validation average_viable_recall - is gone
+   (features.py's group_partition splits by recording identity). What 10x is
+   worth here is an open measurement; the default stays 1. --real-vtlp:
+   formant-shifted real-clip copies are a DISTINCT feature row, not another draw
+   of the same voice.
+2. PIPER-MAJORITY, KOKORO AS A SUPPLEMENT: --kokoro-fraction SUBSTITUTES that
+   share of the phrase-alone positive budget; totals and the negative set stay
+   fixed. Default 0.0; the Apple Silicon run script 0.3. Negatives stay
+   Piper-only: the per-category signal (extend, hey_other) lives there.
+3. NO RUN-ON POSITIVES YET: the cut point needs Kokoro word timestamps; the
+   fallback estimate measured a median +153 ms late against RUNON_TAIL_MS
+   150-300 ms.
+4. DEPTH IS NOT THE LEVER: doubling 60 -> 120 phrase-alone clips (both runs
+   trained 20,000 steps) produced no deployable gain in either engine mix.
+5. REJECTION IS TRAINED: the negative set is small on purpose (12 per voice);
+   a 2x-depth run trained on it became a firehose (37.5% of its training
+   negatives above 0.99, no FAPH operating point). Doubling to 24 per voice
+   fixed exactly that - reach for this knob before depth.
 """
 
 import argparse
@@ -120,9 +47,7 @@ from pathlib import Path
 
 import numpy as np
 
-# The import root src/. This package sits at src/train/mww/, two levels
-# below it, so src/ is two levels up, not the git root the pre-reorg value
-# (parents[2]) points at.
+# The import root src/, two levels up (not the git root).
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from train.corpus.augment import (CHILD_STRETCH_FRACTION,  # noqa: E402
@@ -148,15 +73,10 @@ from recipe import (exclude_voice_holdout, path_for,  # noqa: E402
 def _parse_real_vtlp(spec: str, samples_dir, flag: str = "--real-vtlp") -> dict:
     """Parse 'speaker=N[,speaker=N]' into {speaker: N}, failing loud.
 
-    The mirror of _parse_real_copies_override in train/oww/train.py, with the
-    samples tree as a parameter instead of a module constant: this module's
-    recordings live at --real-samples, and the name must be validated against
-    the tree copy_real_samples actually reads, so the check and the copy
-    cannot drift apart. A typo'd speaker name would otherwise be silently
-    inert (the dict just never matches inside copy_real_samples) and the
-    corpus would be filed under a shaping that claims shifted variants it
-    does not carry - the label/config drift class this repo has paid for
-    twice (the oww-side parser docstring carries the history).
+    Mirror of _parse_real_copies_override in train/oww/train.py, with the samples
+    tree as a parameter: the names must be validated against the tree
+    copy_real_samples actually reads, or a typo'd speaker is silently inert and
+    the corpus is filed under a shaping that claims variants it does not carry.
     """
     if not spec:
         return {}
@@ -279,10 +199,9 @@ def main():
     args = p.parse_args()
 
     if args.seed:
-        # BEFORE any draw below: the whole stage must be a function of the seed,
-        # not of the clock. numpy carries the corpus helpers' draws (piper speed
-        # choice, child-stretch draws, trim jitter); random is seeded too because
-        # the helpers are allowed to use either.
+        # BEFORE any draw below: the stage must be a function of the seed, not
+        # the clock. numpy carries the helpers' draws; random too, because the
+        # helpers are allowed to use either.
         random.seed(args.seed)
         np.random.seed(args.seed)
         print(f"[seed] {args.seed} (drawing is seeded; rendering is not - the "
@@ -299,32 +218,21 @@ def main():
         sys.exit("  --kokoro-fraction must be in [0, 1) - Piper stays primary in "
                  "this corpus, because the negatives are Piper-only")
 
-    # The real-clip shifted variants (above): parsed BEFORE the voice probes
-    # and the --skip decision. A speaker name that is not a directory under
-    # --real-samples must fail loud on a reuse run too - an inert override
-    # filed under a shaping that claims variants the corpus does not carry is
-    # the drift the reuse check exists to refuse - and the parsed dict is part
-    # of the requested shaping that check diffs against the manifest.
+    # --real-vtlp: parsed BEFORE the voice probes and the --skip decision, so an
+    # inert override fails loud on a reuse run too; the parsed dict is part of
+    # the requested shaping the reuse check diffs against the manifest.
     real_vtlp = _parse_real_vtlp(args.real_vtlp, args.real_samples)
 
     # VOICE SET: resolved BEFORE the --skip decision, from the same code path
-    # the build below uses - one computation, so the check and the build cannot
-    # drift apart. The cf9c065b reuse, 2026-09-22 (oww side) showed the hole
-    # this mirrors: every shaping flag matched, but the check never compared
-    # the voice set, so a post-reservation run reused a pre-reservation corpus
-    # and trained on seven held-out voices. The probes are cheap catalog
-    # fetches (no rendering, no model load), but they DO need the fleet up -
-    # a --skip run no longer works with the engines down, because an
-    # unverifiable catalog is exactly the reuse the check exists to refuse.
+    # the build uses - one computation, so the check and the build cannot
+    # drift. (The oww-side cf9c065b reuse, 2026-09-22, matched every flag but
+    # trained on seven held-out voices.) Probes are cheap catalog fetches,
+    # but the engines must be UP for a --skip run: an unverifiable catalog is
+    # exactly the reuse the check refuses.
 
-    # The voice holdout (improvement.md P1.2): a section of the recipe (one
-    # configuration per wake word). Loaded HERE, before either engine branch and
-    # before the corpus-mode decision: both branches consume it, the piper
-    # branch runs first, and a --skip run still needs the recipe read to be
-    # the same read a build would do. Enforced against whichever engine is
-    # actually in play - the live catalog is the source of truth, so a list
-    # that drifted from it fails loudly instead of silently excluding nothing.
-    # A recipe without the section is a no-op, and says so.
+    # Voice holdout: loaded HERE, before either engine
+    # branch and the corpus-mode decision; enforced against the live catalog,
+    # so a list that drifted from it fails loudly. Absent section is a no-op.
     recipe = load_recipe_or_exit(args.wake_word)
     holdout = voice_holdout(recipe)
     voices = []
@@ -337,10 +245,8 @@ def main():
         if not voices:
             sys.exit("  no usable Piper voices - nothing to generate")
         if holdout.get("piper"):
-            # Same fail-loudly rule as the openWakeWord side: a holdout pair the
-            # audited selection no longer carries (dropped by the audit tables,
-            # or gone from the catalog) cannot serve as an eval voice either,
-            # so the tracked list must move, not the audit.
+            # A holdout pair the audited selection no longer carries cannot serve as an
+            # eval voice either: the tracked list moves, not the audit.
             n_before = len(voices)
             voices, holdout_missing = exclude_voice_holdout("piper", voices, holdout)
             if holdout_missing:
@@ -355,20 +261,17 @@ def main():
             print(f"  NOTE: the recipe carries no `voice_holdout:` section - the "
                   f"synthetic ranking set has no reserved voices")
 
-    # KOKORO SUPPLEMENTS THE PHRASE-ALONE BUDGET (see the module docstring):
+    # KOKORO SUPPLEMENTS THE PHRASE-ALONE BUDGET (module docstring, point 2):
     # a share of what Piper would have rendered is rendered by it instead.
     kokoro_voices, kokoro_pool = [], None
     if args.kokoro_fraction > 0.0:
         print(f"\n[Kokoro] {args.kokoro_url}")
         kokoro_pool = KokoroPool(args.kokoro_url.split(","))
         kokoro_voices = probe_kokoro_servers(kokoro_pool)
-        # The same exclusions the openWakeWord corpus applies, for the same
-        # reason: a voice that says something other than the wake word is a
-        # mislabelled positive regardless of engine, and the v0 legacy set is
-        # older renderings of speakers already in the set. Six of 42 Kokoro
-        # voices did exactly this on the example word and went unnoticed for
-        # eleven runs - this list is not optional. It is per-word data, read
-        # from the recipe loaded above: how a voice renders one phrase says
+        # Same exclusions the openWakeWord corpus applies: a voice that says something
+        # other than the wake word is a mislabelled positive regardless of engine, and
+        # the v0 legacy set is older renderings of speakers already in the set. The list
+        # is per-word data read from the recipe - how a voice renders one phrase says
         # nothing about another.
         excluded = set(voice_exclusions(recipe, "kokoro")["mispronouncing"])
         legacy = sorted(v for v in kokoro_voices if LEGACY_VOICE_MARKER in v)
@@ -397,11 +300,10 @@ def main():
             sys.exit("  no usable Kokoro voices - re-run with "
                      "--kokoro-fraction 0 (all Piper)")
 
-    # What a --skip run validates against, and what the manifest records at
-    # the end of a build: the requested shaping flags plus the TOP-LEVEL
-    # voice set (manifest["voices"]), a different axis from every flag -
-    # piper entries are (voice, speaker) pairs, the same shape select_piper_
-    # voices returns and the manifest stores.
+    # What a --skip run validates against, and what the manifest records: the
+    # requested shaping flags plus the TOP-LEVEL voice set - a different axis
+    # from every flag; piper entries are (voice, speaker) pairs, the shape
+    # select_piper_voices returns and the manifest stores.
     requested = {
         "samples_per_voice": args.samples_per_voice,
         "negatives_per_voice": args.negatives_per_voice,
@@ -417,9 +319,8 @@ def main():
         "voices": {"kokoro": kokoro_voices, "piper": voices},
     }
 
-    # REUSE MODE: the sweep's front door. Decided AFTER the probes, because
-    # the check diffs the voice set the probes just resolved (module: the
-    # cf9c065b reuse was blind on exactly that axis).
+    # REUSE MODE: the sweep's front door. Decided AFTER the probes, because the
+    # check diffs the voice set the probes just resolved.
     if args.skip:
         existing = {d: len(list(d.glob("*.wav"))) for d in (positives, negatives)
                     if d.is_dir()}
@@ -437,17 +338,12 @@ def main():
             print(f"  reusing {d} ({n} wav)")
         return
 
-    # REFUSE TO APPEND TO AN EXISTING CORPUS. Generating into a non-empty directory
-    # silently merges two runs, and the merge is worse than it sounds:
-    #
-    #   * clips from voices excluded since the last run stay in the corpus - the
-    #     exclusion list is applied when GENERATING, not when reading
-    #   * add_child_range_copies globs the whole directory, so the previous run's
-    #     clips get a second set of shifted copies
-    #   * real recordings are copied again, changing their share of the corpus
-    #
-    # The result is a corpus no one intended, with no error and only a clip count
-    # to notice it by. train.py's setup_training_dirs rmtree's for the same reason.
+    # REFUSE TO APPEND TO AN EXISTING CORPUS. A silent merge of two runs is
+    # worse than it sounds: exclusion is applied when GENERATING, so clips
+    # from voices excluded since stay in; add_child_range_copies globs the whole
+    # directory, so old clips get a second set of shifted copies; and real
+    # recordings are copied again, changing their share. train.py's
+    # setup_training_dirs rmtree's for the same reason.
     existing = {d: len(list(d.glob("*.wav"))) for d in (positives, negatives)
                 if d.is_dir()}
     if any(existing.values()):
@@ -468,10 +364,8 @@ def main():
     negatives.mkdir(parents=True, exist_ok=True)
 
     # The split, in TOTAL clips: Piper keeps its per-voice budget scaled down by
-    # the fraction, and the difference is spread over however many Kokoro voices
-    # there are. The two engines do not have the same voice count, so a
-    # per-voice figure would not substitute one-for-one. (The mirror image of
-    # openWakeWord's --piper-fraction arithmetic.)
+    # the fraction, the difference spread over the Kokoro voices - voice counts
+    # differ, so a per-voice figure would not substitute one-for-one.
     piper_per_voice = args.samples_per_voice
     kokoro_per_voice = 0
     if 0.0 < args.kokoro_fraction < 1.0:
@@ -491,11 +385,8 @@ def main():
                                 kokoro_per_voice,
                                 texts, "Kokoro positives")
 
-    # The adversarial negatives - "hey serious", "hey Sienna", and the same sounds
-    # inside running speech. These are what the large ambient sets do NOT contain,
-    # and `extend` false accepts have been the unsolved problem on the openWakeWord
-    # side since run 6. Piper-only on purpose: this is where the per-category
-    # signal lives, and a second engine would blur the attribution.
+    # The adversarial negatives - the sounds the large ambient sets do NOT
+    # contain. Piper-only on purpose (module docstring, point 2).
     print(f"\n[Negatives] -> {negatives}")
     phrases = build_negative_phrases(args.wake_word, args.negatives_file)
     generate_piper_samples(args.piper_url, voices, negatives,
@@ -503,30 +394,19 @@ def main():
                            PLAIN_SPEED_GRID, "Piper negatives")
 
     # Before the real clips, so only synthetic output is shifted - and before
-    # trimming, so the shifted copies are trimmed like everything else. Same order
-    # as train.py, for the same reasons.
+    # trimming, so the shifted copies are trimmed like everything else.
     if args.child_fraction > 0:
         print("\n[Child-range copies]")
         add_child_range_copies(positives, "VTLP positives", args.child_fraction)
 
     print("\n[Real Voice]")
-    # --real-vtlp (the mww port of the oww clean-detection lever):
-    # shifted copies of the named speakers' real clips. They transfer cleanly
-    # here for the same reason they won on the oww side: a shifted wav is a NEW
-    # acoustic variant, and in this pipeline it is a DISTINCT feature row, not
-    # another draw of one voice (module docstring, point 1).
-    #
     # NOTE - what does NOT port is the oww-side PER-SPEAKER raw-copy weight
-    # (--real-copies-override), and this module deliberately has no equivalent. The
-    # reason is no longer the split: train/mww/features.py's group_partition keeps every
-    # copy and every shifted variant of a recording in one split, which is what made
-    # --real-copies safe to raise here at all (see corpus/real.py's NOTE FOR THE
-    # microWakeWord PORT, rewritten to that effect). What remains is
-    # granularity: the honest sampling knob (sampling_weight, config.py) is ONE number
-    # per FEATURE SET, and the positives are one directory holding synthetic and real
-    # clips together - so it cannot aim at one speaker. Per-speaker row weights would
-    # need upstream microwakeword support; the pinned clone has none. Per-speaker
-    # DIVERSITY is available, and is what --real-vtlp below consumes.
+    # (--real-copies-override): mww's sampling weight is ONE number per FEATURE
+    # SET, and synthetic and real clips share the positives directory, so it
+    # cannot aim at one speaker. The identity-aware split (features.py's
+    # group_partition) is what made --real-copies safe to raise here. The
+    # per-speaker DIVERSITY lever is --real-vtlp. See corpus/real.py's
+    # NOTE FOR THE microWakeWord PORT.
     real_overrides = None
     balance_spec = parse_balance_spec(args.balance_real_copies)
     if balance_spec is not None:
@@ -549,25 +429,24 @@ def main():
     n_pos = len(list(positives.glob("*.wav")))
     n_neg = len(list(negatives.glob("*.wav")))
 
-    # FREEZE THE CORPUS: the manifest is the identity the run tag hashes and the
-    # check a later `--corpus reuse` (or the sweep runner) validates against. It
-    # is written last, after trimming and the child copies, so its digest covers
-    # the final tree - the state training will actually consume.
+    # FREEZE THE CORPUS: the manifest is the identity the run tag hashes and a
+    # later --skip reuse (or the sweep runner) validates against. Written last,
+    # after trimming and the child copies, so its digest covers the final tree
+    # - the state training will actually consume.
     corpus_manifest.write_manifest(
         root, args.wake_word, "mww",
         seed=args.seed,
         # The REQUESTED shaping (what a later --skip reuse check diffs) plus the
-        # holdout list, so the manifest names the exclusion: the voice set the
-        # manifest records is already holdout-free, and the list says why.
+        # holdout list, so the manifest names the exclusion. real_vtlp is the
+        # PARSED dict - the reuse check compares structure, and the string form
+        # could not be diffed against a later parsed request.
         shaping={
             "samples_per_voice": args.samples_per_voice,
             "negatives_per_voice": args.negatives_per_voice,
             "kokoro_fraction": args.kokoro_fraction,
             "child_fraction": args.child_fraction,
             "real_copies": args.real_copies,
-            # The parsed dict, not the raw string: the --skip check compares
-            # structure, and a manifest that recorded "speakerA=3" as a string
-            # could not be diffed against a later request parsed to {speakerA: 3}.
+            # parsed dict, not raw string: the --skip check compares structure
             "real_vtlp": real_vtlp,
             "balance_real_copies": args.balance_real_copies,
             "piper_speakers": args.piper_speakers,

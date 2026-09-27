@@ -1,24 +1,18 @@
 """Audio transforms applied to a corpus of WAVs: trimming, and child-range copies.
 
-Moved verbatim from train.py. Both trainers need these for the same reasons:
+Both trainers need both: both frontends place a fixed-size window relative to the
+END of the array, so trailing silence displaces the phrase and teaches a later
+alignment (openWakeWord's mechanism is in trim_silence; mww's clip is 1500 ms vs
+2000 ms - the failure mode is the same). Child-range copies cover a corpus that is
+otherwise adult-only - the largest single tuning win (run 13: a 4-year-old
+24% -> 83%).
 
-- Trimming, because BOTH frontends place a fixed-size window relative to the end of
-  the array, so trailing silence displaces the phrase and teaches a later alignment.
-  The openWakeWord mechanism is documented in trim_silence below; microWakeWord's
-  clip duration differs (1500 ms vs 2000 ms) but the failure mode does not.
-- Child-range copies, because the corpus is otherwise adult-only. This was the
-  largest single win in the tuning log (run 13: a 4-year-old 24% -> 83%).
+add_child_range_copies reads the voice's sex from the filename (kokoro_af_bella_*
+-> "af"; Piper clips are named piper_p{sex}_... so the same extraction works).
 
-NOTE ON PIPER CLIPS: add_child_range_copies reads the voice's sex from the filename
-convention (kokoro_af_bella_<uuid> -> "af" -> female; Piper clips are named
-piper_p{sex}_... so the same extraction works) - see the function docstring for the
-unknown-sex case it skips.
-
-time_stretch moved to tts-service on 2026-09-08 (tts_protocol/audio.py) because the
-shared piper engine applies speed with it and that layer must not import train/;
-this module re-exports it, so `from train.corpus.augment import time_stretch`
-keeps working everywhere, and the note about scipy-only inside it now lives there.
-(2026-09-09: the monolith became the protocol package; same module, new name.)
+time_stretch lives in tts_protocol/audio.py (the shared piper engine applies speed
+with it, and that layer must not import train/); re-exported here, so
+`from train.corpus.augment import time_stretch` keeps working.
 """
 
 from fractions import Fraction
@@ -33,43 +27,31 @@ from tts_protocol.audio import time_stretch  # noqa: E402  (re-export; see modul
 
 # Vocal-tract-length perturbation, per voice sex.
 #
-# Run 12 measured the second speaker - a 4-year-old - at 24% detection against 97%
-# for the adult, and 34% on his OWN training clips. He was 26% of the real corpus,
-# so this is not under-representation: his fundamental sits outside the range of
-# almost everything the model has ever seen. Measured medians: the child 291 Hz,
-# the adult female 269 Hz, the adult male 153 Hz, Kokoro am_adam 132 Hz,
-# af_bella 227 Hz. openwakeword's own
-# PitchShift is +/-3 semitones at p=0.25 against a 13.6-semitone gap, so it cannot
-# close it - and it is the same resample-plus-stretch operation as this, just with
-# a range a quarter the size (torch_pitch_shift/main.py:156-168).
-#
-# The ratios are per sex because one global range serves neither. A listening test
-# on vtlp_demo/ (run 12): af_bella at 1.28 is the closest thing to the child in the set,
-# while male voices "sound like teenagers up to R1.30 and useless above that
-# (chipmunk)". Male voices therefore cover the 152-172 Hz gap between the two real
-# speakers rather than reaching a child, which they cannot do without artefact -
-# and training on an artefact teaches the artefact.
+# Run 12 measured the second speaker - a 4-year-old - at 24% against 97% for the
+# adult (34% on his OWN training clips): his fundamental (median 291 Hz) sits
+# outside the range of almost everything the model has seen (adult female 269 Hz,
+# adult male 153 Hz). openwakeword's PitchShift is +/-3 semitones at p=0.25
+# against a 13.6-semitone gap. The ratios are per sex: a listening test put
+# af_bella at 1.28 closest to the child, and male voices "sound like teenagers
+# up to 1.30 and useless above that (chipmunk)" - training on an artefact teaches
+# the artefact.
 #
 # f -> 272-306 Hz, straddling the child. m -> 152-172 Hz, the adult-male-to-child gap.
 CHILD_STRETCH = {"f": (1.20, 1.35), "m": (1.15, 1.30)}
 
-# These clips are ADDED to the corpus, not substituted into it. Substituting would
-# thin out adult coverage in proportion, which is the trade run 10 warns about:
-# real-clip density drives the result, so buying child coverage by spending adult
-# coverage is not a win.
+# These clips are ADDED to the corpus, not substituted: substituting would thin
+# adult coverage in proportion, and real-clip density drives the result.
 CHILD_STRETCH_FRACTION = 0.5
 
 
 def vocal_tract_shift(data: np.ndarray, ratio: float, sr: int = 16000) -> np.ndarray:
     """Raise F0 and formants by `ratio`, keeping the clip's original duration.
 
-    Resampling alone raises pitch and formants together - which is what a shorter
-    vocal tract does, and why this reaches a child voice where a formant-corrected
-    shift would not - but it also shortens the clip by the same factor. The stretch
-    puts the duration back, so the only thing that changed is the speaker, not the
-    delivery speed. Verified against `ffmpeg -af asetrate,aresample,atempo` on the
-    vtlp_demo/ clips: same F0 to within the estimator's resolution, and this keeps
-    the original length exactly where atempo drifts ~3%.
+    Resampling alone raises pitch and formants together - what a shorter vocal
+    tract does, and why this reaches a child voice where a formant-corrected shift
+    would not - but shortens the clip by the same factor; the stretch puts the
+    duration back. Verified against ffmpeg asetrate+atempo: same F0 to the
+    estimator's resolution, and atempo drifts ~3% in length.
     """
 
     frac = Fraction(ratio).limit_denominator(100)
@@ -86,25 +68,17 @@ def add_child_range_copies(directory: Path, desc: str,
                            fraction: float = CHILD_STRETCH_FRACTION) -> int:
     """Add pitch/formant-shifted copies of the SYNTHETIC clips in `directory`.
 
-    Only synthetic clips are shifted, and the ratio comes from the voice's sex,
-    which is why the voice is in the filename. Real recordings are left alone: the
-    child needs no shifting, and the adult speaker is male, so shifting them reaches
-    the teen range that ~15 Kokoro male voices already cover far more cheaply than
-    160 clips of one speaker.
+    Synthetic only: the child needs no shifting, and the adult speaker is male,
+    so shifting the real recordings reaches the teen range that ~15 Kokoro male
+    voices already cover more cheaply than 160 clips of one speaker. Sex comes
+    from the filename (voice prefix second letter; piper_p{sex}_... the same
+    position), so Piper clips participate on equal terms; an unknown sex
+    (piper_pu_...) is skipped rather than shifted by a guessed ratio - shifting a
+    male voice by the female range produces the artefact run 12 warned about.
 
-    Piper clips participate on equal terms, by carrying the sex in the same
-    position: corpus/piper.py names them `piper_p{sex}_...` precisely so the
-    extraction below needs no special case. A Piper voice whose sex has not been
-    established is written `piper_pu_...` and falls out at the CHILD_STRETCH lookup
-    rather than being shifted by a guessed ratio - shifting a male voice by the
-    female range produces the artefact run 12 warned about, and training on an
-    artefact teaches the artefact.
-
-    This matters more than it looks. If Piper clips displace Kokoro ones without
-    being shiftable, the child-range lever's COVERAGE shrinks in proportion, and the
-    likeliest casualty is the 4-year-old that run 13 exists to detect.
-
-    Copies are ADDED - see CHILD_STRETCH_FRACTION.
+    If Piper clips displace Kokoro ones without being shiftable, the child-range
+    lever's COVERAGE shrinks in proportion, and the likeliest casualty is the
+    4-year-old. Copies are ADDED - see CHILD_STRETCH_FRACTION.
     """
     clips = [p for p in sorted(directory.glob("*.wav"))
              if p.name.startswith(("kokoro_", "runon_", "piper_"))]
@@ -114,9 +88,8 @@ def add_child_range_copies(directory: Path, desc: str,
     written = 0
     skipped_unknown = 0
     for clip in tqdm(clips, desc=desc, unit="clip"):
-        # kokoro_{voice}_{uuid}.wav -> af_bella; the sex is the voice prefix's
-        # second letter (af_/bf_ female, am_/bm_ male). Piper clips are named
-        # piper_p{sex}_... so the same index lands on the same thing.
+        # kokoro_{voice}_{uuid}.wav -> af_bella: sex is the voice prefix's second
+        # letter (af_/bf_ female, am_/bm_ male); piper_p{sex}_... same index.
         parts = clip.stem.split("_")
         if len(parts) < 3 or len(parts[1]) != 2:
             continue
@@ -189,7 +162,7 @@ def trim_silence(data: np.ndarray, sr: int = 16000, top_db: float = 40.0,
     start = max(0, voiced[0] * frame - pad)
     end = min(len(data), (voiced[-1] + 1) * frame + pad)
 
-    # Never hand back a clip too short to contain a wake word - if the energy
+    # Never hand back a clip too short to contain a wake word: if the energy
     # detection produced something implausible, keep the original.
     if end - start < int(sr * 0.2):
         return data

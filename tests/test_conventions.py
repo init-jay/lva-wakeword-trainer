@@ -4,7 +4,7 @@ The `make test` target runs each file with plain python (tests/_runner.py,
 and no venv in this repo carries pytest). A file that imports pytest dies
 on its import and stops the loop - and SILENTLY SKIPS every file after it
 in alphabetical order: on 2026-09-22 that was 7 of 10 files, including
-test_sweep.py (the guard on the B1 grid fix), because test_ledger.py had
+test_sweep.py (the guard on the grid fix), because test_ledger.py had
 been written with fixtures and capsys. The 12 tests it carried were well
 designed and had never executed. This guard makes the convention an act,
 not a memory: the moment a file reaches for pytest, the suite says so at

@@ -64,13 +64,13 @@ take is kept under `data/recordings/raw/<speaker>/`, so it can be re-cut with
 - **Level is fixed at capture.** Amplifying a quiet clip raises its noise with it, so a
   quiet session cannot be rescued afterwards.
 - **Listen to a few clips early.** The meters measure level and steady noise, so an
-  impulsive click passes them: takes measuring SNR 38 dB have sounded plainly wrong.
+  impulsive click passes them: takes the meters rate clean have sounded plainly wrong.
 
 ## More than one speaker matters
 
 `src/train/corpus/augment.py` shifts synthetic clips into the child range specifically because
-a run measured a 4-year-old at 24% detection against 97% for the adult, while being 26% of
-the real corpus. Under-representation was not the cause — the fundamental sat outside
+a run measured a 4-year-old far below the adult's detection, while that speaker was a large
+share of the real corpus. Under-representation was not the cause — the fundamental sat outside
 everything the model had seen. If the wake word needs to work for a child or a very
 different voice, real clips from that speaker are worth more than any augmentation.
 

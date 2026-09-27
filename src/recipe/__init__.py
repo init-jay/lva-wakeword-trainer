@@ -304,7 +304,7 @@ def _voice_problems(data):
 
 
 # ---------------------------------------------------------------------------
-# Voice holdout (improvement.md P1.2)
+# Voice holdout
 # ---------------------------------------------------------------------------
 
 # A SECTION of the per-wake-word recipe, not a second file: one configuration

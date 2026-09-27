@@ -177,7 +177,7 @@ def render(records, grid_key, ledger_file):
     for value, rec in kept:
         arms.setdefault(value, []).append(rec)
 
-    # Per-arm structure: samples (C2-collapsed) plus each sample's sweep
+    # Per-arm structure: samples (duplicate runs collapsed) plus each sample's sweep
     # curve and its recorded-threshold adv FA (the budget derivation).
     arm_info = {}
     for value in sorted(arms, key=lambda v: _arm_label(v)):

@@ -136,7 +136,7 @@ def _holdout_voices(args, engine, selection, holdout):
     they DROP the holdout entries from the catalog, this renderer TAKES them -
     the set is rendered from the held-out voices, and the live catalog is still
     the source of truth, so a tracked entry the selection no longer carries is
-    a stale list and an error here, not a skip (improvement.md P1.2).
+    a stale list and an error here, not a skip.
     """
     entries = holdout.get(engine) or []
     if not entries:
@@ -175,7 +175,7 @@ def set_manifest(out, args, written, holdout):
     import json
     from datetime import datetime, timezone
     manifest = {
-        "set": "voice-holdout synthetic ranking set (improvement.md P1.2)",
+        "set": "voice-holdout synthetic ranking set",
         "what_it_is": ("Positives rendered ONLY from the voices "
                        "the recipe's `voice_holdout:` section holds out of every corpus "
                        "build: voice-disjoint from training, every other axis "
@@ -360,7 +360,7 @@ def main():
                         "skip), at speeds inside the 0.7-1.3 training range. "
                         "Output goes to data/corpus/eval/voice_holdout_tts by "
                         "default and is reported as a ranking signal, never as "
-                        "a speaker-generalisation gate (improvement.md P1.2)")
+                        "a speaker-generalisation gate")
     p.add_argument("--url", default="tcp://127.0.0.1:8900",
                    help="Kokoro protocol server: a tcp:// spec (the MLX engine's"
                         " default port on a Mac, the Docker kokoro service's 8899 on"

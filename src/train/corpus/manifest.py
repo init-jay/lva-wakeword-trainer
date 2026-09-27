@@ -2,59 +2,41 @@
 """Name the corpus that training consumes, and refuse to reuse a stale one.
 
 After a corpus stage completes, this writes data/corpus/<wake_word_safe>/<target>/
-corpus.json: the wake word, the engines probed (name, URL, version), the voice list
-actually used, the per-bucket clip counts, EVERY corpus-shaping flag the build was
-run with, the recipe hash, the seed, the wall time, and a content digest of the
-final wav tree. The file IS the corpus's identity.
+corpus.json: the wake word, the engines probed (name, URL, version), the voice
+list actually used, the per-bucket clip counts, EVERY corpus-shaping flag the
+build was run with, the recipe hash, the seed, the wall time, and a content
+digest of the final wav tree. The file IS the corpus's identity.
 
     python -m train.corpus.manifest --corpus-dir data/corpus/hey_seeree/mww --show
     python -m train.corpus.manifest --corpus-dir ... --check-requested '{"seed": 42}'
 
-WHY THIS EXISTS: DURING A SWEEP THE CORPUS IS A HELD-FIXED INDEPENDENT VARIABLE.
-Regenerating it per run means every comparison carries a fresh draw of TTS noise.
-The engines are NOT bit-reproducible — Piper's VITS samples noise per call — and
-this repo has measured the consequence: regenerating the eval corpus from an
-unchanged recipe produced the same 100 filenames and shifted the scorecard
-(one category 0/12 -> 1/12). Two runs of an identical configuration then differ
-by more than the knob under test, which is exactly the confound the 77%/67%
-same-config observation shows is live here. The manifest makes the corpus an
-explicit, named, frozen artefact: a run says "I consumed THIS corpus" instead of
-"some corpus that happened to be on disk", and `--corpus reuse` becomes a check,
-not a hope.
+DURING A SWEEP THE CORPUS IS A HELD-FIXED INDEPENDENT VARIABLE. The TTS engines
+are NOT bit-reproducible (Piper's VITS samples noise per call), so regenerating
+per run means every comparison carries a fresh draw of TTS noise on top of the
+knob under test. The manifest makes the corpus an explicit, named, frozen
+artefact: a run says "I consumed THIS corpus", and `--corpus reuse` becomes a
+check, not a hope.
 
-WHAT THE MANIFEST IS NOT: A RE-RENDERING RECIPE. Freezing does not mean
-reproducing. The TTS engines cannot be seeded (only the drawing/sampling around
-them can — the recorded `seed` seeds which phrases, voices and speakers get
-chosen, not how they are rendered), so two builds with the same manifest fields
-are not byte-identical. Reuse therefore means exactly one thing: use the clips
-ALREADY ON DISK. If a re-render is wanted, delete the tree and rebuild; the
-`content_digest` — the sha256 over the final wav tree, AFTER trimming and child
-copies — is the number that moves when it does, and `corpus_identity()` (the
-sha256 of the manifest file itself) is what `src/train/provenance.py` hashes into the
-run tag's data half.
+FREEZING DOES NOT MEAN REPRODUCING. The engines cannot be seeded (the recorded
+`seed` seeds the drawing/sampling, not the rendering), so reuse means exactly
+one thing: use the clips ALREADY ON DISK. A re-render wants a deleted tree and
+a rebuild; the `content_digest` (sha256 over the final wav tree) is the number
+that moves when it does, and `corpus_identity()` (sha256 of the manifest FILE
+itself) is what src/train/provenance.py hashes into the run tag's data half.
 
-THE REFUSE-STALE-REUSE RULE. `check_reuse()` compares the requested shaping flags
-against the manifest and exits non-zero on ANY difference, printing the diff.
-This exists because today's `--skip-corpus` fails silently in both directions:
-with a changed `--samples-per-voice` it just ignores the flag (src/train/oww/train.py
-says so in a comment), and with a changed `--augmentation-rounds` it reuses
-stale features as if nothing changed. Silent stale reuse is the failure mode
-this module exists to make loud. A corpus that no longer matches its request is
-rebuilt, never coaxed. The voice SET is a first-class axis here, not a
-shaping flag: the cf9c065b reuse, 2026-09-22 — every shaping flag matched,
-but the check never compared `voices`, so a post-reservation run (the tracked
-voice holdout postdated the build) trained on the pre-reservation corpus. A
-manifest that records a voice set different from the one requested is refused
+`check_reuse()` compares the requested shaping flags against the manifest and
+exits non-zero on ANY difference, printing the diff: a corpus that no longer
+matches its request is rebuilt, never coaxed. The voice SET is a first-class
+axis, not a shaping flag: the cf9c065b reuse — every shaping flag matched, but
+the check never compared `voices`, so a post-reservation request matched the
+pre-reservation corpus. A manifest recording a different voice set is refused
 just like one shaped differently.
 
-DIGEST SCOPE, ONE NUMBER. oww lays out four subdirs (positive/train, positive/test,
-negative/train, negative/test) and mww two (positives, negatives); digestting the
-whole <safe>/<target> tree in one call covers either layout and any future one,
-while `per_voice_counts` still records the per-bucket breakdown. The manifest is
-written AFTER the stage completes and its digest must cover the FINAL tree state
-(trimming and child-range copies included) — it must not fail if called early
-mid-build, but a mid-build digest is a lie about the final corpus and this is not
-the place where a lie belongs.
+DIGEST SCOPE: digestting the whole <safe>/<target> tree in one call covers the
+oww four-subdir and mww two-subdir layouts and any future one, while
+`per_voice_counts` keeps the per-bucket breakdown. The digest must cover the
+FINAL tree state (trimming and child-range copies included): the call site is
+the only thing that keeps it honest.
 """
 
 import argparse
@@ -78,12 +60,10 @@ SHORT = 7          # same length as a git short hash, for the same reason
 
 def _normalize_engines(engines):
     """The engines as recorded in the manifest: a dict keyed by engine name.
-
-    The caller may hand over either the dict form ({"kokoro": {"url", "version"},
-    ...}) or a flat list of entries each carrying an engine name ("kokoro" or
-    "piper" key, else "name"). The manifest ALWAYS stores the dict form, so a
-    list in, dict out — one canonical shape to compare against later.
-    """
+    The caller may hand over the dict form or a flat list of entries each
+    carrying an engine name ("kokoro" or "piper" key, else "name"); the
+    manifest ALWAYS stores the dict form - one canonical shape to compare
+    against later."""
     if engines is None:
         return None
     if isinstance(engines, dict):
@@ -97,11 +77,9 @@ def _normalize_engines(engines):
 
 def _recipe_hash(recipe_path):
     """sha256-of-bytes of the recipe yaml, or None when not provided / absent.
-
     The recipe is the text the corpus renders, so it is corpus identity: a
     different recipe under the same shaping flags is a different corpus even
-    though every shaping key in the manifest still matches.
-    """
+    though every shaping key still matches."""
     if recipe_path is None:
         return None
     path = Path(recipe_path)
@@ -114,14 +92,11 @@ def write_manifest(corpus_dir, wake_word, target, seed, shaping,
                    engines=None, voices=None, per_voice_counts=None,
                    recipe_path=None, wall_time_s=None):
     """Digest the corpus tree and write corpus.json beside it. Returns the path.
-
-    corpus_dir is the <wake_word_safe>/<target> directory — one tree for oww,
-    two sub-trees for mww; the digest covers the whole tree (module docstring).
-    Call this only AFTER the corpus stage completes: the digest is meant to be
-    the final state, and this function will happily record the current one if
-    called mid-build without failing, which is exactly why the call site is the
-    only thing that keeps it honest.
-    """
+    corpus_dir is the <wake_word_safe>/<target> directory - one tree for oww,
+    two sub-trees for mww; the digest covers the whole tree. Call this only
+    AFTER the corpus stage completes: called mid-build it will happily record
+    the current state without failing - the call site is the only thing that
+    keeps it honest."""
     corpus_dir = Path(corpus_dir)
     digest, files, total_bytes = digest_tree(corpus_dir)
 
@@ -131,34 +106,30 @@ def write_manifest(corpus_dir, wake_word, target, seed, shaping,
         "target": target,
         "created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         # Seeds the drawing/sampling (which phrases, voices, speakers), not the
-        # rendering: Piper's VITS samples noise per call and Kokoro cannot be
-        # seeded at all, so this alone does not make a rebuild reproducible.
-        # Recorded anyway because a same-seed, different-draw sweep is the kind
-        # of false comparison that cannot otherwise be distinguished.
+        # rendering (Piper's VITS samples noise per call, Kokoro cannot be
+        # seeded at all), so this alone does not make a rebuild reproducible.
+        # Recorded anyway: a same-seed, different-draw sweep is the kind of
+        # false comparison that cannot otherwise be distinguished.
         "seed": seed,
         "engines": _normalize_engines(engines),
         # The voice set ACTUALLY used, post-exclusion — not the catalog the
-        # engine offered, since the mispronunciation/legacy/holdout filters
-        # change which of it got used. Piper entries are (voice, speaker)
-        # pairs, json-serialised as [voice, speaker] lists; matches_requested
+        # engine offered. Piper entries are (voice, speaker) pairs,
+        # json-serialised as [voice, speaker] lists; matches_requested
         # normalises both shapes before comparing (a tuple never equals a
-        # list). This field is the axis the cf9c065b reuse, 2026-09-22,
-        # missed: it was recorded but never diffed, so a post-reservation
-        # request matched a pre-reservation corpus on every shaping flag and
-        # trained on seven held-out voices. `piper: []` is honest, not a hole:
-        # it means the build ran with piper_fraction 0 and rendered no Piper
-        # clips at all (the oww default; the on-disk cf9c065b corpus is one).
+        # list). This is the axis the cf9c065b reuse missed: recorded but
+        # never diffed, so a post-reservation request matched the
+        # pre-reservation corpus on every shaping flag. `piper: []` is honest,
+        # not a hole: the build ran with piper_fraction 0 and rendered no Piper
+        # clips at all (the oww default).
         "voices": {"kokoro": list(voices.get("kokoro", [])),
                    "piper": list(voices.get("piper", []))} if voices is not None else None,
         # oww: {"positive_train", "positive_test", "negative_train", "negative_test"};
-        # mww: {"positives", "negatives"}. Taken as a dict, never hardcoded: the
-        # bucket scheme belongs to the caller's layout.
+        # mww: {"positives", "negatives"}. Taken as a dict, never hardcoded.
         "per_voice_counts": dict(per_voice_counts) if per_voice_counts is not None else None,
-        # Every corpus-shaping flag the build was run with, verbatim: samples_per_voice,
-        # runon_fraction, child_fraction, piper_fraction / kokoro_fraction, real_copies,
-        # negatives_per_voice, piper_speakers, piper_languages, exclude_voices,
-        # include_legacy_voices, no_trim, ... recorded as given so matches_requested()
-        # can diff the requested flags against exactly what the build had.
+        # Every corpus-shaping flag the build was run with (samples_per_voice,
+        # runon_fraction, piper_fraction / kokoro_fraction, real_copies, ...),
+        # verbatim, so matches_requested() can diff the request against exactly
+        # what the build had.
         "shaping": dict(shaping) if shaping is not None else {},
         "recipe_hash": _recipe_hash(recipe_path),
         "wall_time_s": wall_time_s,
@@ -182,12 +153,10 @@ def load_manifest(corpus_dir):
 
 def _canonical_voice(entry):
     """One voice entry in its comparison shape: (voice, speaker-or-None).
-
     Kokoro entries are bare voice strings; Piper entries are (voice, speaker)
-    pairs, and json hands those back as [voice, speaker] LISTS — a tuple and a
-    list never compare equal, so both sides of any diff must land on this one
-    shape first, or a matching corpus would refuse itself.
-    """
+    pairs that json hands back as [voice, speaker] LISTS - a tuple and a list
+    never compare equal, so both sides of any diff must land on this one shape
+    first, or a matching corpus would refuse itself."""
     if isinstance(entry, (list, tuple)):
         speaker = entry[1] if len(entry) > 1 and entry[1] is not None else None
         return (str(entry[0]), speaker)
@@ -196,13 +165,10 @@ def _canonical_voice(entry):
 
 def _canonical_voices(voices):
     """A recorded or requested voice set in comparable form: sorted per engine.
-
     Sorted rather than order-preserving: catalog order belongs to the engine,
-    and two builds of the same set from two server states must still match —
-    the comparison is about WHICH voices, not which slot each sat in. A bare
-    non-dict value reads as the empty set; None (a manifest that records no
-    set at all) stays None so the caller can report the missing field.
-    """
+    and the comparison is about WHICH voices, not which slot each sat in. A
+    bare non-dict value reads as the empty set; None (no set recorded at all)
+    stays None so the caller can report the missing field."""
     if voices is None:
         return None
     if not isinstance(voices, dict):
@@ -213,13 +179,9 @@ def _canonical_voices(voices):
 
 def _voice_set_diffs(requested, recorded):
     """Diff lines for every engine whose voice set moved between build and request.
-
-    The line names the voices that MOVED, not the whole set: a 22-voice corpus
-    diffing against a 15-voice request is seven names, and those seven are the
-    information the operator needs (which reservation drifted, which catalog
-    voice appeared or vanished). Both sides are order-insensitive and
-    tuple/list-normalised via _canonical_voices.
-    """
+    The line names the voices that MOVED, not the whole set - the moved
+    names are what the operator needs. Both sides are order-insensitive and
+    tuple/list-normalised via _canonical_voices."""
     req = _canonical_voices(requested)
     man = _canonical_voices(recorded)
     diffs = []
@@ -240,20 +202,16 @@ def _voice_set_diffs(requested, recorded):
 
 
 def matches_requested(manifest, requested):
-    """Diff strings for every requested shaping key that the manifest disagrees with.
-
-    `requested` carries only the flags the caller cares about, and those keys are
-    exactly the ones compared — a manifest missing a requested key is reported,
-    not skipped. `"seed"` is special-cased against manifest["seed"] because the
-    seed is recorded at top level, not under "shaping"; so is `"voices"`,
-    against the top-level set the build actually used. The voice set is a
-    different axis from every shaping flag: the cf9c065b reuse, 2026-09-22 —
-    a post-reservation request matched the pre-reservation manifest on ALL
-    shaping flags, because the holdout exclusion lives in the voice set, not
-    in any flag. A manifest that records no `voices` field (a build predating
-    the feature) cannot be verified on that axis and is refused, not skipped.
-    Empty list = match.
-    """
+    """Diff strings for every requested shaping key that the manifest disagrees
+    with. `requested` carries only the flags the caller cares about, and those
+    keys are exactly the ones compared — a manifest missing a requested key is
+    reported, not skipped. `"seed"` is special-cased against manifest["seed"]
+    (top level, not under "shaping"); so is `"voices"`, against the top-level
+    set the build actually used. The voice set is a different axis from every
+    shaping flag (the cf9c065b reuse matched ALL shaping flags because the
+    holdout exclusion lives in the voice set, not in any flag). A manifest
+    that records no `voices` field cannot be verified on that axis and is
+    refused, not skipped. Empty list = match."""
     shaping = manifest.get("shaping") or {}
     diffs = []
     for key, value in requested.items():
@@ -280,15 +238,11 @@ def matches_requested(manifest, requested):
 
 
 def check_reuse(corpus_dir, requested):
-    """The ergonomic front door for `--corpus reuse`: exit(1) unless the corpus matches.
-
-    WHY it exists: today `--skip-corpus` with a changed `--samples-per-voice`
-    silently ignores the flag, and with a changed `--augmentation-rounds` it
-    silently reuses stale features. Silent stale reuse — a comparison run built
-    on a corpus it believes it asked for but did not get — is the failure mode
-    this refuses. Refusal is cheap (one JSON read); a corrupted sweep point is
-    the expensive kind of bug.
-    """
+    """The ergonomic front door for `--corpus reuse`: exit(1) unless the corpus
+    matches. Silent stale reuse — a comparison run built on a corpus it
+    believes it asked for but did not get — is the failure mode this refuses;
+    refusal is cheap (one JSON read), a corrupted sweep point is the expensive
+    kind of bug."""
     corpus_dir = Path(corpus_dir)
     manifest = load_manifest(corpus_dir)
     if manifest is None:
@@ -308,13 +262,10 @@ def check_reuse(corpus_dir, requested):
 
 def corpus_identity(corpus_dir):
     """The short-7 identity for the run tag: sha256 of the manifest FILE BYTES.
-
-    Not the content digest: the manifest names the audio as a named artefact,
-    and the file's own bytes already incorporate the tree digest, the shaping
-    and the engines — one number a run can consume instead of re-walking the
-    tree. A re-render of the same recipe would change the tree digest (TTS is
-    not bit-reproducible) and therefore this identity too. None when absent.
-    """
+    Not the content digest: the file's own bytes already incorporate the tree
+    digest, the shaping and the engines — one number a run can consume instead
+    of re-walking the tree. A re-render (TTS is not bit-reproducible) changes
+    the tree digest and therefore this identity too. None when absent."""
     path = Path(corpus_dir) / MANIFEST_NAME
     if not path.is_file():
         return None

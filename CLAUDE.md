@@ -41,14 +41,16 @@ guess a wake word from the repo's existing `hey_seeree` files.
 - **Treat `deploy/` as staging ground.** It stages ONE candidate with its measured
   status written down (`deploy/README.md`), out of `output/` because trainers rmtree
   that tree every run. Replacing the candidate requires a measured win at matched
-  false accepts, per speaker. The adversarial negatives were widened 2026-09-21
-  (extend 20→148, hey_other 12→150; 366-clip set): a scorecard measured on the old
-  230-clip set is not comparable, so the staged candidate must be re-baselined
-  before a ship call.
-- **Retune in search of the weak voice.** ryan (the child) is the lowest-detection
-  speaker at every measured point and step count (17-33% in the ~2.5% FA band,
-  1/6 on the clean-corpus baseline) and no hyperparameter has moved it. More ryan
-  recordings is the only lever the measurements have pointed at.
+  false accepts, per speaker. The adversarial negative set is not a constant: it
+  has been widened when the resolution of the matched-FA comparison demanded it
+  (with few clips, a single clip was worth several points of every row), and a
+  scorecard measured on an older negative set is not comparable to one on the
+  current set, so the staged
+  candidate must be re-baselined before a ship call.
+- **Retune in search of the weak voice.** The weakest-detection speaker in the
+  campaign this pipeline came out of was a child: it stayed the weakest at every
+  measured point and step count, and no hyperparameter moved it. More recordings
+  from that speaker is the only lever the measurements have pointed at.
 
 ## Where things run
 
@@ -65,11 +67,12 @@ On the CUDA box: `export COMPOSE_FILE=docker-compose.yml:docker-compose.cuda.yml
 NVIDIA only - `driver: nvidia` does not match an AMD card under ROCm.
 
 Anywhere else, including a Mac: `docker-compose.yml:docker-compose.cpu.yml`, which
-swaps both trainers for multi-arch CPU images. Slower, unmeasured as of 2026-09-04,
-and the only in-Docker option on Apple Silicon - Docker Desktop passes no Metal
+swaps both trainers for multi-arch CPU images. Slower, and the only in-Docker
+option on Apple Silicon - Docker Desktop passes no Metal
 device through, so there is no MPS image to select and `docker-compose.mps.yml`
-stays empty. Give Docker Desktop enough RAM first: the 17.28 GB feature array is
-mmap'd, and running short of memory page-faults rather than erroring.
+stays empty. Give Docker Desktop enough RAM first: the feature array is
+mmap'd at multi-GB scale, and running short of memory page-faults rather than
+erroring.
 `SKIP_BUILD=1` on either training script reuses the image; needed after a
 `docker builder prune`, since the rebuild is then cold.
 
@@ -81,13 +84,16 @@ is a host uv env (torch, `src/scripts/setup-applesilicon-trainer.sh`) run with
 own - the corpus clients speak the TTS protocol in `src/tts-service/` to the engine
 uv projects there (kokoro-mlx on 8900, in-process piper-tts on 8898; see
 `src/tts-service/README.md`), or a Docker service on a reachable port. The mww
-host route is the measured-faster one on a Mac (full run measured 14m14s there
-against 26m06s in the container, 1.8x); its corpus is Piper-majority with a 30%
-Kokoro mix by default (`KOKORO_FRACTION=0` for the all-Piper corpus). Do not
-scale corpus depth in search of quality: doubling it (with double the training
-steps) produced no deployable model in either engine mix - `src/train/mww/corpus.py`
-and SPEED.md record both runs.
-The route rationale and the measurements: SPEED.md.
+host route is the measured-faster one on a Mac; its corpus is Piper-majority
+with a 30% Kokoro mix by default (`KOKORO_FRACTION=0` for the all-Piper corpus).
+Route rationale and efficiency measurements: `docs/SPEED.md`.
+
+Nothing in this repo records one word's model results - no detection or
+false-accept scores, no sweep verdicts, no staged candidate. The pipeline is the
+product here; a measurement of the example word is evidence about the example, not
+a property of the pipeline, and `tests/test_record_pointers.py` keeps it that way:
+it fails any `SPEED.md` citation that is not `docs/SPEED.md`, any reference to a
+record branch from any file, and any scorecard row in the timings doc.
 
 ## Invariants that are easy to break
 
@@ -102,15 +108,17 @@ The route rationale and the measurements: SPEED.md.
   to it, and a missing recipe is a load error, because its phrases are specific
   to the wake word and cannot be defaulted.
 - **Never compare models at a fixed threshold.** Two runs of an identical config
-  measured 77% and 67% at 0.5. Use matched false accepts.
-- **Never pool per-speaker results.** An average hides the voice that fails: 24% for
-  a child against 97% for an adult, in the run that motivated the augmentation.
+  measured very different detection at the same fixed threshold, and the same
+  quality at matched false accepts. Use matched false accepts.
+- **Never pool per-speaker results.** An average hides the voice that fails:
+  the run that motivated the child-range augmentation looked healthy pooled
+  while one speaker's detection was far below the rest.
 - **Never pool negative categories.** `extend` and `hey_other` carry the signal.
 - **A tag is code + data**, `<commit>-d<audio hash>` — see `src/train/provenance.py`.
   Expect the data half to move between runs even when nothing changed; the TTS is
   not bit-reproducible.
 - **`--seed` is a guarantee, not a convenience.** Same seed gives a byte-identical
-  `.onnx` (bar: 3 runs, same md5, verified 2026-09-22). It holds because the global
+  `.onnx` (verified across repeated runs: same md5). It holds because the global
   RNG seed covers augmentation and the checkpoint merge is a NO-OP on this corpus
   (`cleared=0/N` in every real run — the conjunction gate never fires, which is also
   why the bar was achievable). The ledger prints a DETERMINISM REGRESSION line when
@@ -128,16 +136,25 @@ The route rationale and the measurements: SPEED.md.
 
 ## Conventions
 
-Comments here explain *why*, usually with the measurement that settled it. Match
-that. If you change something a comment justifies, update the comment in the same
-edit. If a measurement is claimed, cite where it came from — several were found the
-expensive way, and a plausible-sounding replacement is worse than none.
+Comments explain *why*, in one line. Not the story that led to the why, not a
+run-by-run account, not a restatement of what the code below already says.
+Sprawl is this repo's failure mode: module docstrings reached 120-180 lines and
+buried the few constraints the code cannot enforce itself - a pinned version, a
+positional guarantee, a value that must not change, a cache key. Keep those, one
+line each. Dates that identify *which* guard exists are load-bearing; the paragraph
+retelling what happened that day is not, and the git log has it.
 
-The plan file (`improvement.md`) and the review file (`bug.md`) were removed
-2026-09-22: the measurements they carried live in SPEED.md, the incident history in
-the git log and the test docstrings. Code comments that cite "improvement.md P.." or
-"bug.md B.." are provenance for the commit that implemented or fixed the finding, not
-links to keep alive.
+Mechanism text cites `docs/SPEED.md` or nothing. It never cites a branch outside
+this repo, and it carries no model results: `hey seeree`'s scores are evidence
+about the example, not a property of the pipeline. `tests/test_record_pointers.py`
+pins both rules. If you change something a comment justifies, update the comment in
+the same edit.
+
+The plan file (`improvement.md`) and the review file (`bug.md`) were removed from
+the repo: what still matters of them is in `docs/SPEED.md`, the git log and the test
+docstrings. Do not cite either file or its labels (`P1.4`, `B1`, ...): a label
+that points at a deleted document tells the reader nothing. State the substance,
+or name the commit.
 
 Verify before asserting. Much of what looks obvious in this repo is not: `os.mkdir`
 is not recursive, `str.strip` is not `removesuffix`, and PyPI metadata does not

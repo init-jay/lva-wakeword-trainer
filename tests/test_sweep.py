@@ -1,6 +1,6 @@
 """Guards for src/scripts/sweep.py: the grid must reach the trainer command.
 
-The bug these tests exist for (bug.md B1, 2026-09-22): the per-point grid
+The bug these tests exist for (2026-09-22): the per-point grid
 dict was used for labels and the ledger field but never translated into
 CLI arguments, so every point ran the base configuration and was filed
 under a label the run did not use - the first sweep on record is four
@@ -13,13 +13,14 @@ The corpus_axes coverage (e.g. the real-vtlp axis) pins the same seam one level
 up: load_spec's gate on the new key, the per-point exemption in
 job_corpus_reuse, and the dry-run transcript itself - where the printed
 corpus label and the resolved --corpus flag of the command must not
-disagree, because that disagreement is exactly the C5 failure class (B1's
-lesson: labels lie, commands do not).
+disagree, because that disagreement is exactly the failure class the grid
+bug belonged to (its lesson: labels lie, commands do not).
 
 The voice-holdout-set coverage pins the eval seam: load_spec
 must accept the new key and die on a path that does not exist (a typo'd
 holdout path that only showed up as a silently-missing ledger block is the
-same "the run believes it passed a knob it never passed" class as B1), and
+same "the run believes it passed a knob it never passed" class as the
+grid bug), and
 eval_cmd must carry --voice-holdout-set when configured and omit it when
 not.
 """
@@ -71,7 +72,7 @@ def test_jobs_expand_grid_times_repeats_with_seed_stride():
 
 
 def test_grid_value_reaches_the_rendered_command_oww():
-    # THE B1 assertion: for every job, the grid value is in the exact
+    # THE grid assertion: for every job, the grid value is in the exact
     # command string the real loop would run.
     for pi, gp, repeat, seed in _jobs():
         cmd = sweep.trainer_cmd("oww", "/venv/bin/python", "hey seeree",
@@ -80,7 +81,7 @@ def test_grid_value_reaches_the_rendered_command_oww():
         joined = " ".join(cmd)
         assert str(gp["training-steps"]) in joined, (
             f"grid value {gp['training-steps']} missing from {joined!r} - "
-            "the point would run the base config under a grid label (B1)")
+            "the point would run the base config under a grid label")
         assert "--seed" in joined and str(seed) in joined
 
 
@@ -109,7 +110,7 @@ def test_repeated_grid_key_names_the_config_the_tag_would_name():
     # mww's tag is computed through --print-tag with the SAME argument list
     # the run uses (base + point). The assertion here is that the list the
     # tag sees and the list the run sees are built identically - the tag
-    # naming a different config from the run was B1's mww half.
+    # naming a different config from the run was the grid bug's mww half.
     for pi, gp, repeat, seed in _jobs():
         tag_args = [] + sweep.options_to_args(gp)
         cmd = sweep.trainer_cmd("mww", "python", "hey seeree", [],
@@ -126,7 +127,7 @@ def test_first_job_is_point_zero_repeat_zero_only():
 
 
 def test_point_zero_repeats_run_corpus_reuse_not_auto():
-    # C5 (bug.md, 2026-09-22): corpus_reuse=(not first_point) left every
+    # The bug (2026-09-22): corpus_reuse=(not first_point) left every
     # repeat of point 0 in auto mode, and auto SILENTLY REBUILDS a
     # mismatched manifest - a TTS catalog change between two repeats of
     # point 0 would redraw the frozen corpus mid-sweep with no error, and
@@ -135,7 +136,7 @@ def test_point_zero_repeats_run_corpus_reuse_not_auto():
     # point 0's repeats included - verifies with --corpus reuse.
     #
     # Routed through job_corpus_reuse with no axes: that is the expression
-    # main() computes, and it must reduce to exactly this C5 rule when
+    # main() computes, and it must reduce to exactly this rule when
     # corpus_axes is absent.
     for pi, gp, repeat, seed in _jobs():
         cmd = sweep.trainer_cmd("oww", "python", "hey seeree", [],
@@ -153,7 +154,7 @@ def test_point_zero_repeats_run_corpus_reuse_not_auto():
 
 
 def test_mww_dry_run_build_label_only_for_first_job():
-    # The mww side of C5's class: the dry-run LABEL and the command must
+    # The mww side of that class: the dry-run LABEL and the command must
     # agree. Build is the first JOB only; point 0 repeat 1+ already had the
     # manifest and verifies it (--skip), so its label says reuse. The mww
     # train stage itself takes no corpus mode flag (the corpus stage owns
@@ -230,7 +231,7 @@ def _dry_run(overrides):
 def _jobs_from_dry(out):
     """{(point, repeat): (corpus label, cmd text)} from a dry-run transcript:
     the label and the resolved command the operator sees, as one pair - the
-    pair C5 says must not disagree."""
+    pair that must not disagree."""
     jobs, cur = {}, None
     for line in out.splitlines():
         if line.startswith("  point "):
@@ -245,8 +246,8 @@ def _jobs_from_dry(out):
     return jobs
 
 
-def test_job_corpus_reuse_c5_rule():
-    # C5, as the function main() calls: with no corpus
+def test_job_corpus_reuse_default_rule():
+    # The default rule, as the function main() calls: with no corpus
     # axes, only the first job (point 0, repeat 0) runs --corpus auto; every
     # later job - point 0's own repeats included - runs --corpus reuse, which
     # refuses a mismatch instead of silently rebuilding the frozen corpus.
@@ -302,8 +303,8 @@ def test_load_spec_grid_corpus_key_without_axes_still_refused():
 
 
 def test_oww_axes_dry_run_label_matches_command():
-    # THE C5 failure class is a label and a command disagreeing, so for a
-    # per-point frozen sweep the assertion is table-driven over all four
+    # THE failure class guarded here is a label and a command disagreeing, so
+    # for a per-point frozen sweep the assertion is table-driven over all four
     # jobs: the printed corpus label and the resolved --corpus flag must
     # match, and both must match the per-point expectation. Point 0 builds,
     # point 1's repeat 0 goes auto on purpose (the grid changed the corpus
@@ -325,11 +326,11 @@ def test_oww_axes_dry_run_label_matches_command():
         has_reuse = "--corpus reuse" in cmd
         assert has_reuse is want_reuse, f"point {key} cmd: {cmd!r}"
         assert label.startswith("reuse") is has_reuse, (
-            f"point {key}: label {label!r} and cmd {cmd!r} disagree (C5 class)")
+            f"point {key}: label {label!r} and cmd {cmd!r} disagree")
 
 
 def test_oww_non_axes_dry_run_still_frozen_per_sweep():
-    # C5 unchanged where corpus_axes is absent, at the dry-run level: only
+    # Unchanged where corpus_axes is absent, at the dry-run level: only
     # the first job is auto; every other job - point 1's own repeat 0
     # included - verifies, and its resolved command carries --corpus reuse
     # (the existing trainer_cmd test pins the same rule one level down).
@@ -348,7 +349,7 @@ def test_oww_non_axes_dry_run_still_frozen_per_sweep():
         has_reuse = "--corpus reuse" in cmd
         assert has_reuse is want_reuse, f"point {key} cmd: {cmd!r}"
         assert label.startswith("reuse") is has_reuse, (
-            f"point {key}: label {label!r} and cmd {cmd!r} disagree (C5 class)")
+            f"point {key}: label {label!r} and cmd {cmd!r} disagree")
 
 
 # -- voice-holdout-set --------------------------------------------------

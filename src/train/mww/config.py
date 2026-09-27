@@ -1,30 +1,21 @@
 """Emit a microWakeWord training YAML pointing at this repo's corpus.
 
-WHY A GENERATOR AND NOT A CHECKED-IN YAML. The same reason train.py builds
-openWakeWord's config from a template rather than shipping one: the paths, the
-per-set weights and the clip counts all move together, and a hand-edited YAML drifts
-from what the corpus actually contains. This mirrors create_config in train.py.
+A generator, not a checked-in YAML: the paths, per-set weights and clip counts
+all move together, and a hand-edited YAML drifts from what the corpus actually
+contains (mirrors create_config in train.py).
 
-EVERYTHING IS `type: mmap`, INCLUDING OUR OWN CORPUS. A feature set can also be
-`type: clips`, which reads a directory of WAVs and generates spectrograms on the fly,
-and that looked like it removed the need for a conversion step. It does not:
+EVERYTHING IS `type: mmap`, INCLUDING OUR OWN CORPUS. A `type: clips` set
+reads WAVs and generates spectrograms on the fly, but
 ClipsHandlerWrapperGenerator.get_mode_size returns 0 for every mode except
-"training" (data.py:357-362), so a clips set supplies no validation or testing data
-and the first validation step fails on whatever shape the ambient sets yield instead.
-
-A clips training set would also LEAK. It is constructed with
-spectrogram_generator(random=True), which draws from Clips.clips - every clip in the
-directory, ignoring the train/validation/test split - so training would sample the
-same clips that validation is scored on.
-
-So mww/features.py writes all three splits to RaggedMmap up front, and this config
-points at those. The ambient negatives from Hugging Face arrive in the same form.
+"training" (data.py:357-362) - no validation or testing data - and a clips
+training set would LEAK: it draws from every clip in the directory, ignoring
+the train/validation/test split. So mww/features.py writes all three splits
+to RaggedMmap up front, and this config points at those; the ambient
+negatives arrive in the same form.
 
 DERIVED KEYS ARE NOT WRITTEN HERE. `spectrogram_length`,
-`spectrogram_length_final_layer`, `training_input_shape` and `stride` are computed by
-model_train_eval.py:60-93 from `clip_duration_ms`, `window_step_ms` and the model
-flags. Writing them here would be duplicating a calculation that the trainer will
-redo, and a stale copy is worse than none.
+`spectrogram_length_final_layer`, `training_input_shape` and `stride` are
+computed by model_train_eval.py:60-93; a stale copy is worse than none.
 
     python -m train.mww.config --wake-word "hey seeree" --out training_parameters.yaml
 """
@@ -34,56 +25,47 @@ from pathlib import Path
 
 import yaml
 
-# 1500 ms, against openWakeWord's 2000 ms window.
+# 1500 ms, against openWakeWord's 2000 ms window. A clip that sits comfortably
+# in a 2 s window may not in 1.5 s - corpus/augment.py's trimming (phrase flush
+# to the end) makes that survivable.
 #
-# THE FRONTEND. A clip that sits comfortably in a 2 s window may not in 1.5 s.
-# corpus/augment.py's trimming makes that survivable - it is why the phrase is flush
-# to the end - but the alignment reasoning behind it does NOT carry over unchecked.
+# THE QUANTIZATION CONSTRAINT. `spectrogram_length` must be divisible by
+# `stride`, and int8 calibration asserts it AFTER training completes
+# (utils.py:321) - getting it wrong costs a full run and leaves a 0-byte
+# .tflite. At 10 ms steps and stride 3, 1500 gives 204, which divides cleanly.
 #
-# THE QUANTIZATION CONSTRAINT. `spectrogram_length` must be divisible by `stride`,
-# and int8 calibration asserts it AFTER training completes (utils.py:321) - so
-# getting it wrong costs a full run and leaves a 0-byte .tflite behind. At 10 ms
-# steps and stride 3, 1500 ms gives 204, which divides cleanly.
-#
-# THIS VALUE IS COUPLED TO WINDOW_STEP_MS. At the earlier 20 ms step, 1500 gave 179
-# and had to move to 1560. Changing either requires re-deriving the other - do not
-# hand-pick it. check_quantization_constraint() at the bottom of this file derives it
-# from the model flags and names a working value, and mww/train.py calls it before
-# launching so the failure costs seconds rather than a full run.
+# COUPLED TO WINDOW_STEP_MS: changing either requires re-deriving the other -
+# do not hand-pick it. check_quantization_constraint() below derives it from
+# the model flags, and mww/train.py calls it before launching so the failure
+# costs seconds rather than a full run.
 CLIP_DURATION_MS = 1500
 
-# 10 ms, MATCHING ESPHOME'S PREPROCESSOR. Not a free parameter.
-#
-# ESPHome's micro_wake_word generates 40 features every 10 ms, and mWW assumes the
-# preprocessor step equals this value:
-#
-#     preprocessor_window_step = config["window_step_ms"]   # model_train_eval.py:66
-#
-# so training at 20 ms builds a model expecting features at half the rate the device
-# delivers. That does not error on device - it detects badly, which is worse. The
-# manifest's `feature_step_size` is emitted from this constant (mww/manifest.py) so
-# the two cannot drift apart.
-#
-# It also sets the frame step for the quantization constraint, which is
-# `stride * window_step_ms` = 30 ms here. See CLIP_DURATION_MS.
+# 10 ms, MATCHING ESPHOME'S PREPROCESSOR. Not a free parameter: ESPHome's
+# micro_wake_word generates 40 features every 10 ms, and
+# preprocessor_window_step = config["window_step_ms"]
+# (model_train_eval.py:66), so training at a different step builds a model
+# expecting features at a different rate than the device delivers - that does
+# not error on device, it detects badly. The manifest's `feature_step_size` is
+# emitted from this constant (mww/manifest.py) so the two cannot drift.
+# Also the frame step for the quantization constraint (stride * window_step_ms
+# = 30 ms here). See CLIP_DURATION_MS.
 WINDOW_STEP_MS = 10
 
-# Augmentation corpora already on disk from download-external-data.sh. mWW takes
-# the same two things openWakeWord's does, from the same downloads.
+# Augmentation corpora already on disk from download-external-data.sh: the
+# same two things openWakeWord's takes, from the same downloads.
 IMPULSE_DIRS = ["data/external/mit_rirs"]
 BACKGROUND_DIRS = ["data/external/audioset_16k", "data/external/fma"]
 
-# Upstream notebook defaults, kept verbatim as the starting point. Change one at a
-# time and record it - the notebook's own README says a usable model takes a lot of
-# experimentation, which is seventeen runs of this repo restated.
+# Upstream notebook defaults, kept verbatim as the starting point. Change one
+# at a time and record it.
 DEFAULT_TRAINING_STEPS = [10000]
 DEFAULT_LEARNING_RATES = [0.001]
 DEFAULT_BATCH_SIZE = 128
 DEFAULT_EVAL_STEP_INTERVAL = 500
 DEFAULT_POSITIVE_CLASS_WEIGHT = [1]
 DEFAULT_NEGATIVE_CLASS_WEIGHT = [20]
-# The per-set sampling / penalty weights, previously hardcoded inside build()'s
-# feature-set dicts and wired to nothing (see the comment there). 2.0/1.0 is the
+# The per-set sampling / penalty weights, now build() parameters instead of
+# hardcoded in the feature-set dicts (wired to nothing there). 2.0/1.0 is the
 # positives value, 2.0/1.0 the adversarial negatives, 1.0/1.0 the ambient sets.
 DEFAULT_POSITIVE_SAMPLING_WEIGHT = 2.0
 DEFAULT_POSITIVE_PENALTY_WEIGHT = 1.0
@@ -98,11 +80,10 @@ def clips_feature_set(directory, truth, sampling_weight, penalty_weight,
                       slide_frames=10, step_ms=WINDOW_STEP_MS):
     """A feature set generated on the fly from a directory of WAVs.
 
-    `slide_frames` is 10 for training and validation and 1 for testing upstream: >1
-    yields several overlapping spectrograms per clip by dropping end frames, which
-    simulates the sequential inputs a streaming model actually sees. Testing wants the
-    real thing, so it uses 1.
-    """
+    `slide_frames` is 10 for training and validation and 1 for testing
+    upstream: >1 yields several overlapping spectrograms per clip by dropping
+    end frames, which simulates the sequential inputs a streaming model
+    actually sees; testing wants the real thing, so it uses 1."""
     return {
         "type": "clips",
         "truth": truth,
@@ -112,18 +93,19 @@ def clips_feature_set(directory, truth, sampling_weight, penalty_weight,
         "clips_settings": {
             "input_directory": str(directory),
             "file_pattern": "*.wav",
-            # No remove_silence here: corpus/augment.py has already trimmed, with a
-            # method calibrated on this corpus. Letting webrtcvad trim a second time
-            # would stack two different silence definitions on the same clips.
+            # No remove_silence: corpus/augment.py has already trimmed, with a
+            # method calibrated on this corpus; a second trim would stack two
+            # different silence definitions on the same clips.
             "remove_silence": False,
-            # None, NOT a seed. A seed here hands the split back to upstream's per-FILE
-            # shuffle (microwakeword/audio/clips.py:145-157 only builds split_clips when
-            # random_split_seed is not None), which scatters the N copies of one recording
-            # across train and validation - the leak src/train/mww/split.py exists to close,
-            # and it would come back silently, because the counts all still look right.
-            # NOTE this factory is unused today: every feature set the trainers assemble is
-            # mmap_feature_set, so nothing constructs Clips from this dict. If it ever is
-            # used, the split must come from split.group_partition, not from here.
+            # None, NOT a seed. A seed here hands the split back to upstream's
+            # per-FILE shuffle (clips.py:145-157 only builds split_clips when
+            # random_split_seed is not None), which scatters the N copies of one
+            # recording across train and validation - the leak
+            # src/train/mww/split.py exists to close, and it would come back
+            # silently, because the counts all still look right. NOTE this
+            # factory is unused today: every feature set the trainers assemble
+            # is mmap_feature_set. If it ever is used, the split must come from
+            # split.group_partition, not from here.
             "random_split_seed": None,
             "split_count": 0.1,
         },
@@ -146,10 +128,8 @@ def clips_feature_set(directory, truth, sampling_weight, penalty_weight,
 def mmap_feature_set(features_dir, truth, sampling_weight, penalty_weight,
                      truncation_strategy="truncate_start"):
     """A pre-generated RaggedMmap set - the Hugging Face ambient negatives.
-
     Layout is <features_dir>/{training,validation,testing,testing_ambient,
-    validation_ambient}/**/*_mmap/ (data.py:170-190).
-    """
+    validation_ambient}/**/*_mmap/ (data.py:170-190)."""
     return {
         "type": "mmap",
         "features_dir": str(features_dir),
@@ -195,24 +175,23 @@ def build(wake_word, positives_dir, negatives_dir, ambient_dirs, output_dir,
         # Positives from mww/corpus.py: synthetic voices plus real recordings,
         # trimmed and carrying the child-range copies, in mWW's own directory.
         #
-        # Real recordings are NOT duplicated here the way --real-copies duplicates
-        # them for openWakeWord. That trick exists because openWakeWord augments by
-        # globbing the directory once, so N copies become N augmented variants. mWW
-        # augments on every read, so copies would only bias sampling - and
-        # `sampling_weight` below is the honest knob for that. See corpus/real.py.
+        # Real recordings are NOT duplicated the way --real-copies does for
+        # openWakeWord (which augments by globbing the directory once, so N
+        # copies become N augmented variants): mWW augments on every read, so
+        # copies would only bias sampling - and `sampling_weight` is the honest
+        # knob for that. See corpus/real.py.
         mmap_feature_set(positives_dir, truth=True,
                          sampling_weight=positive_sampling_weight,
                          penalty_weight=positive_penalty_weight,
                          truncation_strategy="default"),
-        # This repo's ADVERSARIAL negatives - "hey serious", "hey Sienna". ~100 clips
-        # against ambient sets orders of magnitude larger, so they need a sampling
-        # weight that keeps them visible. This was the per-set lever openWakeWord
-        # did not have - there, max_negative_weight applied to the whole negative
-        # class - and it was wired to nothing: hardcoded here, unreachable from
-        # any CLI. It is a build() parameter now (the six *_sampling_weight /
-        # *_penalty_weight knobs, defaulting to their old constants), so a sweep
-        # can move one set's weight without touching the others, and the values
-        # hash into the run tag's config half.
+        # ADVERSARIAL negatives ("hey serious", "hey Sienna"): ~100 clips against
+        # ambient sets orders of magnitude larger, so they need a sampling weight
+        # that keeps them visible - the per-set lever openWakeWord did not have
+        # (its max_negative_weight applied to the whole negative class). Now a
+        # build() parameter (the six *_sampling_weight / *_penalty_weight knobs,
+        # defaulting to their old constants), so a sweep can move one set's weight
+        # without touching the others, and the values hash into the run tag's
+        # config half.
         mmap_feature_set(negatives_dir, truth=False,
                          sampling_weight=negative_sampling_weight,
                          penalty_weight=negative_penalty_weight,
@@ -236,9 +215,9 @@ def build(wake_word, positives_dir, negatives_dir, ambient_dirs, output_dir,
         "eval_step_interval": (
             eval_step_interval or DEFAULT_EVAL_STEP_INTERVAL),
         # The per-set weights, TOP LEVEL as well as in the feature dicts above:
-        # the tag's config half hashes the top level (tag_input drops features -
-        # their directories are machine layout), so without the copies here a
-        # sweep moving one set's weight would share its tag with the default.
+        # the tag's config half hashes the top level (tag_input drops features),
+        # so without the copies a sweep moving one set's weight would share its
+        # tag with the default.
         "positive_sampling_weight": positive_sampling_weight,
         "positive_penalty_weight": positive_penalty_weight,
         "negative_sampling_weight": negative_sampling_weight,
@@ -251,14 +230,10 @@ def build(wake_word, positives_dir, negatives_dir, ambient_dirs, output_dir,
         "minimization_metric": None,
         "target_minimization": 0.5,
         "maximization_metric": "average_viable_recall",
-        # ONE DIRECTORY PER RUN. model_train_eval does os.makedirs(train_dir) and
-        # raises "model already exists in folder ..." if it is there at all
-        # (model_train_eval.py:111-120) - it will not train into an existing
-        # directory, not even an empty one holding only a config file.
-        #
-        # Tagging per run also keeps history, which the openWakeWord side did not:
-        # its rmtree deleted every archived model on each run until the corpus was
-        # nested under oww/.
+        # ONE DIRECTORY PER RUN. model_train_eval raises "model already exists
+        # in folder ..." if train_dir is there at all (model_train_eval.py:111-120)
+        # - not even an empty one holding only a config file. Tagging per run also
+        # keeps history (the openWakeWord side rmtree'd its archive on each run).
         "train_dir": str(Path(output_dir) / safe / "mww" / (run_tag or "run")),
         "summaries_dir": str(
             Path(output_dir) / safe / "mww" / (run_tag or "run") / "summaries"),
@@ -322,18 +297,14 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 # The quantization constraint, checkable before a run instead of after one.
 #
-# int8 calibration feeds the representative dataset in stride-sized slices and
-# asserts the spectrogram divides evenly (utils.py:321). It runs AFTER training
-# completes, so getting this wrong costs a full run and leaves a 0-byte .tflite.
-#
-# Two attempts got it wrong by reasoning from part of the formula. The whole of it
-# is model_train_eval.py:60-88, and the part that matters is that the frame step
-# includes the STRIDE:
+# int8 calibration asserts the spectrogram divides evenly (utils.py:321) AFTER
+# training completes - getting this wrong costs a full run and leaves a 0-byte
+# .tflite. The frame step includes the STRIDE (model_train_eval.py:60-88):
 #
 #     window_step_samples = stride * 16000 * window_step_ms / 1000
 #
-# so one frame is stride x window_step_ms = 30 ms here, not 10. Changing the clip
-# duration by 10 ms moves nothing; it takes 30 ms to move the length by one.
+# so one frame is stride x window_step_ms = 30 ms here, not 10: changing the
+# clip duration by 10 ms moves nothing; it takes 30 ms to move the length by one.
 # ---------------------------------------------------------------------------
 
 PREPROCESSOR_SAMPLE_RATE = 16000

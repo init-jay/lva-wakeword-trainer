@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""P2.3 probe: CoreML EP vs CPU EP for the oww feature-stage models.
+"""Probe: CoreML EP vs CPU EP for the oww feature-stage models.
 
 The augmentation+feature stage is the largest non-TTS host stage (the 2026-09-21
-bar-test run spent ~12 min of it recomputing four arrays at 22,144 clips;
-SPEED.md's range is 11-12m30s), and it runs onnxruntime on CPU:
+bar-test run spent ~12 min of it recomputing four arrays at 22,144 clips - that
+corpus's numbers, recorded in docs/SPEED.md's range of 11-12m30s), and it runs
+onnxruntime on CPU:
 openwakeword/openwakeword/utils.py pins providers to CUDA or CPU and there is
 no CoreML branch (patches/feature-device-selection.py keys the device off
 onnxruntime's real providers, which is where a CoreML branch would go).
-SPEED.md's closed-Metal section is about TRAINING (torch/tensorflow), not
-these two ONNX models - so this question was open, and improvement.md P2.3
-prescribes exactly this probe: the real models on the real batch shape, on
-this machine, and the result written down either way.
+docs/SPEED.md's closed-Metal section is about TRAINING (torch/tensorflow), not
+these two ONNX models - so this question was open, and this probe answers
+it: the real models on the real batch shape, on this machine, and the
+result written down either way.
 
     src/train/train-applesilicon/.venv/bin/python src/scripts/coreml_probe.py
 
@@ -74,6 +75,12 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--reps", type=int, default=8)
+    ap.add_argument("--clips", type=int, default=None,
+                    help="corpus depth to extrapolate the timings to. Omit it and the "
+                         "probe reports the rate per 1000 clips instead of an absolute "
+                         "time - an absolute figure only means anything for the corpus "
+                         "you are actually building (the hey_seeree feature stage was "
+                         "22,144 clips; docs/SPEED.md).")
     args = ap.parse_args()
 
     import onnxruntime as ort
@@ -82,7 +89,8 @@ def main():
 
     if "CoreMLExecutionProvider" not in ort.get_available_providers():
         print("CoreMLExecutionProvider not available - nothing to probe. "
-              "Record that in SPEED.md and stop.")
+              "Record that with the repo's other measurements (docs/SPEED.md, the "
+              "closed-avenues section) and stop.")
         return
 
     # One fixed input: deterministic, and the same array feeds every session.
@@ -109,7 +117,7 @@ def main():
         emb_m = make_session("embedding_model.onnx",
                              ["CoreMLExecutionProvider", "CPUExecutionProvider"])
     except Exception as e:
-        print(f"CoreML session creation FAILED ({type(e).__name__}: {e}) - record in SPEED.md and stop.")
+        print(f"CoreML session creation FAILED ({type(e).__name__}: {e}) - record it in docs/SPEED.md, under the closed avenues, and stop.")
         return
     print(f"CoreML sessions created in {time.perf_counter()-t0:.2f} s")
     print(f"  melspec providers in effect: {mel_m.get_providers()}")
@@ -169,10 +177,19 @@ def main():
     total_m = t_mel_m + t_mel_e
     print(f"per-batch total: CPU {total_cpu*1000:.0f} ms vs CoreML {total_m*1000:.0f} ms "
           f"({total_cpu/total_m:.2f}x)")
-    n_batches = 22144 // BATCH
-    print(f"Extrapolated to the 22,144-clip feature stage (~{n_batches} batches at batch "
-          f"{BATCH}), at the measured ~12 min: CoreML would be "
-          f"~{12*total_m/total_cpu:.1f} min of model time.")
+    # Model time only - the stage also augments and does IO, so this is not the
+    # stage wall time and must not be quoted as if it were. It is the part a
+    # provider swap could move, which is the question the probe answers.
+    per_k_cpu = 1000 / BATCH * total_cpu
+    per_k_mlm = 1000 / BATCH * total_m
+    print(f"per 1000 clips of MODEL time: CPU {per_k_cpu/60:.2f} min vs CoreML "
+          f"{per_k_mlm/60:.2f} min ({per_k_cpu/per_k_mlm:.2f}x)")
+    if args.clips:
+        n_batches = args.clips // BATCH
+        print(f"Extrapolated to a {args.clips:,}-clip feature stage (~{n_batches:,} batches "
+              f"at batch {BATCH}): CPU ~{n_batches*total_cpu/60:.1f} min of model time, "
+              f"CoreML ~{n_batches*total_m/60:.1f} min. Compare that against your own "
+              f"measured stage wall time, not against the ~12 min any other corpus took.")
 
 
 if __name__ == "__main__":

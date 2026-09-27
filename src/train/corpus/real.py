@@ -1,11 +1,7 @@
 """Real voice recordings into a training corpus, weighted by repetition.
 
-Moved from train.py. Two changes, both behaviour-preserving:
-
-- `real_samples_dir` is now a parameter instead of a constant path
-  read from train.py's module globals, so a second trainer can point at the same
-  recordings without importing train.py.
-- The `wake_word` parameter is gone. It was never referenced in the body.
+`real_samples_dir` is a parameter, not a constant from train.py's globals, so a
+second trainer can point at the same recordings without importing train.py.
 """
 
 from pathlib import Path
@@ -17,8 +13,8 @@ import scipy.io.wavfile
 def speaker_clip_counts(real_samples_dir: Path) -> dict:
     """{speaker: wav count} over the samples tree, the same way copy_real_samples reads it.
 
-    Recursive, so loose files and one-directory-per-speaker both count; loose files
-    share the "(loose files)" key because there is no speaker to attribute them to.
+    Recursive: loose files and one-directory-per-speaker both count; loose files
+    share the "(loose files)" key.
     """
     root = Path(real_samples_dir)
     counts = {}
@@ -35,9 +31,9 @@ def parse_balance_spec(spec: str, flag: str = "--balance-real-copies"):
     """'' is off (None); 'all' is the every-speaker sentinel; else a validated list
     of speaker names.
 
-    The spec is kept as written in the corpus manifest, so the *rule* is the identity
-    and the multipliers are derived fresh each build - which is what lets recording more
-    clips of a thin speaker shrink their lift without editing a flag.
+    The spec is kept as written in the corpus manifest: the rule is the identity,
+    the multipliers are derived fresh each build, so recording more of a thin
+    speaker shrinks their lift without editing a flag.
     """
     if not spec or not spec.strip():
         return None
@@ -53,54 +49,39 @@ def balanced_copy_weights(counts: dict, base_copies: int, speakers=None,
                           explicit: dict = None, max_multiplier: float = 0.0):
     """Per-speaker copy counts that EQUALISE each speaker's rows, auto-derived from clip counts.
 
-    WHY. `--real-copies` is one weight for everybody, so a speaker's share of the
-    positive class is whatever accident of recording left them with. The measured
-    consequence is this repo's most stubborn result: the least-recorded speaker can
-    read worse on her OWN training clips than the better-recorded voices do - a
-    corpus-coverage failure, not a threshold one. Presence, not timbre - so derive
-    the weight from the counts instead of carrying it by hand, and let recording
-    more of a thin speaker shrink the correction rather than change a flag.
+    WHY: one flat weight makes a speaker's share of the positive class an accident
+    of recording, and the least-recorded speaker can read worse on her OWN training
+    clips than the better-recorded voices do - a corpus-coverage failure, not a
+    threshold one. So the weight is derived from the counts.
 
-    The rule is EQUALISE UP, never down: the target is the richest speaker the balance
-    set is actually balancing - a speaker carrying an explicit `--real-copies-override`
-    is out of the set, so it cannot be the anchor - at the base weight, and every other
-    named speaker is lifted to it.
-    Cutting the richest speaker back to the thinnest one's row count would balance
-    the table by removing data rather than adding it, and the only measured way to
-    spend one speaker's presence to buy another's came out negative.
+    The rule is EQUALISE UP, never down: the target is the richest speaker the
+    balance set is actually balancing (an explicit `--real-copies-override` takes a
+    speaker OUT of the set, so it cannot be the anchor) at the base weight; cutting
+    the richest speaker back would balance the table by removing data. A hand-set
+    override wins over the derived number - the decision beats the arithmetic.
 
-    `speakers` is None (= every speaker) or an explicit list. A speaker named in
-    `explicit` keeps that weight: a hand-set override is a decision, a derived number is
-    arithmetic, and the decision wins.
+    `max_multiplier` caps the lift (multiple of base_copies) and the cap is
+    REPORTED: a cap below the base weight cannot bind (equalising never cuts),
+    and the note says so instead of claiming a cap that did not apply.
 
-    `max_multiplier` caps the lift (>0, as a multiple of base_copies) and the cap being
-    hit is REPORTED, because "balance these three" silently turning into "one voice
-    dominates the corpus" is the dilution failure above wearing a different hat. A cap
-    below the base weight cannot bind - there is nothing left to cut - and the note says
-    so instead of claiming a cap that did not apply.
-
-    Returns ({speaker: copies}, notes:list[str]) - the notes are for printing: the table
-    is the point of the exercise, so it has to be visible in the run log.
+    Returns ({speaker: copies}, notes:list[str]); the notes go to the run log -
+    the table is the point, so it has to be visible.
     """
     explicit = dict(explicit or {})
     if not counts:
         return {}, ["no real recordings found - nothing to balance"]
     if speakers == "all":
-        # parse_balance_spec's sentinel for "every speaker". Accepted here because
-        # passing it straight through used to iterate it character-wise and raise
-        # about unknown speakers ['a', 'l', 'l'] - a true story from a dry run.
+        # parse_balance_spec's sentinel for "every speaker"; passing it straight
+        # through would iterate it character-wise and raise on unknown speakers.
         speakers = None
     named = list(counts) if speakers is None else [s for s in speakers]
     unknown = [s for s in named if s not in counts]
     if unknown:
         raise ValueError(f"unknown speaker(s) {unknown}; the samples tree has "
                          f"{sorted(counts)}")
-    # The anchor is the richest speaker actually being balanced. An explicit override
-    # takes a speaker OUT of the balance set (it keeps the weight it was given), so
-    # letting one anchor the target produced a note naming a speaker nobody was
-    # balanced to and a row count nobody reaches - the same class of wrong as a label
-    # disagreeing with the number beside it, which the cap note below goes out of its
-    # way to avoid.
+    # The anchor is the richest speaker actually being balanced: an explicit
+    # override takes a speaker OUT of the set, so letting one anchor the target
+    # would name a speaker nobody is balanced to.
     balanced = [s for s in named if s not in explicit]
     if balanced:
         target = max(counts[s] for s in balanced) * base_copies
@@ -121,12 +102,9 @@ def balanced_copy_weights(counts: dict, base_copies: int, speakers=None,
         want = -(-target // n) if n else base_copies      # ceil division
         cap = int(base_copies * max_multiplier) if max_multiplier else 0
         if cap and want > cap:
-            # The cap is clamped at the base weight, because equalising never cuts a
-            # speaker (the rule above). A --balance-max-multiplier below 1.0 therefore
-            # cannot bind at all: the most it can express is "no lift", so the weight
-            # lands on the base and the note must say that. Reporting "capped at 0.5x"
-            # next to a weight of 1.0x is a message contradicting the number beside it -
-            # the same class of wrong as a label that disagrees with its command.
+            # The cap is clamped at the base weight: equalising never cuts a speaker,
+            # so a cap below the base weight cannot bind, and the note must say
+            # "no lift" rather than claim a cap that did not apply.
             capped = max(cap, base_copies)
             if capped == cap:
                 notes.append(f"{s}: capped at {max_multiplier:g}x the base weight - "
@@ -157,59 +135,44 @@ def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10
                       per_speaker_vtlp: dict = None) -> int:
     """Copy real voice recordings to training directory, `copies` times each.
 
-    The copies are NOT redundant. They are written before openwakeword's
-    augmentation stage, which globs this whole directory, so each copy is augmented
-    independently: background noise from `background_paths` at p=0.75, a room
-    impulse response, EQ, pitch shift and gain. AddBackgroundNoise runs
-    mode="per_batch" and the copies are named real_{i}_... so sorting spreads them
-    ~195 apart - every copy lands in a different batch and draws different noise.
-    With augmentation_rounds=3 on top, 10 copies means 30 acoustically distinct
-    variants of each recording, not 30 identical ones.
+    The copies are NOT redundant (openWakeWord path): they are written before the
+    augmentation stage, which globs this whole directory, so each copy is
+    augmented independently (background p=0.75, RIR, EQ, pitch, gain). The
+    real_{i}_ names sort ~195 apart, so with mode="per_batch" every copy lands in
+    a different batch and draws different noise - with augmentation_rounds=3,
+    10 copies means 30 distinct variants. That is why 3 -> 10 in run 10 improved
+    generalisation (held-out run-on detection 53% -> 77%): real clips are ~4% of
+    the positive set but dominate the result - they carry room, mic and delivery
+    characteristics Kokoro does not. Batch class balance is unaffected
+    (batch_n_per_class); this only changes how often a real clip is drawn WITHIN
+    the positive class.
 
-    That is why raising this from 3 to 10 in run 10 improved generalisation instead
-    of overfitting: held-out run-on detection went 53% -> 77%, the largest single
-    effect measured. Real clips are ~4% of the positive set by default and dominate
-    the result, because real speech carries room, mic and delivery characteristics
-    that Kokoro does not.
-
-    Batch class balance is unaffected (batch_n_per_class fixes that), so this only
-    changes how often a real clip is drawn WITHIN the positive class.
-
-    `per_speaker_copies` overrides the weight for individual speakers. The global
-    weight is one lever aimed at everybody; this one is aimed at a voice that is
-    thin in the corpus and undetected on its OWN clips while the well-recorded
-    voices detect fine - the same repetition lever, at one speaker.
+    `per_speaker_copies` aims the same lever at one speaker: the global weight
+    is one number for everybody, this is aimed at a voice that is thin and
+    undetected on its OWN clips.
 
     `per_speaker_vtlp` adds N vocal-tract-length-shifted copies per clip for the
-    named speakers (CHILD_STRETCH["m"] ratios, the same range the synthetic child-
-    lever uses). It exists because raw repetition buys the weak voice presence at
-    the price of diluting the voices that were already detected, while one shifted
-    copy is a NEW acoustic variant of the same recording - diversity is not paid
-    for in row count, which is exactly how CHILD_STRETCH_FRACTION reasons about
-    the synthetic side ("real-clip density drives the result, so buying child
-    coverage by spending adult coverage is not a win").
+    named speakers (CHILD_STRETCH["m"], the synthetic child-lever's range): a
+    shifted copy is a NEW acoustic variant - diversity not paid for in row
+    count, which raw repetition is.
 
-    Recordings may sit loose in the samples directory or be grouped one directory
-    per speaker (samples/speaker1/, samples/speaker2/, ...). Both layouts are
-    picked up, so speakers can be added, re-recorded, or dropped independently.
+    Recordings may sit loose or in one directory per speaker; both layouts are
+    picked up.
 
-    NOTE FOR THE microWakeWord PORT (it used to say raw copies must not port).
-    mww generates its features up front but augments each row per read
-    (background p=0.75, RIR, gain), so N raw copies are N DIFFERENTLY-augmented rows -
-    presence, not repetition. What did forbid the port was the split: mww's
-    train/validation/test partition was per FILE, so N copies of one recording scattered
-    that speaker into all three splits, and mWW selects the weights it ships on
-    validation average_viable_recall - a leak in the selection path, not just in a
-    number. src/train/mww/features.py now splits by recording identity (group_partition), so
-    copies and their shifted variants always land together, and the port is safe: a
-    thin voice moved in the expected direction on the holdout, the same direction
-    the higher global weight measured here.
-
-    What still does NOT port is the PER-SPEAKER raw-copy weight (--real-copies-override):
-    mww's sampling weights are one number per FEATURE SET, and synthetic and real clips
-    share the positives directory, so it cannot aim at one speaker. Per-speaker diversity
-    is what --real-vtlp consumes here (vocal-tract-shifted copies are distinct clips by
-    construction). See the NOTE at the copy call in src/train/mww/corpus.py.
+    NOTE FOR THE microWakeWord PORT: raw copies DO port now. mww augments each
+    row per read, so N copies are N differently-augmented rows - presence, not
+    repetition. What did forbid the port was the split: mww's partition was per
+    FILE, so N copies of one recording scattered that speaker into all three
+    splits, and mWW selects the weights it ships on validation
+    average_viable_recall - a leak in the selection path. features.py now splits
+    by recording identity (group_partition), so copies and their shifted
+    variants always land together, and a thin voice moved in the expected
+    direction on the holdout.
+    What still does NOT port is the PER-SPEAKER raw-copy weight
+    (--real-copies-override): mww's sampling weights are one number per FEATURE
+    SET, and synthetic and real clips share the positives directory, so it
+    cannot aim at one speaker. Per-speaker diversity is what --real-vtlp
+    consumes. See the NOTE at the copy call in src/train/mww/corpus.py.
     """
     real_samples_dir = Path(real_samples_dir)
     if not real_samples_dir.exists():
@@ -233,9 +196,8 @@ def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10
                 data = resample(data, num_samples)
                 data = np.clip(data, -32768, 32767).astype(np.int16)
 
-            # Flatten the path into the destination filename. Two speakers recording
-            # the same phrase produce identical basenames (hey_seeree_0001.wav), so
-            # using wav_file.name alone would silently overwrite one with the other.
+            # Flatten the path: two speakers recording the same phrase produce identical
+            # basenames; wav_file.name alone would silently overwrite one with the other.
             rel = wav_file.relative_to(real_samples_dir)
             stem = "_".join(rel.with_suffix("").parts)
             speaker = rel.parts[0] if len(rel.parts) > 1 else "(loose files)"
@@ -247,15 +209,13 @@ def copy_real_samples(real_samples_dir: Path, output_dir: Path, copies: int = 10
                 dest = output_dir / f"real_{i}_{stem}.wav"
                 scipy.io.wavfile.write(str(dest), 16000, data)
                 count += 1
-            # Shifted variants: N NEW acoustic forms of this recording, named
-            # real_v{i}_ so they sort apart from the raw copies (the augmentation
-            # rounds spread a speaker's clips across batches by sort order, and a
-            # shifted copy draws its own noise/room like a raw copy does).
+            # Shifted variants, named real_v{i}_ so they sort apart from the raw
+            # copies: sort order spreads a speaker's clips across augmentation
+            # batches, and a shifted copy draws its own noise/room like a raw copy.
             for i in range((per_speaker_vtlp or {}).get(speaker, 0)):
                 ratio = float(np.random.uniform(*vtlp_span))
-                # vocal_tract_shift's contract is int16 in, int16 out (it
-                # peak-normalises against 32767). Feeding it float audio returns
-                # near-silence - the dtype bug a holdout probe paid for.
+                # vocal_tract_shift's contract is int16 in/out: feeding it float
+                # audio returns near-silence - a dtype bug a holdout probe paid for.
                 shifted = vocal_tract_shift(
                     np.clip(data, -32768, 32767).astype(np.int16), ratio)
                 dest = output_dir / f"real_v{i}_{ratio:.2f}_{stem}.wav"

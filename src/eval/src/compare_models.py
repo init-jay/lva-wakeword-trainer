@@ -191,8 +191,8 @@ def main():
                              "read as a line. Default: the manifest's value")
     parser.add_argument("--json", dest="json_path", default=None, metavar="PATH",
                         help="Also write every number printed here as machine-readable "
-                             "JSON to PATH (same values, for the run ledger - see "
-                             "improvement.md P0.5). Does not change the report.")
+                             "JSON to PATH (same values, for the run ledger). "
+                             "Does not change the report.")
     args = parser.parse_args()
 
     negatives, _ = ev.load_dir(args.negatives)
@@ -432,7 +432,7 @@ def main():
             print("  room before committing to it.")
 
     # --- machine-readable copy of the same numbers -------------------------------
-    # --json is the hook the run ledger (improvement.md P0.5) reads: the values are
+    # --json is the hook the run ledger reads: the values are
     # exactly what the report above printed, computed with the same functions.
     if args.json_path:
         counts = [c for c in FA_POINTS if c < len(adversarial)]

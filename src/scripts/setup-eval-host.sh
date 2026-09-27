@@ -33,8 +33,8 @@ command -v uv >/dev/null || { echo "ERROR: uv not found - https://docs.astral.sh
 # --- the shared openwakeword clone ----------------------------------------------
 #
 # The .onnx path (backends.OpenWakeWordOnnxBackend) imports openwakeword.model,
-# and P2.4 reuses the clone setup-applesilicon-trainer.sh already makes rather
-# than a second one: it is the same upstream code (all eight of that script's
+# and this host eval env reuses the clone setup-applesilicon-trainer.sh already makes
+# rather than a second one: it is the same upstream code (all eight of that script's
 # patches take train.py as their sole target, so the inference path is
 # unpatched) with the same v0.5.1 embedding models the Dockerfile bakes in.
 if [[ ! -d "$CLONE_DIR/openwakeword" ]]; then
