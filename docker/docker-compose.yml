@@ -60,8 +60,9 @@ services:
       # they are:
       #   data/external/   third-party downloads - huge, fixed, re-fetchable
       #   data/recordings/ the real clips - irreplaceable
-      #   data/corpus/     generated per run, one directory per trainer:
-      #                    .../oww/ from train.py, .../mww/ from mww/corpus.py
+      #   data/corpus/     generated per run, one directory per wake word:
+      #                    .../<word>/oww/ from train.py, .../<word>/mww/ from
+      #                    mww/corpus.py, .../<word>/eval/ for the TTS eval corpora
       # Neither trainer reaches into the other's corpus, which matters because
       # train.py rmtree's its own at the start of every run.
       - ../data:/app/data

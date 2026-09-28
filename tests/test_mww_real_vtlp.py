@@ -129,10 +129,13 @@ def test_parser_refuses_unknown_speaker():
         msg = _expect_refusal("bob=3", samples, "bob")
         # Names the tree it actually checked, so the operator can fix the typo.
         assert "ryan" in msg and "jay" in msg, msg
-    # An ABSENT samples tree still accepts (nothing to validate against -
-    # copy_real_samples would find no recordings anyway, so no drift).
+    # An ABSENT samples tree refuses too: with no real recordings a named
+    # override cannot match anything, and filing the corpus under a shaping
+    # that claims shifted variants it does not carry is exactly the drift the
+    # check exists to refuse (the old skip re-opened that hole).
     with tempfile.TemporaryDirectory() as tmp:
-        assert mww_corpus._parse_real_vtlp("ryan=3", Path(tmp) / "nope") == {"ryan": 3}
+        msg = _expect_refusal("ryan=3", Path(tmp) / "nope", "ryan")
+        assert "no real recordings" in msg, msg
 
 
 # ---------------------------------------------------------------------------

@@ -743,9 +743,15 @@ def _parse_real_copies_override(spec: str, flag: str = "--real-copies-override",
         speaker, n = speaker.strip(), n.strip()
         if not n.isdigit() or int(n) < 1:
             sys.exit(f"ERROR: {flag} {part!r}: copies must be a positive int")
-        if known and speaker not in known:
-            sys.exit(f"ERROR: {flag} names {speaker!r}, but the samples "
-                     f"tree has {sorted(known)} - the override would be inert")
+        if speaker not in known:
+            # Fails loud when the tree is missing or empty too (known == set()):
+            # with no recordings the override cannot match anything, and training
+            # TTS-only while being filed under a config that names a speaker is
+            # the label/config drift this validation exists to refuse.
+            sys.exit(f"ERROR: {flag} names {speaker!r}, but the samples tree at "
+                     f"{samples} has no such speaker "
+                     f"{sorted(known) or '(none - no real recordings)'} - the "
+                     f"override would be inert")
         overrides[speaker] = int(n)
     return overrides
 
