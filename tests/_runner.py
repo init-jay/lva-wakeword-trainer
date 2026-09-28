@@ -1,11 +1,11 @@
 """Plain-python fallback runner for the tests in this directory.
 
-No venv in this repo carries pytest (checked 2026-09: train-applesilicon,
-train-mww-applesilicon, preflight, tts-service), so the suite doubles as
-plain `python tests/test_x.py` runs: every test is a module-level
-`test_*()` function holding plain asserts, which pytest would also collect
-if a venv ever gained the dependency. `run()` executes them all in sorted
-name order and exits non-zero on any failure.
+`make test` runs the suite with pytest from the tests project's own env
+(tests/pyproject.toml); on a machine without uv, every file still runs as
+plain `python tests/test_x.py`: each test is a module-level `test_*()`
+function holding plain asserts, which is also exactly what pytest collects
+unchanged. `run()` executes them all in sorted name order and exits
+non-zero on any failure.
 """
 
 import sys
