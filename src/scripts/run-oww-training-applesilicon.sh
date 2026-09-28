@@ -242,6 +242,21 @@ PYEOF
     fi
 fi
 
+# THE CLONE'S HEAD IS THE SENTINEL, the way the mww run script checks its pinned
+# commit: setup-applesilicon-trainer.sh pins the openwakeword clone to a commit
+# (OWW_COMMIT), and the venv's editable install resolves to whatever HEAD is. A
+# `git pull` or a checkout inside the clone moves the trainer underneath this run -
+# a variable the tag (code + data hash) does not record. Read-only; the repair is
+# the setup script, which re-checks out the pin.
+OWW_COMMIT="368c03716d1e92591906a84949bc477f3a834455"  # keep in step with setup-applesilicon-trainer.sh
+if [[ "$(git -C src/train/openwakeword rev-parse HEAD 2>/dev/null)" != "$OWW_COMMIT" ]]; then
+    echo "ERROR: the openWakeWord clone is at $(git -C src/train/openwakeword rev-parse --short HEAD 2>/dev/null), not $OWW_COMMIT." >&2
+    echo "       The venv's editable install resolves to whatever HEAD is. Re-run" >&2
+    echo "       ./src/scripts/setup-applesilicon-trainer.sh (idempotent) to pin it," >&2
+    echo "       then start this run again." >&2
+    exit 2
+fi
+
 # THE CLONE'S PATCHES ARE WORKING-TREE EDITS, and only setup-applesilicon-trainer.sh
 # applies them (it runs the scripts in patches/). A working-tree reset in the clone -
 # a bare `git checkout .` did exactly this once - silently undoes them, and

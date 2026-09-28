@@ -16,6 +16,16 @@ ENV_DIR="src/train/train-applesilicon"
 CLONE="openwakeword"
 CLONE_DIR="src/train/openwakeword"
 
+# THE PINNED COMMIT of github.com/dscripka/openWakeWord, the same way the mww host
+# route pins OHF-Voice/micro-wake-word (setup-mww-applesilicon-trainer.sh). The clone
+# used to float at upstream main: a `git pull` inside it, or a fresh clone after an
+# upstream move, silently changed the trainer underneath a run - provenance the tag
+# (code + data hash) does not record. The pin is main as of 2026-09-27 (this host's
+# clone, which the b8a141f pipeline-functionality test trained with). Move it
+# deliberately: the patches in src/train/patches/ are written against this commit's
+# anchors, and each only WARNS and exits 0 if an anchor moved.
+OWW_COMMIT="368c03716d1e92591906a84949bc477f3a834455"
+
 if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
     echo "ERROR: this is the Apple Silicon host path; you are on $(uname -s)/$(uname -m)." >&2
     echo "       Everywhere else, use the containers:" >&2
@@ -51,6 +61,18 @@ if [[ ! -d "$CLONE_DIR/.git" ]]; then
     echo "==> cloning openWakeWord into $CLONE_DIR/"
     mkdir -p "$CLONE_DIR/.."
     git clone https://github.com/dscripka/openWakeWord "$CLONE_DIR"
+fi
+# The clone is a shared mutable state: a later pull or checkout moves HEAD, and the
+# venv's editable install silently follows it. Force it back to the pin. Re-running
+# this script is the repair for a moved HEAD too - the run script checks the pin
+# before spending an hour. The working tree carries the patches' edits on purpose
+# (below), and a plain checkout refuses to move HEAD over them ("local changes would
+# be overwritten"), so -f discards them: the patch loop re-applies them immediately
+# after.
+if [[ "$(git -C "$CLONE_DIR" rev-parse HEAD 2>/dev/null)" != "$OWW_COMMIT" ]]; then
+    echo "==> checking out $OWW_COMMIT in $CLONE_DIR/"
+    git -C "$CLONE_DIR" fetch origin
+    git -C "$CLONE_DIR" checkout -f "$OWW_COMMIT"
 fi
 
 # --- patches ----------------------------------------------------------------------
