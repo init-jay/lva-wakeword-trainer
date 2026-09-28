@@ -121,11 +121,11 @@ work anywhere. Training is the one step that cares, and it picks a set of images
 ```bash
 # NVIDIA box. Will not match an AMD card under ROCm - `driver: nvidia` is a CUDA
 # reservation and has no vendor-neutral spelling.
-export COMPOSE_FILE=docker-compose.yml:docker-compose.cuda.yml
+export COMPOSE_FILE=docker/docker-compose.yml:docker/docker-compose.cuda.yml
 
 # Everything else: Apple Silicon, AMD, or a CPU-only Linux box. Multi-arch images,
 # native on arm64, no emulation.
-export COMPOSE_FILE=docker-compose.yml:docker-compose.cpu.yml
+export COMPOSE_FILE=docker/docker-compose.yml:docker/docker-compose.cpu.yml
 ```
 
 Set one per shell, then use the scripts in `src/scripts/` unchanged — they read

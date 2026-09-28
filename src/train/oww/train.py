@@ -46,7 +46,7 @@ SRC_ROOT = REPO_ROOT / "src"
 # ./src/train bind mount would hide an image clone there, leaving nothing on a box
 # with no host clone and a Mac-patched one on a Mac that ran the host setup. So
 # the images clone to /opt/openwakeword, as the mww images do /opt/micro-wake-word,
-# and docker-compose.yml names it here through OWW_CLONE.
+# and docker/docker-compose.yml names it here through OWW_CLONE.
 OWW_CLONE = Path(os.environ.get("OWW_CLONE", SRC_ROOT / "train" / "openwakeword"))
 
 # The plain-path form (`python src/train/oww/train.py`) puts src/train/oww/ on
@@ -597,7 +597,7 @@ def wait_for_kokoro_shutdown(timeout: int = 120):
     # The NATIVE FastAPI ports, not the protocol ones (8899/8901): this wait is
     # about VRAM, and VRAM is held by the in-image FastAPI process, which still
     # listens on 8880 in BOTH kokoro containers - 8881 is only the host-side
-    # mapping of kokoro2's 8880 ("8881:8880" in docker-compose.yml), and the
+    # mapping of kokoro2's 8880 ("8881:8880" in docker/docker-compose.yml), and the
     # names here resolve on the compose network, where both answers come off
     # 8880. The wrapper in front of it holds nothing worth waiting for.
     servers = [("kokoro", 8880), ("kokoro2", 8880)]

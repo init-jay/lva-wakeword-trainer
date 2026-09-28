@@ -277,7 +277,7 @@ if [[ "${KOKORO_URL}" == http://* ]]; then
     echo "       Point KOKORO_URL at one of:" >&2
     echo "         tcp://127.0.0.1:8900   the mlx engine, in-process on this Mac" >&2
     echo "           (uv run --project src/tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900)" >&2
-    echo "         tcp://<box>:8899       the Docker kokoro wrapper (docker-compose.yml)" >&2
+    echo "         tcp://<box>:8899       the Docker kokoro wrapper (docker/docker-compose.yml)" >&2
     exit 1
 fi
 if [[ "${KOKORO_URL}" == mlx://* ]]; then

@@ -1,18 +1,23 @@
+# Pins the compose project name, so container and network names stay
+# lva-wakeword-trainer_* no matter which directory compose is run from -
+# without this they are derived from the cwd's basename.
+name: lva-wakeword-trainer
+
 x-kokoro: &kokoro
   build:
-    context: .
+    context: ..
     dockerfile: docker/Dockerfile.kokoro
     args:
       KOKORO_IMAGE: ${KOKORO_IMAGE:-ghcr.io/remsky/kokoro-fastapi-cpu:v0.8.1}
 
 x-piper: &piper
   build:
-    context: .
+    context: ..
     dockerfile: docker/Dockerfile.piper
   volumes:
     # Voices are downloaded on demand and get large - libritts_r alone carries 904
     # speakers - so they persist here rather than in the container.
-    - ./data/piper_voices:/data
+    - ../data/piper_voices:/data
 
 services:
   kokoro:
@@ -48,7 +53,7 @@ services:
 
   mww-trainer:
     build:
-      context: .
+      context: ..
       dockerfile: docker/Dockerfile.mww.cuda
     volumes:
       # ONE MOUNT COVERS THE INPUTS, and data/ separates them by how replaceable
@@ -59,26 +64,26 @@ services:
       #                    .../oww/ from train.py, .../mww/ from mww/corpus.py
       # Neither trainer reaches into the other's corpus, which matters because
       # train.py rmtree's its own at the start of every run.
-      - ./data:/app/data
+      - ../data:/app/data
       # Trained models and their manifests. A SEPARATE TREE from the corpus, so the
       # rmtree above cannot reach a model even in principle.
-      - ./output:/app/output
-      - ./src/recipe:/app/src/recipe:ro       # the loader
+      - ../output:/app/output
+      - ../src/recipe:/app/src/recipe:ro       # the loader
       # The data itself. The loader resolves it at <repo-root>/recipes, and inside
       # this image the repo root is /app - so without this mount the trainers would
       # import cleanly and then fail to find a single phrase list.
-      - ./recipes:/app/recipes:ro
+      - ../recipes:/app/recipes:ro
       # SOURCE IS MOUNTED, NOT BAKED IN. The images COPY src/train/, src/tts-service/ and
       # src/recipe/ so their build-time import check has something to check, and these mounts shadow
       # that copy at runtime - so editing a trainer or a script does not mean
       # rebuilding a CUDA image. Read-only: the trainers read their source, they
       # never write it.
-      - ./src/train:/app/src/train:ro
+      - ../src/train:/app/src/train:ro
       # The TTS protocol client (src/train/corpus's sys.path bootstrap finds it at
       # /app/src/tts-service/tts_protocol). The trainers carry no engine code - the
       # engines are the `kokoro` and `piper` services. src/tts-service/README.md.
-      - ./src/tts-service:/app/src/tts-service:ro
-      - ./src/scripts:/app/src/scripts:ro
+      - ../src/tts-service:/app/src/tts-service:ro
+      - ../src/scripts:/app/src/scripts:ro
     environment:
       # /app/src is the import root: the repo modules (train, recipe, eval) import by
       # their pre-reorg names, and they are mounted there, not installed.
@@ -94,26 +99,26 @@ services:
 
   oww-trainer:
     build:
-      context: .
+      context: ..
       dockerfile: docker/Dockerfile.oww.cuda
     volumes:
       # Same split as the mww service above: data/ is inputs and generated corpus,
       # output/ is models. train.py rmtree's data/corpus/<wake_word>/oww/ every run.
-      - ./data:/app/data
-      - ./output:/app/output
-      - ./src/recipe:/app/src/recipe:ro
+      - ../data:/app/data
+      - ../output:/app/output
+      - ../src/recipe:/app/src/recipe:ro
       # The data, at the path the loader derives from its own location (see the
       # mww service above for why the mount is not optional).
-      - ./recipes:/app/recipes:ro
+      - ../recipes:/app/recipes:ro
       # SOURCE IS MOUNTED, NOT BAKED IN. The images COPY src/train/, src/tts-service/ and
       # src/recipe/ so their build-time import check has something to check, and these mounts shadow
       # that copy at runtime - so editing a trainer or a script does not mean
       # rebuilding a CUDA image. Read-only: the trainers read their source, they
       # never write it.
-      - ./src/train:/app/src/train:ro
+      - ../src/train:/app/src/train:ro
       # The TTS protocol client - same mount as mww-trainer above.
-      - ./src/tts-service:/app/src/tts-service:ro
-      - ./src/scripts:/app/src/scripts:ro
+      - ../src/tts-service:/app/src/tts-service:ro
+      - ../src/scripts:/app/src/scripts:ro
     environment:
       # Import root, same as the mww service above.
       - PYTHONPATH=/app/src

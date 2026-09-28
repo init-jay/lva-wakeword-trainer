@@ -63,14 +63,14 @@ guess a wake word from the repo's existing `hey_seeree` files.
 `make help` is the entry point: the Makefile at the repo root carries the commands
 a human actually types, each annotated with what it costs (minutes, GB, TTS).
 
-On the CUDA box: `export COMPOSE_FILE=docker-compose.yml:docker-compose.cuda.yml`.
+On the CUDA box: `export COMPOSE_FILE=docker/docker-compose.yml:docker/docker-compose.cuda.yml`.
 NVIDIA only - `driver: nvidia` does not match an AMD card under ROCm.
 
-Anywhere else, including a Mac: `docker-compose.yml:docker-compose.cpu.yml`, which
+Anywhere else, including a Mac: `docker/docker-compose.yml:docker/docker-compose.cpu.yml`, which
 swaps both trainers for multi-arch CPU images. Slower, and the only in-Docker
 option on Apple Silicon - Docker Desktop passes no Metal
-device through, so there is no MPS image to select and `docker-compose.mps.yml`
-stays empty. Give Docker Desktop enough RAM first: the feature array is
+device through, so there is no MPS image to select. Give Docker
+Desktop enough RAM first: the feature array is
 mmap'd at multi-GB scale, and running short of memory page-faults rather than
 erroring.
 `SKIP_BUILD=1` on either training script reuses the image; needed after a

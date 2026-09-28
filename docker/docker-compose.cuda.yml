@@ -1,10 +1,10 @@
 # CUDA overlay - NVIDIA only. Apply it on the training server:
 #
-#     docker compose -f docker-compose.yml -f docker-compose.cuda.yml up -d kokoro kokoro2
+#     docker compose -f docker/docker-compose.yml -f docker/docker-compose.cuda.yml up -d kokoro kokoro2
 #
 # Or set it once for the shell, so plain `docker compose` picks both up:
 #
-#     export COMPOSE_FILE=docker-compose.yml:docker-compose.cuda.yml
+#     export COMPOSE_FILE=docker/docker-compose.yml:docker/docker-compose.cuda.yml
 #
 # WHY AN OVERLAY AND NOT A FLAG. A `deploy.resources.reservations.devices` block
 # cannot be made conditional inside one compose file - there is no falsy value that

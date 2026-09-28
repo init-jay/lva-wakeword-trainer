@@ -26,8 +26,8 @@ directional, same-day stage probes are the evidence.
 
 Three environments, all measured with `time` on the same wake word:
 
-- **CUDA box** — RTX 3090, 20 GB RAM, 4 cores, `docker-compose.cuda.yml`
-- **Mac, Docker** — M1 Max, 64 GB, 10 cores, `docker-compose.cpu.yml`, no GPU
+- **CUDA box** — RTX 3090, 20 GB RAM, 4 cores, `docker/docker-compose.cuda.yml`
+- **Mac, Docker** — M1 Max, 64 GB, 10 cores, `docker/docker-compose.cpu.yml`, no GPU
 - **Mac, host** — same Mac, no container: `src/scripts/*-applesilicon.sh`
 
 | Step | CUDA box | Mac, Docker | Mac, host |
@@ -209,7 +209,7 @@ mechanism paragraph was written from a `top` reading of a different run.
 device through, so a torch build asking for `mps` inside one finds nothing and
 falls back to CPU — silently, which is worse than failing — and no compose overlay
 can say otherwise (there is no device reservation to write, unlike
-`docker-compose.cuda.yml`'s `driver: nvidia`). Hence no `.mps` overlay at all. The
+`docker/docker-compose.cuda.yml`'s `driver: nvidia`). Hence no `.mps` overlay at all. The
 host is the only route to Metal; MPS/CoreML *training* there was evaluated and
 abandoned, and `tensorflow-metal` does not pair with TF 2.21.0, so microWakeWord
 has no Metal path at all. Kokoro is the one measured exception, below.

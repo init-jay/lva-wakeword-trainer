@@ -15,7 +15,7 @@ requires-python = ">=3.12,<3.13"
 #
 # A SEPARATE ENVIRONMENT FROM train-applesilicon, for the same reason the two
 # trainer images cannot share one: mWW requires numpy>=2, openWakeWord pins
-# numpy<2. See docker-compose.yml's mww-trainer comment.
+# numpy<2. See docker/docker-compose.yml's mww-trainer comment.
 #
 # WHAT RUNS WHERE ON A MAC:
 #   corpus   the in-process Piper engine uv project

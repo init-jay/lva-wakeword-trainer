@@ -35,7 +35,7 @@ if str(REPO_ROOT / "src") not in sys.path:
 
 import recipe  # noqa: E402
 
-COMPOSE_FILES = [REPO_ROOT / "docker-compose.yml",
+COMPOSE_FILES = [REPO_ROOT / "docker" / "docker-compose.yml",
                  REPO_ROOT / "src" / "eval" / "docker-compose.yml"]
 DOCKERFILES = sorted((REPO_ROOT / "docker").glob("Dockerfile.*")) + \
     [REPO_ROOT / "src" / "eval" / "Dockerfile"]

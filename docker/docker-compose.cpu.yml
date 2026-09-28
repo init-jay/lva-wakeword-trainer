@@ -1,6 +1,6 @@
 # CPU overlay - point both trainers at their CPU images. Any architecture.
 #
-#     export COMPOSE_FILE=docker-compose.yml:docker-compose.cpu.yml
+#     export COMPOSE_FILE=docker/docker-compose.yml:docker/docker-compose.cpu.yml
 #     docker compose build oww-trainer mww-trainer
 #
 # GIVE DOCKER ENOUGH MEMORY FIRST. openWakeWord's negative feature array is 17.28 GB
