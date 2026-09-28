@@ -42,7 +42,7 @@ Then, one directory per speaker:
 
 ```bash
 uv run record_samples.py \
-  --wake-word "hey seeree" \
+  --wake-word "<wake word>" \
   --device 0 \
   --output-dir data/recordings/samples/speaker1
 ```

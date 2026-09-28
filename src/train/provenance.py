@@ -170,7 +170,7 @@ def run_tag(wake_word, target=None, config=None, fallback=None):
 
 def main():
     p = argparse.ArgumentParser(description="Identify a training run by code + data (+ config)")
-    p.add_argument("--wake-word", default="hey seeree")
+    p.add_argument("--wake-word", required=True)
     p.add_argument("--tag", action="store_true", help="print only the tag")
     p.add_argument("--target", choices=TARGETS, default=None,
                    help="scope the corpus half to this trainer's tree")

@@ -7,7 +7,7 @@
 #     cd src/eval
 #     docker compose build                  # first time, or after Dockerfile changes
 #     docker compose run --rm eval python -m eval.eval_model \
-#         --model output/hey_seeree/oww/<tag>.onnx
+#         --model output/<wake_word>/oww/<tag>.onnx
 #
 # The explicit image name keeps the one this step had while it lived in the base
 # file, so a machine that already has it does not rebuild; without it compose

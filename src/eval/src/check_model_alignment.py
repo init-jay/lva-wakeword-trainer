@@ -44,14 +44,14 @@ unlike `check_alignment.py` this does not run on a bare host. The eval image has
 everything the .onnx path needs and runs on the Mac:
 
     docker compose run --rm eval python -m eval.check_model_alignment \\
-        --model output/hey_seeree/oww/hey_seeree_705c23b.onnx
+        --model output/<wake_word>/oww/<wake_word>_<commit>.onnx
 
 A .tflite needs ai-edge-litert, which the eval image does not carry - it uses the
 deployment runtime's bundled interpreter instead - so use the trainer image for that.
 
 Usage:
     python -m eval.check_model_alignment \\
-        --model output/hey_seeree/oww/hey_seeree_705c23b.onnx
+        --model output/<wake_word>/oww/<wake_word>_<commit>.onnx
     python -m eval.check_model_alignment --model M \\
         --positives data/recordings/holdout/speaker1
     python -m eval.check_model_alignment --model M --step 20 --max-gap 600

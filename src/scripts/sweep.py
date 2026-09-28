@@ -69,7 +69,7 @@ system python3 (3.14.6) does not - run this script with a venv python.
 
 YAML SHAPE
 
-    wake_word: "hey seeree"
+    wake_word: "<wake word>"
     target: mww                # or oww
     python: <path>             # optional; the trainer venv python
     base_seed: 42              # optional; seeds are base + 1000*point + repeat

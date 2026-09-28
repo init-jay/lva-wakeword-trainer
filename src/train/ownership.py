@@ -5,7 +5,7 @@ under output/ therefore lands root-owned on the host, and the first thing that
 touches it afterwards fails:
 
     cp: cannot create regular file
-        'output/hey_seeree/oww/hey_seeree_<tag>.onnx': Permission denied
+        'output/<wake_word>/oww/<wake_word>_<tag>.onnx': Permission denied
 
 That is the tagging copy in run-oww-training.sh, on the host, immediately after a
 successful run - the most annoying possible moment. The same wall is hit collecting

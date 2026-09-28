@@ -1,8 +1,8 @@
 """Check a TTS server in five seconds: list its catalog, or render through it.
 
     python -m tts_protocol --server tcp://127.0.0.1:8899 --list-voices
-    python -m tts_protocol --server tcp://127.0.0.1:8899 --voice af_bella -o hey.wav "hey seeree"
-    python -m tts_protocol --server tcp://127.0.0.1:8898 --voice en_US-lessac-medium --speaker 12 -o s12.wav "hey seeree"
+    python -m tts_protocol --server tcp://127.0.0.1:8899 --voice af_bella -o hey.wav "<wake word>"
+    python -m tts_protocol --server tcp://127.0.0.1:8898 --voice en_US-lessac-medium --speaker 12 -o s12.wav "<wake word>"
     python -m tts_protocol --server tcp://127.0.0.1:8899 --voice af_bella --batch 5 --out-dir out/ "a" "b" "c" "d" "e"
 
 One line per clip, then a measured ms/clip summary - the same number the

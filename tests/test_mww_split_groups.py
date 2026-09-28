@@ -43,7 +43,7 @@ from train.mww.split import (group_partition, partition_indices,  # noqa: E402
                              recording_identity)
 
 
-def _names(speaker="jen", base="hey_seeree_0012", copies=5, variants=3):
+def _names(speaker="jen", base="okay_jarvis_0012", copies=5, variants=3):
     raw = [f"real_{i}_{speaker}_{base}.wav" for i in range(copies)]
     vtlp = [f"real_v{i}_1.{20 + i}_{speaker}_{base}.wav" for i in range(variants)]
     return raw + vtlp
@@ -52,7 +52,7 @@ def _names(speaker="jen", base="hey_seeree_0012", copies=5, variants=3):
 def test_copies_and_variants_share_one_identity():
     names = _names()
     ids = {recording_identity(n) for n in names}
-    assert ids == {"jen_hey_seeree_0012.wav"}, ids
+    assert ids == {"jen_okay_jarvis_0012.wav"}, ids
     # The copy index and the variant's ratio must BOTH be stripped: leaving either in is
     # a silent no-op - every file is its own group again and the leak is back.
     one = ["real_0_jay_x.wav", "real_9_jay_x.wav", "real_v2_1.25_jay_x.wav"]
@@ -101,7 +101,7 @@ def test_no_recording_straddles_the_split():
     names = []
     for speaker in ("jay", "jen", "ryan"):
         for clip in range(40):
-            names += _names(speaker=speaker, base=f"hey_seeree_{clip:04d}",
+            names += _names(speaker=speaker, base=f"okay_jarvis_{clip:04d}",
                             copies=10, variants=4)
     part, by_group = _split_of(names)
     # "dropped" is the third legal value (a held-out recording's surplus copies); the
@@ -123,7 +123,7 @@ def test_the_holdout_is_broad_and_shallow():
     # identity-aware runs scattered across repeats of one configuration, and one collapsed).
     names = []
     for clip in range(100):
-        names += _names(base=f"hey_seeree_{clip:04d}", copies=10, variants=0)
+        names += _names(base=f"okay_jarvis_{clip:04d}", copies=10, variants=0)
     part, by_group = _split_of(names, split_count=0.1)
     groups = set(by_group)
     held = {g for g, s in by_group.items() if s & {"validation", "test"}}
@@ -140,7 +140,7 @@ def test_the_holdout_is_broad_and_shallow():
 def test_holdout_copies_keeps_more_rows_when_asked():
     names = []
     for clip in range(50):
-        names += _names(base=f"hey_seeree_{clip:04d}", copies=5, variants=0)
+        names += _names(base=f"okay_jarvis_{clip:04d}", copies=5, variants=0)
     part, by_group = _split_of(names, split_count=0.2, holdout_copies=3)
     held = [g for g, s in by_group.items() if s & {"validation", "test"}]
     per = [sum(1 for n in names if recording_identity(n) == g
@@ -181,8 +181,8 @@ def test_partition_indices_address_the_names_they_came_from():
     still look right because the totals are unchanged. That is why the correspondence is
     pinned here rather than the counts.
     """
-    names = [f"real_{i}_jay_hey_seeree_{i:04d}.wav" for i in range(60)]
-    names += [f"vtlp1.20_jen_hey_seeree_{i:04d}.wav" for i in range(60)]
+    names = [f"real_{i}_jay_okay_jarvis_{i:04d}.wav" for i in range(60)]
+    names += [f"vtlp1.20_jen_okay_jarvis_{i:04d}.wav" for i in range(60)]
     assignment = group_partition(names, 0.1)
     by_mode, dropped = partition_indices(names, 0.1)
 
@@ -211,7 +211,7 @@ def test_extra_copies_of_a_held_out_recording_come_back_by_name():
     A caller that forgot to handle them would silently train on a held-out recording, and
     nothing downstream would notice: the counts still add up.
     """
-    base = [f"real_{i}_jay_hey_seeree_{i:04d}.wav" for i in range(60)]
+    base = [f"real_{i}_jay_okay_jarvis_{i:04d}.wav" for i in range(60)]
 
     def with_copies(src):
         """`base` plus five extra copies of the recording `src` is a copy of."""
@@ -243,7 +243,7 @@ def test_a_name_the_filesystem_cannot_decode_still_partitions():
     so the split was the first place it could fail - and it failed the whole feature build.
     `os.fsencode` round-trips the original bytes instead.
     """
-    odd = "real_0_jay_hey_seeree_\udcff\xfe.wav"      # not encodable as utf-8
+    odd = "real_0_jay_okay_jarvis_\udcff\xfe.wav"      # not encodable as utf-8
     try:
         odd.encode()
     except UnicodeEncodeError:
@@ -251,7 +251,7 @@ def test_a_name_the_filesystem_cannot_decode_still_partitions():
     else:
         raise AssertionError("fixture name must be unencodable or this proves nothing")
 
-    names = [odd] + [f"real_{i}_jay_hey_seeree_{i:04d}.wav" for i in range(40)]
+    names = [odd] + [f"real_{i}_jay_okay_jarvis_{i:04d}.wav" for i in range(40)]
     part = group_partition(names, 0.1)                 # raised before the fix
     assert part[odd] in ("train", "validation", "test", "dropped"), part[odd]
 

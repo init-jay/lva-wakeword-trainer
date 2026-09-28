@@ -14,8 +14,8 @@
 #      + collection: the three shipped files, commit-tagged, in output/<wake>/mww/
 #
 # Usage:
-#   ./src/scripts/run-mww-training.sh "hey seeree"
-#   ./src/scripts/run-mww-training.sh "hey seeree" --training-steps 20000
+#   ./src/scripts/run-mww-training.sh "<wake word>"
+#   ./src/scripts/run-mww-training.sh "<wake word>" --training-steps 20000
 #
 # Extra arguments are passed through to train.mww.train.
 #

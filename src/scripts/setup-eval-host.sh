@@ -138,7 +138,7 @@ echo "  eval_model.py / compare_models.py import OK in the plain-path form"
 
 echo
 echo "==> ready. Score (from the repo root, no Docker):"
-echo "      $ENV_DIR/.venv/bin/python $ENV_DIR/src/eval_model.py --model output/hey_seeree/oww/hey_seeree.onnx"
+echo "      $ENV_DIR/.venv/bin/python $ENV_DIR/src/eval_model.py --model output/<wake_word>/oww/<wake_word>.onnx"
 echo "      $ENV_DIR/.venv/bin/python $ENV_DIR/src/compare_models.py --models <new> <previous-best>"
 echo
 echo "    The container remains the route on a CUDA box or an eval-only machine:"

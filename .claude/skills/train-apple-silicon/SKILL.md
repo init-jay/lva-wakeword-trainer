@@ -51,7 +51,7 @@ protocol, against the same engines the corpus uses - not for training.)
 uv run --project src/tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900   # terminal 2
 uv run --project src/tts-service/engines/piper python -m piper_engine --port 8898              # terminal 3, only if --piper-fraction > 0
 
-./src/scripts/run-oww-training-applesilicon.sh "hey seeree" --piper-fraction 0.3
+./src/scripts/run-oww-training-applesilicon.sh "<wake word>" --piper-fraction 0.3
 ```
 
 `KOKORO_URL` defaults to the mlx engine (`tcp://127.0.0.1:8900`); `--skip-corpus`
@@ -138,7 +138,7 @@ One quirk, checked and harmless: `onnx2tf` re-saves the input `.onnx`
 ./src/scripts/setup-mww-applesilicon-trainer.sh   # once per machine; idempotent
 uv run --project src/tts-service/engines/piper python -m piper_engine --port 8898      # in another terminal
 uv run --project src/tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900  # another, for the default 30% mix
-./src/scripts/run-mww-training-applesilicon.sh "hey seeree"
+./src/scripts/run-mww-training-applesilicon.sh "<wake word>"
 ```
 
 `KOKORO_FRACTION=0` (or `--kokoro-fraction 0`) runs the historical all-Piper

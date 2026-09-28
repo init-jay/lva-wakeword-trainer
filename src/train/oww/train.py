@@ -3,12 +3,12 @@
 Train OpenWakeWord model using Kokoro TTS synthetic voices + real recordings.
 
 Usage:
-    python train.py --wake-word "hey seeree"
+    python train.py --wake-word "<wake word>"
     python train.py --wake-word "okay jarvis" --samples-per-voice 300 --training-steps 75000
 
 Docker:
     docker compose run --rm oww-trainer python -m train.oww.train \\
-        --wake-word "hey seeree"
+        --wake-word "<wake word>"
 """
 
 import argparse
@@ -174,15 +174,15 @@ def generate_runon_samples(pool: "KokoroPool", voices: list, output_dir: Path,
                            batch: int = 16):
     """Positives where the phrase runs straight into a command.
 
-    The model measured in the tuning log detects 97% of "hey seeree, what's the time?"
-    (comma, so the TTS puts a pause in) but only 83% of "hey seeree what's the time?"
+    The model measured in the tuning log detects 97% of "<wake word>, what's the time?"
+    (comma, so the TTS puts a pause in) but only 83% of "<wake word> what's the time?"
     spoken as one breath. Splicing a command onto a separately-recorded phrase does not
     reproduce that - the final syllable has to actually be coarticulated into the next
     word, which means rendering the whole thing as one utterance.
 
     The clip is then CUT shortly after the phrase, and that is the careful part.
     create_fixed_size_clip aligns the END OF THE ARRAY with the end of the detection
-    window, so a whole "hey seeree what's the time" would land the wake word ~1.5s
+    window, so a whole "<wake word> what's the time" would land the wake word ~1.5s
     before the window end - outside the window once truncated to 2s. Cutting just past
     the phrase leaves the command's onset as trailing context and keeps the phrase
     where the window expects it.
@@ -469,7 +469,7 @@ def create_config(wake_word: str, n_samples: int, training_steps: int,
     # (train.py:650-651), which creates ONE level - fatal now that it is three deep:
     #
     #     FileNotFoundError: [Errno 2] No such file or directory:
-    #         '/app/output/hey_seeree/oww'
+    #         '/app/output/<wake_word>/oww'
     #
     # It fails inside the augmentation subprocess, after corpus generation has
     # already run, so the cost is the whole generation stage. corpus_dir needs no
@@ -513,7 +513,7 @@ def create_config(wake_word: str, n_samples: int, training_steps: int,
     # The --set escape hatch, applied LAST: it overrides every key set above,
     # so a sweep runner needs no per-knob plumbing for anything in this config.
     # Values parse as JSON, falling back to the raw string when that fails
-    # ("--set target_phrase=hey seeree" keeps the spaces). Whatever lands here
+    # ("--set target_phrase=<wake word>" keeps the spaces). Whatever lands here
     # is part of the resolved config, so _tag_input hashes it into the run tag
     # and it is filed verbatim in <tag>.config.json - a --set point is a
     # first-class sweep point, named like the explicit flags.
@@ -752,7 +752,7 @@ def _parse_real_copies_override(spec: str, flag: str = "--real-copies-override")
 
 def main():
     parser = argparse.ArgumentParser(description="Train a custom OpenWakeWord model")
-    parser.add_argument("--wake-word", default="hey seeree", help="Wake word/phrase to train")
+    parser.add_argument("--wake-word", required=True, help="Wake word/phrase to train")
     parser.add_argument("--samples-per-voice", type=int, default=300,
                         help="Samples per Kokoro voice (default: %(default)s). Raised from\n                             200 when the recipe grew: 59 negative phrases and 60\n                             run-on command/speed combinations need more renderings each\n                             to keep per-item density up.")
     parser.add_argument("--training-steps", type=int, default=50000,
@@ -1139,7 +1139,7 @@ def main():
 
     # The voices that render THIS phrase wrong are per-word data, so they come
     # from the recipe rather than from a table in this file: how a voice says
-    # "seeree" says nothing about how it says another phrase. This is the same
+    # <wake word> says nothing about how it says another phrase. This is the same
     # hard stop build_negative_phrases makes further down, hit earlier - a word
     # with no recipe cannot produce a corpus that can be measured either.
     recipe = load_recipe_or_exit(wake_word)

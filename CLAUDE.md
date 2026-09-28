@@ -32,7 +32,7 @@ each **STOP** until the human has done their part.
    `cd src/preflight && uv run test_model.py --model ../../output/<x>/mww/<tag>.json`
 
 Ask which wake word and which target before starting anything expensive. Do not
-guess a wake word from the repo's existing `hey_seeree` files.
+guess a wake word from the repo's existing `<wake word>` files (the worked example's recipe and any output you have generated).
 
 ## What you cannot do
 

@@ -28,7 +28,7 @@ BASE_NEGATIVES = [
 ]
 
 # Commands used two ways: appended to the wake word to build run-on positives
-# ("hey seeree what's the time"), and rendered on their own as negatives.
+# ("<word> what's the time"), and rendered on their own as negatives.
 #
 # Both halves are needed. The positives teach that the phrase can be followed
 # immediately by speech; without the matching negatives the model can learn the

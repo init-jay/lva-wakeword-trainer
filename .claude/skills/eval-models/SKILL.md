@@ -62,7 +62,7 @@ uv run --project src/tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine 
 # from the repo root, plain-path form
 src/eval/.venv/bin/python src/eval/src/generate_negatives.py --url tcp://127.0.0.1:8900
 src/eval/.venv/bin/python src/eval/src/generate_positives.py \
-    --url tcp://127.0.0.1:8900 --wake-word "hey seeree"
+    --url tcp://127.0.0.1:8900 --wake-word "<wake word>"
 ```
 
 In the container, the eval project cannot reach the Mac's mlx engine by a name
@@ -75,7 +75,7 @@ name to `host-gateway`, which Linux needs):
 docker compose run --rm eval python -m eval.generate_negatives \
     --url tcp://host.docker.internal:8900
 docker compose run --rm eval python -m eval.generate_positives \
-    --url tcp://host.docker.internal:8900 --wake-word "hey seeree"
+    --url tcp://host.docker.internal:8900 --wake-word "<wake word>"
 ```
 
 On the training box, `docker compose up -d kokoro` instead (with the GPU
@@ -126,16 +126,16 @@ so the invocation is the plain-path form, from the repo root:
 
 # the four gates, one model
 src/eval/.venv/bin/python src/eval/src/eval_model.py \
-    --model output/hey_seeree/oww/hey_seeree_705c23b.onnx
+    --model output/<wake_word>/oww/<wake_word>_<tag>.onnx
 
 # is the new run better than the last one
 src/eval/.venv/bin/python src/eval/src/compare_models.py \
-    --models output/hey_seeree/oww/<new>.onnx output/hey_seeree/oww/<previous-best>.onnx
+    --models output/<wake_word>/oww/<new>.onnx output/<wake_word>/oww/<previous-best>.onnx
 
 # openWakeWord candidate against the microWakeWord build
 src/eval/.venv/bin/python src/eval/src/compare_models.py --models \
-    output/hey_seeree/oww/hey_seeree_705c23b.onnx \
-    output/hey_seeree/mww/hey_seeree_705c23b.json
+    output/<wake_word>/oww/<wake_word>_<tag>.onnx \
+    output/<wake_word>/mww/<wake_word>_<tag>.json
 
 # choosing a deployment operating point for one model
 src/eval/.venv/bin/python src/eval/src/compare_models.py --models M --sweep
@@ -143,7 +143,7 @@ src/eval/.venv/bin/python src/eval/src/compare_models.py --models M --sweep
 # CONTAINER - module form, from src/eval/
 # the four gates, one model
 docker compose run --rm eval python -m eval.eval_model \
-    --model output/hey_seeree/oww/hey_seeree_705c23b.onnx
+    --model output/<wake_word>/oww/<wake_word>_<tag>.onnx
 
 # the other three commands, with `docker compose run --rm eval python -m
 # eval.compare_models` in place of `src/eval/.venv/bin/python src/eval/src/compare_models.py`

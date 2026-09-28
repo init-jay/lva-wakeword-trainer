@@ -131,7 +131,7 @@ def kokoro_tts_timed(kokoro_url: str, voice: str, text: str, speed: float):
 def kokoro_tts_batch(kokoro_url: str, voice: str, texts: list, speed: float):
     """Render several utterances in ONE request and split them apart.
 
-    Measured against a Kokoro-FastAPI server: a single "hey seeree" request costs
+    Measured against a Kokoro-FastAPI server: a single short-phrase request costs
     ~119 ms of fixed overhead plus ~42 ms per second of audio, so for a phrase under
     a second, THREE QUARTERS of the request is overhead. Batching amortises it.
 

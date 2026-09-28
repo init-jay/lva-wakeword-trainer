@@ -195,17 +195,17 @@ for bad in ("http://127.0.0.1:8880", "127.0.0.1:8900", "mlx://"):
 # dict - a dict makes phrase_end_sample's timestamps[:len(...)] slice KeyError.
 # Pre-existing at e5cb5f0: this check had never been green.
 assert phrase_end_sample(
-    [{"word": "hey", "start_time": 0.0, "end_time": 0.1},
-     {"word": "seeree", "start_time": 0.1, "end_time": 0.3}], "hey seeree") == 4800
+    [{"word": "okay", "start_time": 0.0, "end_time": 0.1},
+     {"word": "jarvis", "start_time": 0.1, "end_time": 0.3}], "okay jarvis") == 4800
 print("  tts-protocol OK: client URL policy + phrase_end_sample")
 PY
 
 echo
 echo "==> ready. Train with:"
-echo "      ./src/scripts/run-oww-training-applesilicon.sh \"hey seeree\" --skip-corpus"
+echo "      ./src/scripts/run-oww-training-applesilicon.sh \"<wake word>\" --skip-corpus"
 echo
 echo "    To generate a corpus too, start the engines first (each in its own"
 echo "    terminal - the run script's probes tell you which one is missing):"
 echo "      uv run --project src/tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900"
 echo "      uv run --project src/tts-service/engines/piper python -m piper_engine --port 8898"
-echo "      ./src/scripts/run-oww-training-applesilicon.sh \"hey seeree\"  # add --piper-fraction 0.3 for the Piper mix"
+echo "      ./src/scripts/run-oww-training-applesilicon.sh \"<wake word>\"  # add --piper-fraction 0.3 for the Piper mix"

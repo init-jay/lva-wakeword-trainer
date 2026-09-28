@@ -5,7 +5,7 @@ Not the same directory as the openWakeWord corpus: train.py rmtree's its own
 corpus at the start of every run. The build code is shared (corpus/) - same
 trimming, child-range copies, audited voices, phrase texts, speed grid.
 
-    python -m train.mww.corpus --wake-word "hey seeree" \
+    python -m train.mww.corpus --wake-word "<wake word>" \
         --piper-url tcp://127.0.0.1:8898 [--kokoro-url ... --kokoro-fraction 0.3]
 
 --piper-url is a comma-separated FLEET: the corpus shards BY VOICE, each model
@@ -103,7 +103,7 @@ def _parse_real_vtlp(spec: str, samples_dir, flag: str = "--real-vtlp") -> dict:
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--wake-word", default="hey seeree")
+    p.add_argument("--wake-word", required=True)
     p.add_argument("--piper-url", default=os.environ.get("PIPER_URL", "tcp://127.0.0.1:8898"),
                    help="Piper protocol server(s), tcp:// URLs, comma-separated "
                         "to run a fleet (sharded by VOICE - every model pinned "

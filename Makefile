@@ -8,13 +8,22 @@
 # measured; "needs TTS" means the uv engines in src/tts-service/engines/, in
 # another terminal, per the run-script headers.
 
-WAKE ?= hey seeree
+# Required: the pipeline is wakeword-agnostic and the word is the recipe's name -
+# make WAKE="your wake word" <target>. There is deliberately no default: one with
+# the example word in it would make main look general while carrying one word.
+WAKE ?=
 PY_OWW := src/train/train-applesilicon/.venv/bin/python
 PY_MWW := src/train/train-mww-applesilicon/.venv/bin/python
 
 .DEFAULT_GOAL := help
 
-.PHONY: help smoke-oww smoke-mww test fleet eval eval-docker corpus-oww corpus-mww render-voice-holdout
+.PHONY: help smoke-oww smoke-mww test fleet eval eval-docker corpus-oww corpus-mww render-voice-holdout .WAKE-CHECK
+
+# Order-only prerequisite of every WAKE-consuming target: a recipe exit is
+# reported as "Error <n>" and makes stop with its own exit 2, so the guard is
+# one line here and a prereq line at each target rather than a test at each.
+.WAKE-CHECK:
+	@test -n "$(WAKE)" || { echo "usage: make WAKE=\"<wake word>\" <target> - the word is required (recipes/<word>.yaml must exist)"; exit 1; }
 
 help:
 	@echo "make help           this list"
@@ -38,18 +47,18 @@ help:
 	@echo "                    seconds of Kokoro, into data/corpus/eval/voice_holdout_tts;"
 	@echo "                    the existing corpora and the real-speaker gates stay untouched"
 	@echo ""
-	@echo "WAKE overrides the wake word (default: $(WAKE))."
+	@echo "WAKE=\"<wake word>\" is required for the targets that take it."
 
 # The full pipeline at minified size: reuse the corpus, recompute the features,
 # train 200 steps, do the real tflite conversion. The model lands in a smoke
 # directory; the canonical model and .last_run_tag are untouched (src/train/oww/
 # train.py --smoke).
-smoke-oww:
+smoke-oww: | .WAKE-CHECK
 	SMOKE=1 ./src/scripts/run-oww-training-applesilicon.sh "$(WAKE)"
 
 # Same, for the mww side: the corpus goes through its --skip path and the
 # pre-built features are reused, so nothing needs a TTS server at all.
-smoke-mww:
+smoke-mww: | .WAKE-CHECK
 	SMOKE=1 ./src/scripts/run-mww-training-applesilicon.sh "$(WAKE)"
 
 # No venv in this repo carries pytest (tests/_runner.py), so the suite is plain
@@ -66,10 +75,11 @@ fleet:
 # The Mac default: the host uv env in src/eval/, no Docker and no TTS -
 # scoring reads the already-rendered negatives; only corpus generation speaks to
 # Kokoro. The setup script runs only when the venv is missing; it is idempotent.
-# The model directories are keyed hey seeree -> hey_seeree; $(subst  ,_,...) cannot
+# The model directories are keyed by the wake word with spaces as underscores;
+# $(subst  ,_,...) cannot
 # do that - Make trims the leading space out of subst's first argument - so the
 # conversion runs in shell.
-eval:
+eval: | .WAKE-CHECK
 	@test -d src/eval/.venv || ./src/scripts/setup-eval-host.sh
 	@WAKE_DIR=$$(echo "$(WAKE)" | tr ' ' '_') ; \
 	echo "Score:   src/eval/.venv/bin/python src/eval/src/eval_model.py --model output/$$WAKE_DIR/oww/<model>.onnx"
@@ -79,7 +89,7 @@ eval:
 # on a Mac the alternative to the host env. It pins the same deployment-runtime
 # wheels as src/eval/pyproject.toml (they must stay equal), so the numbers check
 # against each other.
-eval-docker:
+eval-docker: | .WAKE-CHECK
 	cd src/eval && docker compose build
 	@WAKE_DIR=$$(echo "$(WAKE)" | tr ' ' '_') ; \
 	echo "Score: cd src/eval && docker compose run --rm eval python -m eval.eval_model --model output/$$WAKE_DIR/oww/<model>.onnx"
@@ -87,12 +97,12 @@ eval-docker:
 # oww has no standalone corpus module: generation is the first stage of
 # src/train/oww/train.py, so "the real corpus stage" here is a full run (TTS
 # generation, features, 50k steps, conversion). Reuse instead: --skip-corpus.
-corpus-oww:
+corpus-oww: | .WAKE-CHECK
 	./src/scripts/run-oww-training-applesilicon.sh "$(WAKE)"
 
 # The mww corpus IS standalone. PIPER_URLS makes a fleet of them (make fleet
 # N=<n> prints the list); the default is the single in-process engine on 8898.
-corpus-mww:
+corpus-mww: | .WAKE-CHECK
 	@if [ -n "$(PIPER_URLS)" ]; then PURLS="--piper-url $(PIPER_URLS)"; else PURLS="--piper-url tcp://127.0.0.1:8898"; fi; \
 	PYTHONPATH=src $(PY_MWW) -m train.mww.corpus --wake-word "$(WAKE)" $${PURLS} --piper-speakers 12 \
 	    --kokoro-url tcp://127.0.0.1:8900 --kokoro-fraction 0.3
@@ -102,7 +112,7 @@ corpus-mww:
 # `voice_holdout:` section holds out of that word's corpus builds, at speeds
 # inside the 0.7-1.3 training range. The live Kokoro catalog is probed and a
 # stale list fails loudly; the existing eval corpora are not touched.
-render-voice-holdout:
+render-voice-holdout: | .WAKE-CHECK
 	@test -d src/eval/.venv || ./src/scripts/setup-eval-host.sh
 	src/eval/.venv/bin/python src/eval/src/generate_positives.py \
 		--wake-word "$(WAKE)" \

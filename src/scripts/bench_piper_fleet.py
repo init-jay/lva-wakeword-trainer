@@ -54,10 +54,8 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from train.corpus.piper import PiperFleet, _client, select_piper_voices  # noqa: E402
 from train.corpus.positives import PLAIN_SPEED_GRID, plain_positive_texts  # noqa: E402
 
-WAKE_WORD = "hey seeree"
 
-
-def build_clip_list(voices, clips_per_pair):
+def build_clip_list(voices, clips_per_pair, wake_word):
     """(voice, speaker, text, speed) per pair, built ONCE and re-used at every N.
 
     Deterministic rotation over the corpus's own grids (modulo, not
@@ -65,7 +63,7 @@ def build_clip_list(voices, clips_per_pair):
     benchmark that has to be comparable across five N values cannot depend on
     a different random mix each run, and the modulo cycle gives the same mean
     render cost with a fixed workload."""
-    texts = plain_positive_texts(WAKE_WORD)
+    texts = plain_positive_texts(wake_word)
     speeds = list(PLAIN_SPEED_GRID)
     clips = []
     for v, pair in enumerate(voices):
@@ -169,6 +167,9 @@ class _CpuSampler:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--wake-word", required=True,
+                    help="wake word with a recipe on disk; select_piper_voices reads "
+                         "its exclusions, plain_positive_texts its grids")
     ap.add_argument("--urls", default=os.environ.get("PIPER_URLS"),
                     help="comma-separated tcp:// fleet (default: $PIPER_URLS)")
     ap.add_argument("--clips-per-pair", type=int, default=24,
@@ -192,11 +193,11 @@ def main():
     N = len(fleet.urls)
     catalog = fleet.probe(languages=("en_US", "en_GB"), max_speakers=12)
     # The exact oww voice set (select_piper_voices applies the same exclusions).
-    voices = select_piper_voices(urls, WAKE_WORD,
+    voices = select_piper_voices(urls, args.wake_word,
                                  languages=("en_US", "en_GB"), max_speakers=12)
     assignment = fleet.shard(voices)
 
-    clips = build_clip_list(voices, args.clips_per_pair)
+    clips = build_clip_list(voices, args.clips_per_pair, args.wake_word)
     # One job per MODEL (all its speaker pairs), exactly generate_piper_samples:
     # keying on clip[0] (the model name) groups a multi-speaker model's pairs
     # into a single job so its 0.6 s load is paid once, not per speaker.

@@ -21,7 +21,7 @@ several of its own imports, so in practice the working set is:
     pip install tensorflow onnxruntime onnx onnx2tf \\
                 onnx-graphsurgeon sng4onnx tf_keras psutil ai-edge-litert
 
-    python onnx2tflite.py hey_seeree.onnx -o hey_seeree_v0.1.tflite
+    python onnx2tflite.py <wake_word>.onnx -o <wake_word>_v0.1.tflite
 """
 
 import argparse

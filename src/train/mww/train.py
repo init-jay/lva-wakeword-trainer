@@ -10,7 +10,7 @@ openWakeWord equivalent is run-oww-training.sh. Two lessons carried over from it
     found in a configured feature set" and carries on, so a corpus that failed
     to build trains a model on nothing - the config is checked first.
 
-    python -m train.mww.train --wake-word "hey seeree" \\
+    python -m train.mww.train --wake-word "<wake word>" \\
         --ambient data/external/mww_ambient/speech \\
                   data/external/mww_ambient/no_speech
 
@@ -152,7 +152,7 @@ def checksum(path: Path):
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--wake-word", default="hey seeree")
+    p.add_argument("--wake-word", required=True)
     p.add_argument("--ambient", nargs="*", default=[],
                    help="RaggedMmap dirs from `download-external-data.sh mww`, "
                         "under data/external/mww_ambient/")

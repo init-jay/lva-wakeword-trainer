@@ -6,7 +6,7 @@ WHY THIS EXISTS
 ---------------
 A wake word worth having is not a dictionary word, so a TTS engine's grapheme-to-
 phoneme has to guess at it - and voices guess differently. Six of Kokoro's 42 English
-voices do not say "hey seeree" (af_alloy, am_echo, bf_alice, bf_lily, bm_daniel,
+voices do not say it (af_alloy, am_echo, bf_alice, bf_lily, bm_daniel,
 bm_fable). Every clip such a voice produces is a mislabelled positive, and at 1/42 of
 the voice list each that was ~14% of the synthetic corpus for the six together.
 
@@ -56,9 +56,9 @@ renderings of a correct phrase are GOOD training data, since real users have acc
 Listen before excluding those.
 
 Usage:
-    python audit_voices.py --wake-word "hey seeree" \
+    python audit_voices.py --wake-word "<wake word>" \
         --tts tcp://192.168.2.26:8899 --asr 192.168.2.14:10300
-    python audit_voices.py --wake-word "hey seeree" \
+    python audit_voices.py --wake-word "<wake word>" \
         --tts tcp://127.0.0.1:8898 --asr 192.168.2.14:10300
 
 The TTS server speaks the repo protocol (src/tts-service/) - the same per-engine
