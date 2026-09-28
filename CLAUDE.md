@@ -69,8 +69,8 @@ NVIDIA only - `driver: nvidia` does not match an AMD card under ROCm.
 Anywhere else, including a Mac: `docker/docker-compose.yml:docker/docker-compose.cpu.yml`, which
 swaps both trainers for multi-arch CPU images. Slower, and the only in-Docker
 option on Apple Silicon - Docker Desktop passes no Metal
-device through, so there is no MPS image to select and `docker/docker-compose.mps.yml`
-stays empty. Give Docker Desktop enough RAM first: the feature array is
+device through, so there is no MPS image to select. Give Docker
+Desktop enough RAM first: the feature array is
 mmap'd at multi-GB scale, and running short of memory page-faults rather than
 erroring.
 `SKIP_BUILD=1` on either training script reuses the image; needed after a
