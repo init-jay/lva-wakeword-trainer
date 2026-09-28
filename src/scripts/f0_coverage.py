@@ -117,8 +117,7 @@ def main():
     print("REAL SPEAKERS (recordings, not the corpus)")
     speakers, known = {}, set()
     # Word-scoped: every child of recordings/ is a wake word, and the speakers
-    # live under its samples/ - the wordless data/recordings/samples/ predates
-    # that and does not exist in this layout.
+    # live under its samples/ - there is no wordless recordings/samples here.
     for word in sorted((p for p in rec.iterdir() if p.is_dir()) if rec.is_dir() else []):
         samples = word / "samples"
         if not samples.is_dir():
