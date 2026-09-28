@@ -44,7 +44,7 @@ help:
 	@echo "make corpus-mww     the standalone mww corpus stage; TTS-bound (faster with a fleet),"
 	@echo "                    needs Piper on 8898 and, for the default 0.3 mix, Kokoro on 8900"
 	@echo "make render-voice-holdout  the voice-holdout synthetic RANKING set: a"
-	@echo "                    seconds of Kokoro, into data/corpus/eval/voice_holdout_tts;"
+	@echo "                    seconds of Kokoro, into data/corpus/<wake_word>/eval/voice_holdout_tts;"
 	@echo "                    the existing corpora and the real-speaker gates stay untouched"
 	@echo ""
 	@echo "WAKE=\"<wake word>\" is required for the targets that take it."
@@ -82,8 +82,8 @@ fleet:
 eval: | .WAKE-CHECK
 	@test -d src/eval/.venv || ./src/scripts/setup-eval-host.sh
 	@WAKE_DIR=$$(echo "$(WAKE)" | tr ' ' '_') ; \
-	echo "Score:   src/eval/.venv/bin/python src/eval/src/eval_model.py --model output/$$WAKE_DIR/oww/<model>.onnx"
-	@echo "Compare: src/eval/.venv/bin/python src/eval/src/compare_models.py --models <new> <previous-best>"
+	echo "Score:   src/eval/.venv/bin/python src/eval/src/eval_model.py --wake-word \"$(WAKE)\" --model output/$$WAKE_DIR/oww/<model>.onnx"
+	@echo "Compare: src/eval/.venv/bin/python src/eval/src/compare_models.py --wake-word \"$(WAKE)\" --models <new> <previous-best>"
 
 # The container route: the right one on a CUDA box or an eval-only machine, and
 # on a Mac the alternative to the host env. It pins the same deployment-runtime
@@ -92,7 +92,7 @@ eval: | .WAKE-CHECK
 eval-docker: | .WAKE-CHECK
 	cd src/eval && docker compose build
 	@WAKE_DIR=$$(echo "$(WAKE)" | tr ' ' '_') ; \
-	echo "Score: cd src/eval && docker compose run --rm eval python -m eval.eval_model --model output/$$WAKE_DIR/oww/<model>.onnx"
+	echo "Score: cd src/eval && docker compose run --rm eval python -m eval.eval_model --wake-word \"$(WAKE)\" --model output/$$WAKE_DIR/oww/<model>.onnx"
 
 # oww has no standalone corpus module: generation is the first stage of
 # src/train/oww/train.py, so "the real corpus stage" here is a full run (TTS
@@ -108,13 +108,14 @@ corpus-mww: | .WAKE-CHECK
 	    --kokoro-url tcp://127.0.0.1:8900 --kokoro-fraction 0.3
 
 # The voice-holdout synthetic ranking set: its own output
-# directory (data/corpus/eval/voice_holdout_tts) from the voices the recipe's
+# directory (data/corpus/<wake_word>/eval/voice_holdout_tts) from the voices the recipe's
 # `voice_holdout:` section holds out of that word's corpus builds, at speeds
 # inside the 0.7-1.3 training range. The live Kokoro catalog is probed and a
 # stale list fails loudly; the existing eval corpora are not touched.
 render-voice-holdout: | .WAKE-CHECK
 	@test -d src/eval/.venv || ./src/scripts/setup-eval-host.sh
+	@WAKE_DIR=$$(echo "$(WAKE)" | tr ' ' '_') ; \
 	src/eval/.venv/bin/python src/eval/src/generate_positives.py \
 		--wake-word "$(WAKE)" \
 		--voice-holdout \
-		--out data/corpus/eval/voice_holdout_tts
+		--out data/corpus/$$WAKE_DIR/eval/voice_holdout_tts

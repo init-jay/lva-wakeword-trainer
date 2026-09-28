@@ -719,19 +719,19 @@ def _parse_audit_lines(audit):
     return weight, steps, merge_seen
 
 
-def _parse_real_copies_override(spec: str, flag: str = "--real-copies-override") -> dict:
+def _parse_real_copies_override(spec: str, flag: str = "--real-copies-override", wake_word: str = None) -> dict:
     """Parse 'speaker=N[,speaker=N]' into {speaker: N}, failing loud.
 
     A typo'd speaker name would otherwise be silently inert (the override dict
     just never matches) and the run would train at the base weight while being
     filed under a config that claims otherwise - the label/config drift class
     this repo has paid for twice. The speaker name must name a directory that
-    actually exists under the samples tree.
+    actually exists under the word's samples tree.
     """
     if not spec:
         return {}
     overrides = {}
-    samples = WORK_DIR / "data" / "recordings" / "samples"
+    samples = WORK_DIR / "data" / "recordings" / wake_word.replace(" ", "_").lower() / "samples"
     known = {p.name for p in samples.iterdir() if p.is_dir()} if samples.is_dir() else set()
     for part in spec.split(","):
         part = part.strip()
@@ -743,9 +743,15 @@ def _parse_real_copies_override(spec: str, flag: str = "--real-copies-override")
         speaker, n = speaker.strip(), n.strip()
         if not n.isdigit() or int(n) < 1:
             sys.exit(f"ERROR: {flag} {part!r}: copies must be a positive int")
-        if known and speaker not in known:
-            sys.exit(f"ERROR: {flag} names {speaker!r}, but the samples "
-                     f"tree has {sorted(known)} - the override would be inert")
+        if speaker not in known:
+            # Fails loud when the tree is missing or empty too (known == set()):
+            # with no recordings the override cannot match anything, and training
+            # TTS-only while being filed under a config that names a speaker is
+            # the label/config drift this validation exists to refuse.
+            sys.exit(f"ERROR: {flag} names {speaker!r}, but the samples tree at "
+                     f"{samples} has no such speaker "
+                     f"{sorted(known) or '(none - no real recordings)'} - the "
+                     f"override would be inert")
         overrides[speaker] = int(n)
     return overrides
 
@@ -872,7 +878,7 @@ def main():
                              "overfitting to the specific clips.")
     parser.add_argument("--real-copies-override", default="",
                         help="Per-speaker override of --real-copies, 'speaker=N[,speaker=N]' "
-                             "(speaker = the directory name under data/recordings/samples/). "
+                             "(speaker = the directory name under data/recordings/<wake_word>/samples/). "
                              "A flat weight can leave the least-recorded speaker a tiny "
                              "share of the positive set - the weight is the lever, aimed "
                              "per speaker. Part of the corpus identity: changing it "
@@ -881,7 +887,7 @@ def main():
                         help="Derive per-speaker --real-copies so each named speaker "
                              "contributes the SAME number of positive rows: 'all', or "
                              "'speakerA,speakerB'. The multiplier is computed from the clip counts "
-                             "in data/recordings/samples/ at build time, so recording more "
+                             "in data/recordings/<wake_word>/samples/ at build time, so recording more "
                              "of a thin speaker shrinks their lift without touching a flag. "
                              "Equalise UP only - the richest named speaker keeps the base "
                              "weight, nobody is cut to make the table tidy. An explicit "
@@ -1246,9 +1252,9 @@ def main():
         "child_fraction": args.child_fraction,
         "piper_fraction": args.piper_fraction,
         "real_copies": args.real_copies,
-        "real_copies_override": _parse_real_copies_override(args.real_copies_override),
+        "real_copies_override": _parse_real_copies_override(args.real_copies_override, wake_word=safe_name),
         "balance_real_copies": args.balance_real_copies,
-        "real_vtlp": _parse_real_copies_override(args.real_vtlp, flag="--real-vtlp"),
+        "real_vtlp": _parse_real_copies_override(args.real_vtlp, flag="--real-vtlp", wake_word=safe_name),
         "piper_speakers": args.piper_speakers,
         "piper_languages": args.piper_languages,
         "negatives_file": args.negatives_file,
@@ -1442,13 +1448,13 @@ def main():
             add_child_range_copies(pos_test, "VTLP positive test", args.child_fraction)
 
         print("\n[Real Voice]")
-        # The training half of the recordings. data/recordings/holdout/ is a SIBLING
+        # The training half of the recordings. data/recordings/<wake_word>/holdout/ is a SIBLING
         # and is never read here - copy_real_samples globs this tree recursively, so
         # a holdout nested inside it would be trained on and every eval number after
         # would measure memorisation. src/eval/src/paths.py enforces the pair.
-        real_samples_dir = WORK_DIR / "data" / "recordings" / "samples"
-        real_overrides = _parse_real_copies_override(args.real_copies_override)
-        real_vtlp = _parse_real_copies_override(args.real_vtlp, flag="--real-vtlp")
+        real_samples_dir = WORK_DIR / "data" / "recordings" / wake_word.replace(" ", "_").lower() / "samples"
+        real_overrides = _parse_real_copies_override(args.real_copies_override, wake_word=wake_word)
+        real_vtlp = _parse_real_copies_override(args.real_vtlp, flag="--real-vtlp", wake_word=wake_word)
         balance_spec = parse_balance_spec(args.balance_real_copies)
         if balance_spec is not None:
             real_overrides, balance_notes = balanced_copy_weights(

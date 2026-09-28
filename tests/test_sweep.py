@@ -388,16 +388,17 @@ def test_load_spec_eval_refuses_unknown_key():
 
 
 def test_eval_cmd_carries_flag_when_configured():
-    cmd = sweep.eval_cmd("/venv/bin/python", "model.onnx", "eval.json",
-                         voice_holdout_set="data/corpus/eval/voice_holdout_tts")
+    cmd = sweep.eval_cmd("/venv/bin/python", "okay jarvis", "model.onnx", "eval.json",
+                         voice_holdout_set="data/corpus/okay_jarvis/eval/voice_holdout_tts")
     assert cmd[0] == "/venv/bin/python"
     assert "eval_model.py" in cmd[1]
+    assert "--wake-word" in cmd and cmd[cmd.index("--wake-word") + 1] == "okay jarvis", f"{cmd!r}"
     assert cmd[-2:] == ["--voice-holdout-set",
-                        "data/corpus/eval/voice_holdout_tts"], f"{cmd!r}"
+                        "data/corpus/okay_jarvis/eval/voice_holdout_tts"], f"{cmd!r}"
 
 
 def test_eval_cmd_omits_flag_when_not_configured():
-    cmd = sweep.eval_cmd("/venv/bin/python", "model.onnx", "eval.json")
+    cmd = sweep.eval_cmd("/venv/bin/python", "okay jarvis", "model.onnx", "eval.json")
     assert "--voice-holdout-set" not in cmd
     assert "--model" in cmd and "model.onnx" in cmd
     assert "--json" in cmd and "eval.json" in cmd

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Record real voice samples for wake word training.
-Creates 16kHz mono WAV files in the repo's data/recordings/samples/.
+Creates 16kHz mono WAV files in the repo's data/recordings/<wake_word>/samples/.
 
 Lives in its own directory with its own uv environment: it runs on the host for
 microphone access and needs only numpy, whereas the training environment pins torch
@@ -25,7 +25,7 @@ Usage:
     cd src/record
     uv run record_samples.py --list-devices
     uv run record_samples.py --wake-word "<wake word>"
-    uv run record_samples.py --wake-word "<wake word>" --output-dir ../../data/recordings/samples/speaker1
+    uv run record_samples.py --wake-word "<wake word>" --output-dir ../../data/recordings/<wake_word>/samples/speaker1
 """
 import argparse
 import re
@@ -50,20 +50,36 @@ WARMUP = 0.6    # seconds discarded after opening the device, before the cue
 # clean and means one ignore rule covers the lot. record/ now sits under src/,
 # so the root is three levels up, not two.
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-RECORDINGS_DIR = REPO_ROOT / "data" / "recordings"
-SAMPLES_DIR = RECORDINGS_DIR / "samples"
+RECORDINGS_ROOT = REPO_ROOT / "data" / "recordings"
+
+
+def recordings_dir(wake_word):
+    """data/recordings/<wake_word>/ - every child of data/recordings/ is a wake
+    word, the same slug the recipes/, corpus/ and output/ trees use (spaces to
+    underscores, lower)."""
+    return RECORDINGS_ROOT / wake_word.replace(" ", "_").lower()
+
+
+def samples_dir(wake_word):
+    return recordings_dir(wake_word) / "samples"
+
 
 # Holdout clips are evaluated against and NEVER trained on, which is the one thing
 # the pipeline's shape is built around: a model scored on clips it was trained on
 # reports a number that means nothing. That guarantee is positional - holdout/ is a
 # SIBLING of samples/, not a subdirectory - because the trainer globs the samples
-# tree recursively for positives and would swallow anything nested inside it.HOLDOUT_DIR = RECORDINGS_DIR / "holdout"
+# tree recursively for positives and would swallow anything nested inside it.
+def holdout_dir(wake_word):
+    return recordings_dir(wake_word) / "holdout"
 
-# Unsplit recordings go OUTSIDE data/recordings/samples/. train.py globs that tree
+
+# Unsplit recordings go OUTSIDE data/recordings/<word>/samples/. train.py globs that tree
 # recursively for positives, so a three-minute raw file left there becomes a
 # training positive - and after trimming, only its first 2 s survives, which is a
 # few utterances and a lot of silence presented as one example of the wake word.
-RAW_DIR = RECORDINGS_DIR / "raw"
+
+def raw_dir(wake_word):
+    return recordings_dir(wake_word) / "raw"
 
 FULL_SCALE = 32768.0
 # Speech should peak somewhere near -12 dBFS.
@@ -81,25 +97,25 @@ CLIPPING_DBFS = -0.5
 LOW_SNR_DB = 20.0
 
 
-def raw_dir_for(output_dir: Path) -> Path:
+def raw_dir_for(output_dir: Path, wake_word: str) -> Path:
     """Where the unsplit recording for `output_dir` belongs.
 
-    Mirrors the speaker subdirectory under data/recordings/raw/, so
-    data/recordings/samples/speaker1 -> data/recordings/raw/speaker1. Outside the
-    samples tree entirely, because train.py searches that tree recursively for
-    positives.
+    Mirrors the speaker subdirectory under the word's raw/ dir, so
+    data/recordings/<word>/samples/speaker1 -> data/recordings/<word>/raw/speaker1.
+    Outside the samples tree entirely, because train.py searches that tree
+    recursively for positives.
 
     Holdout raws mirror under raw/holdout/ rather than alongside the training raws.
     Keeping the two apart is what makes a raw file re-segmentable later without
     having to remember which side it came from - and a holdout raw re-cut into the
     training set is exactly the leak the holdout exists to prevent.
     """
-    for base, prefix in ((SAMPLES_DIR, ""), (HOLDOUT_DIR, "holdout")):
+    for base, prefix in ((samples_dir(wake_word), ""), (holdout_dir(wake_word), "holdout")):
         try:
-            return RAW_DIR / prefix / output_dir.resolve().relative_to(base.resolve())
+            return raw_dir(wake_word) / prefix / output_dir.resolve().relative_to(base.resolve())
         except ValueError:
             continue
-    return RAW_DIR
+    return raw_dir(wake_word)
 
 
 class Terminal:
@@ -552,14 +568,14 @@ def resolve_output_dir(args) -> Path:
     on the flag, so `--holdout --output-dir <somewhere under holdout/>` is allowed -
     that pair agrees.
     """
-    base = HOLDOUT_DIR if args.holdout else SAMPLES_DIR
+    base = holdout_dir(args.wake_word) if args.holdout else samples_dir(args.wake_word)
 
     if args.output_dir is not None:
         chosen = Path(args.output_dir)
-        if args.holdout and not chosen.resolve().is_relative_to(HOLDOUT_DIR.resolve()):
+        if args.holdout and not chosen.resolve().is_relative_to(holdout_dir(args.wake_word).resolve()):
             raise SystemExit(
-                f"--holdout wants {HOLDOUT_DIR}, but --output-dir says {chosen}.\n"
-                f"Drop one of them, or point --output-dir inside {HOLDOUT_DIR}.")
+                f"--holdout wants {holdout_dir(args.wake_word)}, but --output-dir says {chosen}.\n"
+                f"Drop one of them, or point --output-dir inside {holdout_dir(args.wake_word)}.")
         if args.speaker:
             raise SystemExit("Pass either --speaker or --output-dir, not both.")
         return chosen
@@ -572,15 +588,15 @@ def main():
     parser.add_argument("--wake-word", required=True, help="Wake word you're recording")
     parser.add_argument("--raw-dir", default=None,
                         help="Where unsplit --continuous recordings go (default: "
-                             "data/recordings/raw/, mirroring the speaker "
-                             "subdirectory). Kept out of data/recordings/samples/ so "
+                             "data/recordings/<wake_word>/raw/, mirroring the speaker "
+                             "subdirectory). Kept out of data/recordings/<wake_word>/samples/ so "
                              "the trainer never picks a raw file up as a positive.")
     parser.add_argument("--output-dir", default=None,
-                        help=f"Output directory (default: {SAMPLES_DIR}, or the "
-                             "matching holdout directory with --holdout). Use a "
+                        help="Output directory (default: data/recordings/<wake_word>/samples, "
+                             "or the matching holdout directory with --holdout). Use a "
                              "per-speaker subdirectory when several people record.")
     parser.add_argument("--holdout", action="store_true",
-                        help="Record into data/recordings/holdout/ instead. These "
+                        help="Record into data/recordings/<wake_word>/holdout/ instead. These "
                              "clips are evaluated against and never trained on, so "
                              "record them in the same session as the training clips "
                              "- a holdout captured weeks later on a different mic "
@@ -671,7 +687,7 @@ def main():
     if args.continuous:
         audio, noise = record_continuous(args.device, args.continuous, args.backend)
         if args.keep_raw:
-            raw_dir = Path(args.raw_dir) if args.raw_dir else raw_dir_for(output_dir)
+            raw_dir = Path(args.raw_dir) if args.raw_dir else raw_dir_for(output_dir, args.wake_word)
             raw_dir.mkdir(parents=True, exist_ok=True)
             raw = raw_dir / f"{safe_name}_raw_{int(time.time())}.wav"
             with wave.open(str(raw), "wb") as wf:

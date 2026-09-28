@@ -7,7 +7,7 @@ Read the output carefully, because this corpus is not a generalisation test.
 so a plain rendering of the wake phrase is inside the training distribution and the
 model has effectively seen it. Detection near 100% on those clips means the training
 run worked; it says nothing about a new speaker. The held-out recordings in
-`data/recordings/holdout/` remain the only speaker-generalisation measure.
+`data/recordings/<wake_word>/holdout/` remain the only speaker-generalisation measure.
 
 What this *is* good for is the axes where the corpus can be pushed outside what
 training saw, which is why generation is organised as sweeps:
@@ -62,7 +62,7 @@ engine but lists instead of rendering.
 
 Then score with, noting that --positives here OVERRIDES the held-out recordings the
 gates normally run on - this measures the sweeps, not speaker generalisation:
-    python -m eval.eval_model --model MODEL --positives data/corpus/eval/positives_tts
+    python -m eval.eval_model --wake-word "<wake word>" --model MODEL --positives data/corpus/<wake_word>/eval/positives_tts
 """
 
 import argparse
@@ -184,7 +184,7 @@ def set_manifest(out, args, written, holdout):
         "what_it_is_not": ("A speaker-generalisation gate. A synthetic voice is "
                            "not a person; this set is a low-variance RANKING "
                            "signal for sweep points. The gates stay on the real "
-                           "held-out recordings in data/recordings/holdout/, and "
+                           "held-out recordings in data/recordings/<wake_word>/holdout/, and "
                            "the top sweep points go there, not here."),
         "wake_word": args.wake_word,
         "tts": args.tts,
@@ -358,7 +358,7 @@ def main():
                         "this word's corpus builds (the catalog is checked live, and a "
                         "held-out voice it no longer offers is an error, not a "
                         "skip), at speeds inside the 0.7-1.3 training range. "
-                        "Output goes to data/corpus/eval/voice_holdout_tts by "
+                        "Output goes to data/corpus/<wake_word>/eval/voice_holdout_tts by "
                         "default and is reported as a ranking signal, never as "
                         "a speaker-generalisation gate")
     p.add_argument("--url", default="tcp://127.0.0.1:8900",
@@ -377,8 +377,9 @@ def main():
                    help="ignored; kept so old invocations keep working (the engine "
                         "owns the request shape now)")
     p.add_argument("--model", default="kokoro", help="ignored; see --api-key")
-    p.add_argument("--out", default=str(paths.POSITIVES_DIR),
-                   help="output directory (default: %(default)s)")
+    p.add_argument("--out", default=None,
+                   help="output directory (default: "
+                        "data/corpus/<wake_word>/eval/positives_tts)")
     p.add_argument("--sweeps", nargs="+",
                    default=["voices", "speed", "level", "noise", "command"],
                    choices=["voices", "speed", "level", "noise", "command", "holdout"],
@@ -402,10 +403,12 @@ def main():
     # (its own directory, so the existing positives/negatives corpora stay
     # byte-for-byte untouched). Both only when the user has not set them.
     if args.voice_holdout:
-        if args.out == str(paths.POSITIVES_DIR):
-            args.out = str(paths.EVAL_CORPUS_DIR / "voice_holdout_tts")
+        if args.out is None or args.out == str(paths.positives_dir(args.wake_word)):
+            args.out = str(paths.eval_corpus_dir(args.wake_word) / "voice_holdout_tts")
         if args.sweeps == ["voices", "speed", "level", "noise", "command"]:
             args.sweeps = ["holdout"]
+    if args.out is None:
+        args.out = str(paths.positives_dir(args.wake_word))
 
     # Engine construction is offline (no I/O), so it happens before the dry-run
     # even though voice SELECTION for Piper needs the live catalog.
@@ -532,9 +535,9 @@ def main():
             print("builders never train on, at speeds inside the 0.7-1.3 training")
             print("range. A synthetic voice is not a person - this ranks sweep")
             print("points (low variance, a real n); the speaker-generalisation")
-            print("gates stay on data/recordings/holdout/, where the top points go.")
+            print("gates stay on data/recordings/<wake_word>/holdout/, where the top points go.")
             print(f"\nevaluate with (labelled block, never merged into the gates):\n"
-                  f"  python eval_model.py --model MODEL --voice-holdout-set {out}")
+                  f"  python eval_model.py --wake-word {args.wake_word!r} --model MODEL --voice-holdout-set {out}")
         else:
             print("\nNOTE: these are training-distribution clips. High detection here means")
             print("the training run worked, not that the model generalises to new speakers.")

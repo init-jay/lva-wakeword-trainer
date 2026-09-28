@@ -24,7 +24,7 @@ cd src/record
 uv run record_samples.py --list-devices
 uv run record_samples.py --wake-word "<wake word>" --device 0 --speaker speaker1
 uv run record_samples.py --wake-word "<wake word>" --device 0 --holdout --speaker speaker1
-uv run python check_alignment.py data/recordings/samples/speaker1
+uv run python check_alignment.py data/recordings/<wake_word>/samples/speaker1
 ```
 
 More than one speaker matters more than more clips from one: a model that reads 97%
@@ -65,24 +65,25 @@ docker compose up -d kokoro
 cd src/eval
 docker compose build                  # first time, or after Dockerfile changes
 docker compose run --rm eval python -m eval.generate_negatives \
+    --wake-word "<wake word>" \
     --url http://host.docker.internal:8880/v1/audio/speech
 cd .. && docker compose stop kokoro
 
 # the four gates, one model (still in src/eval/; model paths are relative to /app)
 docker compose run --rm eval python -m eval.eval_model \
-    --model output/<wake_word>/oww/<tag>.onnx
+    --wake-word "<wake word>" --model output/<wake_word>/oww/<tag>.onnx
 
 # is this run better than the last one?
 docker compose run --rm eval python -m eval.compare_models \
-    --models output/<wake_word>/oww/<new>.onnx output/<wake_word>/oww/<previous-best>.onnx
+    --wake-word "<wake word>" --models output/<wake_word>/oww/<new>.onnx output/<wake_word>/oww/<previous-best>.onnx
 
 # the two targets side by side: server vs ESP32
-docker compose run --rm eval python -m eval.compare_models --models \
+docker compose run --rm eval python -m eval.compare_models --wake-word "<wake word>" --models \
     output/<wake_word>/oww/<tag>.onnx \
     output/<wake_word>/mww/<tag>.json
 
 # one model, swept, to pick a deployment operating point
-docker compose run --rm eval python -m eval.compare_models --sweep \
+docker compose run --rm eval python -m eval.compare_models --wake-word "<wake word>" --sweep \
     --models output/<wake_word>/mww/<tag>.json
 ```
 

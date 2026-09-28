@@ -97,12 +97,10 @@ if paths is not None:
     import recipe  # noqa: E402
     from tts_protocol import TtsClient  # noqa: E402
     from train.corpus.piper import select_piper_voices  # noqa: E402
-    DEFAULT_OUT = str(paths.NEGATIVES_DIR)
 else:
     recipe = None  # type: ignore
     TtsClient = None  # type: ignore
     select_piper_voices = None
-    DEFAULT_OUT = "negatives_tts"
 
 SR = 16000  # openWakeWord operates on 16 kHz mono audio
 
@@ -191,9 +189,10 @@ def main():
                    help="ignored; kept so old invocations keep working (the engine "
                         "owns the request shape now)")
     p.add_argument("--model", default="kokoro", help="ignored; see --api-key")
-    p.add_argument("--out", default=DEFAULT_OUT,
-                   help="output directory for the WAVs (default: %(default)s, where "
-                        "the eval tools look for them)")
+    p.add_argument("--out", default=None,
+                   help="output directory for the WAVs (default: "
+                        "data/corpus/<wake_word>/eval/negatives_tts, where the eval "
+                        "tools look for them)")
     p.add_argument("--wake-word", required=True,
                    help="picks recipes/<wake_word>.yaml")
     p.add_argument("--recipe", default=None,
@@ -247,6 +246,8 @@ def main():
     else:
         args.voices = VOICES
 
+    if args.out is None:
+        args.out = str(paths.negatives_dir(args.wake_word))
     out = Path(args.out).expanduser()
     out.mkdir(parents=True, exist_ok=True)
     args.out = out

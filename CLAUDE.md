@@ -97,9 +97,14 @@ record branch from any file, and any scorecard row in the timings doc.
 
 ## Invariants that are easy to break
 
-- **`data/recordings/holdout/` is never trained on.** The guarantee is *positional* —
-  it is a sibling of `samples/`, not a child, because the trainer globs the samples
-  tree recursively. `src/eval/src/paths.py` enforces and explains it.
+- **`data/recordings/<wake_word>/holdout/` is never trained on.** The guarantee is
+  *positional* — it is a sibling of `samples/`, not a child, because the trainer
+  globs the samples tree recursively. `src/eval/src/paths.py` enforces and
+  explains it.
+- **Every child of `data/recordings/` and `data/corpus/` is a wake word** (the same
+  slug as `recipes/` and `output/`: spaces to underscores, lower). The eval tools
+  take `--wake-word` and resolve their defaults from it; there is deliberately no
+  single-word fallback — a default would be how one word becomes the default.
 - **`data/` is inputs and generated corpus; `output/` is models.** The trainers
   `rmtree` their corpus every run, so the split is what keeps that away from models.
 - **`recipes/` is the hand-written per-word input.** One file per wake word

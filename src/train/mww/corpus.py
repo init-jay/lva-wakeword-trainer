@@ -93,9 +93,15 @@ def _parse_real_vtlp(spec: str, samples_dir, flag: str = "--real-vtlp") -> dict:
         speaker, n = speaker.strip(), n.strip()
         if not n.isdigit() or int(n) < 1:
             sys.exit(f"ERROR: {flag} {part!r}: variants must be a positive int")
-        if known and speaker not in known:
-            sys.exit(f"ERROR: {flag} names {speaker!r}, but the samples "
-                     f"tree has {sorted(known)} - the override would be inert")
+        if speaker not in known:
+            # Fails loud when the tree is missing or empty too (known == set()):
+            # with no real recordings the override cannot match anything, and
+            # filing the corpus under a shaping that claims variants it does not
+            # carry is the label/config drift this validation exists to refuse.
+            sys.exit(f"ERROR: {flag} names {speaker!r}, but the samples tree at "
+                     f"{samples} has no such speaker "
+                     f"{sorted(known) or '(none - no real recordings)'} - the "
+                     f"override would be inert")
         overrides[speaker] = int(n)
     return overrides
 
@@ -162,7 +168,9 @@ def main():
                         "corpus identity: a different value refuses the --skip reuse.")
     p.add_argument("--child-fraction", type=float, default=CHILD_STRETCH_FRACTION)
     p.add_argument("--corpus-root", default="data/corpus")
-    p.add_argument("--real-samples", default="data/recordings/samples")
+    p.add_argument("--real-samples", default=None,
+                   help="the word's real recordings (default: "
+                        "data/recordings/<wake_word>/samples)")
     p.add_argument("--negatives-file", default=None)
     p.add_argument("--clean", action="store_true",
                    help="delete an existing corpus first. Required to regenerate - "
@@ -197,6 +205,8 @@ def main():
                         "(the manifest written at the end of this stage) rather "
                         "than rebuilding it.")
     args = p.parse_args()
+    if args.real_samples is None:
+        args.real_samples = f"data/recordings/{args.wake_word.replace(' ', '_').lower()}/samples"
 
     if args.seed:
         # BEFORE any draw below: the stage must be a function of the seed, not

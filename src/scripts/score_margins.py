@@ -305,11 +305,15 @@ def report(model, pos_dirs, neg_dir, budget, top_n, csv_path=None, window=None):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--wake-word", required=True,
+                    help="the word the models were trained for (selects "
+                         "data/recordings/<wake_word>/ and data/corpus/<wake_word>/eval/)")
     ap.add_argument("--model", action="append", required=True,
                     help="repeatable; .onnx (oww) or .json (mww manifest+weights)")
     ap.add_argument("--positives", nargs="+", default=None,
                     help="default: the held-out speaker dirs (same as eval_model.py)")
-    ap.add_argument("--negatives", default=str(paths.NEGATIVES_DIR))
+    ap.add_argument("--negatives", default=None,
+                    help="default: data/corpus/<wake_word>/eval/negatives_tts")
     ap.add_argument("--adv-fa-budget", type=int, default=None,
                     help="fires of extend+hey_other allowed (default: derived - the "
                          "largest count that stays strictly inside the repo's standing "
@@ -324,8 +328,10 @@ def main():
                          "this overrides that.")
     ap.add_argument("--csv", default=None, help="dump per-clip peaks here (suffix .csv)")
     args = ap.parse_args()
+    if args.negatives is None:
+        args.negatives = str(paths.negatives_dir(args.wake_word))
 
-    pos_dirs = [Path(d) for d in args.positives] if args.positives else paths.holdout_dirs(runon=False)
+    pos_dirs = [Path(d) for d in args.positives] if args.positives else paths.holdout_dirs(runon=False, wake_word=args.wake_word)
     for i, m in enumerate(args.model):
         report(m, pos_dirs, args.negatives, args.adv_fa_budget, args.top,
                csv_path=(f"{args.csv}.{i}" if args.csv and len(args.model) > 1

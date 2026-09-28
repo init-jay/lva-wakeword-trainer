@@ -525,7 +525,7 @@ voices:
     # speakers land here. Not automatically disqualifying: accented renderings of the
     # CORRECT phrase are good training data, since real users have accents.
     # Disqualified here because the benefit cannot be measured - there is no accented
-    # speaker in data/recordings/holdout/, so the contamination is measurable and the
+    # speaker in data/recordings/hey_seeree/holdout/, so the contamination is measurable and the
     # upside is not. Revisit if an accented speaker is ever recorded.
     #
     # WHAT THIS METHOD CANNOT SEE: the score is agreement with the consensus ACROSS
@@ -610,7 +610,7 @@ voices:
 # low-variance RANKING SIGNAL for sweep points - voice disjoint from training,
 # every other axis inside the training distribution, a synthetic voice with a
 # real n. A synthetic voice is not a person, so it never stands in for the
-# real-speaker gates on data/recordings/holdout/; the top two or three of the
+# real-speaker gates on data/recordings/hey_seeree/holdout/; the top two or three of the
 # twenty sweep points go there, on real recordings.
 #
 # Kokoro - N = 7, chosen from the 22 usable voices of the kokoro-mlx catalog

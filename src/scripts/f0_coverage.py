@@ -116,12 +116,19 @@ def main():
     rec = REPO_ROOT / "data" / "recordings"
     print("REAL SPEAKERS (recordings, not the corpus)")
     speakers, known = {}, set()
-    for sp in sorted(p for p in (rec / "samples").iterdir() if p.is_dir()):
-        files = sorted(sp.rglob("*.wav"))
-        vals = [clip_f0(f) for f in rng.sample(files, min(args.speaker_clips, len(files)))]
-        known.add(sp.name)
-        speakers[sp.name] = float(np.median([v for v in vals if v] or [0]))
-        describe(sp.name, vals)
+    # Word-scoped: every child of recordings/ is a wake word, and the speakers
+    # live under its samples/ - there is no wordless recordings/samples here.
+    for word in sorted((p for p in rec.iterdir() if p.is_dir()) if rec.is_dir() else []):
+        samples = word / "samples"
+        if not samples.is_dir():
+            continue
+        print(f"[{word.name}]")
+        for sp in sorted(p for p in samples.iterdir() if p.is_dir()):
+            files = sorted(sp.rglob("*.wav"))
+            vals = [clip_f0(f) for f in rng.sample(files, min(args.speaker_clips, len(files)))]
+            known.add(sp.name)
+            speakers[sp.name] = float(np.median([v for v in vals if v] or [0]))
+            describe(sp.name, vals)
     print()
 
     corpora = [Path(REPO_ROOT / c) for c in args.corpus] or discover_corpora()

@@ -10,16 +10,20 @@ written up in the tuning log, and nothing in the output looked wrong. `holdout/`
 therefore a SIBLING of `samples/`, never a child, and `warn_if_trained_on` says
 so out loud when a run is pointed back inside the training set anyway.
 
-    data/recordings/samples/<speaker>/          trained on
-    data/recordings/holdout/<speaker>/          evaluated against, never trained on
-    data/recordings/holdout/<speaker>_runon/    ditto, phrase running into a command
+    data/recordings/<wake_word>/samples/<speaker>/          trained on
+    data/recordings/<wake_word>/holdout/<speaker>/          evaluated against, never trained on
+    data/recordings/<wake_word>/holdout/<speaker>_runon/    ditto, phrase running into a command
+
+Every child of data/recordings/ and of data/corpus/ is a wake word (the slug is
+the same one recipes/, corpus/ and output/ use: spaces to underscores, lower).
+word-agnostic inputs live elsewhere: data/external/, data/piper_voices/.
 
 THE `_runon` SUFFIX IS LOAD-BEARING. Plain and run-on clips answer different
 questions and are never pooled: `compare_models.py` reports them as separate rows,
 and `eval_model.py` builds its own command-following case by concatenating a
 command onto a plain clip, so a real run-on recording in its positives set would
 be scored as if it were the phrase alone. Since the loaders recurse, splitting on
-the directory suffix is what keeps a bare `--positives data/recordings/holdout`
+the directory suffix is what keeps a bare `--positives data/recordings/<wake_word>/holdout`
 from quietly mixing the two.
 
 PATHS ARE ANCHORED ON THE REPO ROOT, not the working directory. These tools run
@@ -57,9 +61,50 @@ def _repo_root():
 
 REPO_ROOT = _repo_root()
 
-RECORDINGS_DIR = REPO_ROOT / "data" / "recordings"
-SAMPLES_DIR = RECORDINGS_DIR / "samples"
-HOLDOUT_DIR = RECORDINGS_DIR / "holdout"
+RECORDINGS_ROOT = REPO_ROOT / "data" / "recordings"
+CORPUS_ROOT = REPO_ROOT / "data" / "corpus"
+
+
+def word_name(wake_word):
+    """The directory slug a wake word uses under recipes/, corpus/ and output/:
+    spaces to underscores, lowercased - the same rule src/recipe.path_for and
+    src/train/provenance.py apply. One rule for the whole data/ tree."""
+    return wake_word.replace(" ", "_").lower()
+
+
+def recordings_dir(wake_word, root=None):
+    """data/recordings/<wake_word>/ - every child of data/recordings/ is a wake
+    word; `root` is overridable so tests can point at a tree of their own."""
+    return (RECORDINGS_ROOT if root is None else Path(root)) / word_name(wake_word)
+
+
+def samples_dir(wake_word, root=None):
+    return recordings_dir(wake_word, root) / "samples"
+
+
+def holdout_dir(wake_word, root=None):
+    return recordings_dir(wake_word, root) / "holdout"
+
+
+def eval_corpus_dir(wake_word, root=None):
+    """The generated TTS evaluation corpora for one word - beside the trainer's
+    data/corpus/<wake_word>/{oww,mww} trees, never inside them (the trainer
+    rmtree's those)."""
+    root = CORPUS_ROOT if root is None else Path(root)
+    return root / word_name(wake_word) / "eval"
+
+
+NEGATIVES_SUBDIR = "negatives_tts"
+POSITIVES_SUBDIR = "positives_tts"
+
+
+def negatives_dir(wake_word):
+    return eval_corpus_dir(wake_word) / NEGATIVES_SUBDIR
+
+
+def positives_dir(wake_word):
+    return eval_corpus_dir(wake_word) / POSITIVES_SUBDIR
+
 
 # Trained models and their scorecards, one directory per wake word and per trainer:
 #
@@ -82,17 +127,11 @@ HOLDOUT_DIR = RECORDINGS_DIR / "holdout"
 # train.py's per-run rmtree away from anything in this tree.
 OUTPUT_DIR = REPO_ROOT / "output"
 
-# The TTS evaluation corpora, which are generated rather than recorded - hence
-# data/corpus/ beside the trainer's, not data/recordings/.
-EVAL_CORPUS_DIR = REPO_ROOT / "data" / "corpus" / "eval"
-NEGATIVES_DIR = EVAL_CORPUS_DIR / "negatives_tts"
-POSITIVES_DIR = EVAL_CORPUS_DIR / "positives_tts"
-
 RUNON_SUFFIX = "_runon"
 
 
-def holdout_dirs(runon=False, root=HOLDOUT_DIR):
-    """Held-out speaker directories, split on the `_runon` suffix.
+def holdout_dirs(runon=False, wake_word=None, root=None):
+    """Held-out speaker directories for one word, split on the `_runon` suffix.
 
     Returns [] rather than raising when nothing is there, so a tool can report
     "no held-out positives" in its own words instead of dying in argparse.
@@ -101,6 +140,10 @@ def holdout_dirs(runon=False, root=HOLDOUT_DIR):
     the root itself is the plain set - the layout a single-speaker `--holdout`
     recording session produces before anyone passes `--speaker`.
     """
+    if root is None:
+        if wake_word is None:
+            raise ValueError("holdout_dirs needs wake_word (or an explicit root)")
+        root = holdout_dir(wake_word)
     if not root.is_dir():
         return []
     subdirs = sorted(d for d in root.iterdir() if d.is_dir())
@@ -109,16 +152,19 @@ def holdout_dirs(runon=False, root=HOLDOUT_DIR):
     return [d for d in subdirs if d.name.endswith(RUNON_SUFFIX) == runon]
 
 
-def speaker_label(directory):
+def speaker_label(directory, wake_word=None):
     """Short name for a speaker directory, for keying a per-speaker report on.
 
-    Relative to the recordings tree when it sits inside one, so
-    data/recordings/holdout/speaker1 reads as `speaker1` rather than a path - and a
-    directory somewhere else entirely still gets its own basename rather than
-    colliding with everything.
+    Relative to the word's recordings tree when it sits inside one, so
+    data/recordings/<word>/holdout/speaker1 reads as `holdout/speaker1` rather than
+    a path - and a directory somewhere else entirely still gets its own basename
+    rather than colliding with everything.
     """
     path = Path(directory).resolve()
-    for base in (HOLDOUT_DIR, SAMPLES_DIR, RECORDINGS_DIR):
+    bases = []
+    if wake_word is not None:
+        bases = [holdout_dir(wake_word), samples_dir(wake_word), recordings_dir(wake_word)]
+    for base in bases:
         try:
             return str(path.relative_to(base.resolve()))
         except (ValueError, OSError):
@@ -126,7 +172,7 @@ def speaker_label(directory):
     return path.name
 
 
-def warn_if_trained_on(directories):
+def warn_if_trained_on(directories, wake_word, root=None):
     """Shout when an evaluation is pointed at clips the trainer also reads.
 
     A warning and not a hard error: measuring training accuracy on purpose is a
@@ -135,7 +181,7 @@ def warn_if_trained_on(directories):
     directories so a caller can decide differently.
     """
     inside = []
-    samples = SAMPLES_DIR.resolve()
+    samples = samples_dir(wake_word, root).resolve()
     for directory in directories:
         try:
             Path(directory).resolve().relative_to(samples)
@@ -147,8 +193,8 @@ def warn_if_trained_on(directories):
               "accuracy, not detection:")
         for directory in inside:
             print(f"    {directory}")
-        print(f"         Held-out recordings live in {HOLDOUT_DIR}, outside the "
-              f"tree the trainer globs.")
+        print(f"         Held-out recordings live in {holdout_dir(wake_word)}, "
+              f"outside the tree the trainer globs.")
     return inside
 
 

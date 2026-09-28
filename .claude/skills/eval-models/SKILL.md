@@ -29,8 +29,8 @@ Host, the Mac default, from the repo root:
 ```bash
 ./src/scripts/setup-eval-host.sh          # once per machine; idempotent
 ls output/*/oww output/*/mww          # models to score
-ls data/recordings/holdout/           # what to score them against
-ls data/corpus/eval/negatives_tts/    # the adversarial corpus
+ls data/recordings/<wake_word>/holdout/   # what to score them against
+ls data/corpus/<wake_word>/eval/negatives_tts/   # the adversarial corpus
 ```
 
 The same checks, for the container:
@@ -40,8 +40,8 @@ cd src/eval
 docker compose build            # first time, or after Dockerfile changes
 cd ../..                        # back to the repo root for the data-relative paths below
 ls output/*/oww output/*/mww       # models to score
-ls data/recordings/holdout/           # what to score them against
-ls data/corpus/eval/negatives_tts/    # the adversarial corpus
+ls data/recordings/<wake_word>/holdout/   # what to score them against
+ls data/corpus/<wake_word>/eval/negatives_tts/   # the adversarial corpus
 ```
 
 If the negatives are missing, `eval_model.py` and `compare_models.py` both exit before
@@ -126,24 +126,24 @@ so the invocation is the plain-path form, from the repo root:
 
 # the four gates, one model
 src/eval/.venv/bin/python src/eval/src/eval_model.py \
-    --model output/<wake_word>/oww/<wake_word>_<tag>.onnx
+    --wake-word "<wake word>" --model output/<wake_word>/oww/<wake_word>_<tag>.onnx
 
 # is the new run better than the last one
 src/eval/.venv/bin/python src/eval/src/compare_models.py \
-    --models output/<wake_word>/oww/<new>.onnx output/<wake_word>/oww/<previous-best>.onnx
+    --wake-word "<wake word>" --models output/<wake_word>/oww/<new>.onnx output/<wake_word>/oww/<previous-best>.onnx
 
 # openWakeWord candidate against the microWakeWord build
-src/eval/.venv/bin/python src/eval/src/compare_models.py --models \
+src/eval/.venv/bin/python src/eval/src/compare_models.py --wake-word "<wake word>" --models \
     output/<wake_word>/oww/<wake_word>_<tag>.onnx \
     output/<wake_word>/mww/<wake_word>_<tag>.json
 
 # choosing a deployment operating point for one model
-src/eval/.venv/bin/python src/eval/src/compare_models.py --models M --sweep
+src/eval/.venv/bin/python src/eval/src/compare_models.py --wake-word "<wake word>" --models M --sweep
 
 # CONTAINER - module form, from src/eval/
 # the four gates, one model
 docker compose run --rm eval python -m eval.eval_model \
-    --model output/<wake_word>/oww/<wake_word>_<tag>.onnx
+    --wake-word "<wake word>" --model output/<wake_word>/oww/<wake_word>_<tag>.onnx
 
 # the other three commands, with `docker compose run --rm eval python -m
 # eval.compare_models` in place of `src/eval/.venv/bin/python src/eval/src/compare_models.py`
@@ -154,7 +154,7 @@ reads `probability_cutoff` and `sliding_window_size` from the manifest, so scori
 JSON puts the manifest under test too. Score a bare `.tflite` and it is not.
 
 No `--positives`/`--runon` needed: they default to every held-out speaker directory
-under `data/recordings/holdout/`, with the `_runon` ones kept separate.
+under `data/recordings/<wake_word>/holdout/`, with the `_runon` ones kept separate.
 
 ## Five ways to misread the output
 
@@ -323,7 +323,7 @@ and moved a little has told you nothing. Say which single variable moved, and re
 
 ## The voice-holdout ranking set
 
-A third corpus at `data/corpus/eval/voice_holdout_tts/`, rendered by
+A third corpus at `data/corpus/<wake_word>/eval/voice_holdout_tts/`, rendered by
 `make render-voice-holdout` (Kokoro on 8900): positives from the voices the
 recipe's `voice_holdout:` section **holds out of every corpus build of its own
 word** (oww and
@@ -333,10 +333,10 @@ truth, so a stale list is an error, not a skip), at speeds inside the
 it is a low-variance *ranking* signal for sweep points — a real n per
 point — not a speaker-generalisation gate. A synthetic voice is not a
 person, and the four gates above stay on the real held-out recordings in
-`data/recordings/holdout/`, which the top two or three of the ranked
+`data/recordings/<wake_word>/holdout/`, which the top two or three of the ranked
 points go to. The directory is labelled by its own `set.json`; score it
 with the separate block, never merged into the gates:
 
 ```bash
-src/eval/.venv/bin/python src/eval/src/eval_model.py --model M --voice-holdout-set data/corpus/eval/voice_holdout_tts
+src/eval/.venv/bin/python src/eval/src/eval_model.py --wake-word "<wake word>" --model M --voice-holdout-set data/corpus/<wake_word>/eval/voice_holdout_tts
 ```

@@ -4,9 +4,8 @@
 #
 #   data/external/      audioset, fma, mit_rirs, oww feature .npy, cloned repos
 #   data/piper_voices/  piper voices, pulled on demand into the container volume
-#   data/recordings/    real samples, raw takes, holdout   (1 · record)
-#   data/corpus/        generated positives / negatives    (2 · train)
-#   data/corpus/eval/   the TTS evaluation corpora         (3 · eval)
+#   data/recordings/    real samples, raw takes, holdout - per wake word   (1 · record)
+#   data/corpus/        generated corpora - per wake word, eval/ included  (2 · train, 3 · eval)
 #   data/audit/         src/scripts/ one-off measurement output
 #
 #   output/             trained oww + mww models, training_config.yaml, scorecards

@@ -44,7 +44,7 @@ Then, one directory per speaker:
 uv run record_samples.py \
   --wake-word "<wake word>" \
   --device 0 \
-  --output-dir data/recordings/samples/speaker1
+  --output-dir data/recordings/<wake_word>/samples/speaker1
 ```
 
 Take-by-take: ENTER arms, "SPEAK NOW!" cues, 2 s captured, levels reported. `q` or Ctrl-C
@@ -53,7 +53,7 @@ days, and the recorder refuses to overwrite an existing take.
 
 For a longer stretch, `--continuous 120` records one block and splits it on silence — say
 the phrase, pause ~1 s, repeat. Ctrl-C stops early and keeps what was captured. The unsplit
-take is kept under `data/recordings/raw/<speaker>/`, so it can be re-cut with
+take is kept under `data/recordings/<wake_word>/raw/<speaker>/`, so it can be re-cut with
 `--resegment <wav> --dry-run` while tuning `--gap-ms`/`--min-ms` without recording again.
 
 ## What to tell the user before they start
@@ -80,11 +80,11 @@ Things you *can* do, and should:
 
 ```bash
 # how many, per speaker
-find data/recordings/samples -name '*.wav' | wc -l
-ls data/recordings/samples/
+find data/recordings/<wake_word>/samples -name '*.wav' | wc -l
+ls data/recordings/<wake_word>/samples/
 
 # where speech sits in openWakeWord's detection window
-cd src/record && uv run python check_alignment.py data/recordings/samples/
+cd src/record && uv run python check_alignment.py data/recordings/<wake_word>/samples/
 ```
 
 Trailing silence pushes the phrase earlier than the alignment the model sees when
@@ -98,12 +98,12 @@ closer, or find a quieter room.
 ## Holdout
 
 Holdout clips exist to be evaluated against and are **never trained on**. They belong in
-`data/recordings/holdout/`, kept out of `data/recordings/samples/` entirely, since the
+`data/recordings/<wake_word>/holdout/`, kept out of `data/recordings/<wake_word>/samples/` entirely, since the
 trainer globs the samples tree recursively for positives.
 
 ```bash
 cd src/record
-uv run record_samples.py --holdout --speaker speaker1
+uv run record_samples.py --wake-word "<wake word>" --holdout --speaker speaker1
 ```
 
 `--speaker` picks the subdirectory under whichever of `samples/` or `holdout/` applies,
