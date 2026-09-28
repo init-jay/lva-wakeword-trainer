@@ -27,6 +27,27 @@ each **STOP** until the human has done their part.
    `train-apple-silicon` skill carries both routes, including the oww
    tflite-conversion workaround and the host Piper for mww. Hours.
    Ask which target they want before running both.
+
+   **Launch in the background and poll the log - never foreground.** A host run
+   is 15-35 minutes (docs/SPEED.md) against an agent Bash-tool cap of ~10 minutes:
+   foreground, it is killed at ten and the run dies with the shell.
+
+   ```bash
+   nohup ./src/scripts/run-oww-training-applesilicon.sh "X" > train.out 2>&1 &
+   tail -n1 train.out   # the scripts print `log: <path>` as their FIRST line
+   ```
+
+   The sentinel contract - grep the log for these, not the exit code:
+   `=== DONE` means the model was written (the scripts verify it on disk;
+   `=== TRAINING FAILED` means it was not - including a run whose model file
+   is unchanged from before, i.e. the previous model). On the oww path the
+   exit code is NOT the signal: openwakeword exits 1 on its own tflite
+   conversion, which the repo replaces (the "model was WRITTEN" comment in
+   src/scripts/run-oww-training.sh and run-oww-training-applesilicon.sh).
+
+   `make status` (JSON=1 for machine-readable) is the single state surface:
+   recipes, venvs, external data, recordings per speaker, last run tag, ledger
+   tail, staging - read-only, seconds, no venv needed.
 5. **Eval.** Use `eval-models`. Report per speaker and at matched false accepts.
 6. **STOP — preflight.** Also needs their microphone:
    `cd src/preflight && uv run test_model.py --model ../../output/<x>/mww/<tag>.json`

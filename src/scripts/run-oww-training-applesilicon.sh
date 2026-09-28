@@ -275,8 +275,11 @@ fi
 SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
 MODEL="output/${SAFE_NAME}/oww/${SAFE_NAME}.onnx"
 STAMP="$(date +%Y%m%d-%H%M%S)"
-mkdir -p src/logs
-LOG="src/logs/training-${SAFE_NAME}-macos-${STAMP}.log"
+mkdir -p logs
+LOG="logs/training-${SAFE_NAME}-macos-${STAMP}.log"
+# The FIRST line of output: a backgrounded run's stdout is often never read,
+# so the log handle must be discoverable before any stage can fail.
+echo "log: $LOG"
 
 # SMOKE=1 (header): the smoke directory is named HERE, not in train.py, because
 # this script's success check has to look at exactly the file the run writes -
@@ -307,7 +310,7 @@ BEFORE_SUM=""
 [[ -f "$MODEL" ]] && BEFORE_SUM="$(md5 -q "$MODEL")"
 
 echo "=== $(date '+%H:%M:%S')  host trainer, $("$ENV_DIR/.venv/bin/python" -c 'import torch; print("torch", torch.__version__)')"
-echo "=== $(date '+%H:%M:%S')  training (log: $LOG)"
+echo "=== $(date '+%H:%M:%S')  training"
 
 # `script -q` for a pty, so tqdm draws its progress bar - the same reason
 # run-oww-training.sh uses it. BSD script takes the command as trailing arguments,

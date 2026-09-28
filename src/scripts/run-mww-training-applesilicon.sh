@@ -376,8 +376,11 @@ run() {
 }
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
-mkdir -p src/logs
-LOG="src/logs/training-${SAFE_NAME}-macos-${STAMP}.log"
+mkdir -p logs
+LOG="logs/training-${SAFE_NAME}-macos-${STAMP}.log"
+# The FIRST line of output: a backgrounded run's stdout is often never read,
+# so the log handle must be discoverable before any stage can fail.
+echo "log: $LOG"
 
 # === 1. corpus ====================================================================
 #

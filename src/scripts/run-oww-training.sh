@@ -60,8 +60,11 @@ SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
 MODEL="output/${SAFE_NAME}/oww/${SAFE_NAME}.onnx"
 CORPUS="data/corpus/${SAFE_NAME}/oww"
 STAMP="$(date +%Y%m%d-%H%M%S)"
-mkdir -p src/logs
-LOG="src/logs/training-${SAFE_NAME}-${STAMP}.log"
+mkdir -p logs
+LOG="logs/training-${SAFE_NAME}-${STAMP}.log"
+# The FIRST line of output: a backgrounded run's stdout is often never read,
+# so the log handle must be discoverable before any stage can fail.
+echo "log: $LOG"
 
 # Record the current model so a stale one cannot be mistaken for this run's output.
 BEFORE_SUM=""
@@ -229,7 +232,7 @@ fi
 
 # Generation and feature computation. Kokoro is needed for the first, and the GPU
 # headroom it occupies is harmless until training starts.
-echo "=== $(date '+%H:%M:%S')  training (log: $LOG)"
+echo "=== $(date '+%H:%M:%S')  training"
 : > "$LOG"
 
 # Stop Kokoro the moment feature computation finishes, freeing its VRAM before
