@@ -43,11 +43,13 @@ services:
       # imports cleanly and then finds no recipe at all.
       - ../../src/recipe:/app/src/recipe:ro
       - ../../output:/app/output
-      - ../../data/recordings/holdout:/app/data/recordings/holdout:ro
-      # Training positives, for the rare deliberate check against them. Scoring here
-      # reports TRAINING accuracy, and src/eval/src/paths.py warns when a run is pointed here.
-      - ../../data/recordings/samples:/app/data/recordings/samples:ro
-      - ../../data/corpus/eval:/app/data/corpus/eval
+      # The whole recordings tree, word-scoped (data/recordings/<wake_word>/{samples,holdout,raw}).
+      # Read-only: the eval image scores, it does not record. The holdout positional
+      # guarantee is inside the word dir, so the mount width is not what keeps it safe.
+      - ../../data/recordings:/app/data/recordings:ro
+      # The generated corpora, word-scoped (data/corpus/<wake_word>/{oww,mww,eval}).
+      # Read-write: generate_negatives.py / generate_positives.py write here.
+      - ../../data/corpus:/app/data/corpus
     # /app/src is the import root: `python -m train.mww.manifest` resolves the
     # mounted package from there, the same convention as the trainer images.
     environment:

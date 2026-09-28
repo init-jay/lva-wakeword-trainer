@@ -120,7 +120,7 @@ def rec(tag, seed, value, det, fa, extend=(9, 148), hey_other=(2, 150),
         eval_block["threshold_sweep"] = curve
     if vhs is not None:
         eval_block["voice_holdout_set"] = {
-            "directory": "data/corpus/eval/voice_holdout_tts",
+            "directory": "data/corpus/okay_jarvis/eval/voice_holdout_tts",
             "n": 45,
             "detected": int(round(vhs * 45)),
             "rate": vhs,

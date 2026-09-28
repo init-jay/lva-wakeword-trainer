@@ -54,17 +54,17 @@ is arithmetic over scores. Two consequences worth stating rather than discoverin
   directly: it is the deployed quantity either way.
 
 POSITIVES DEFAULT TO THE HELD-OUT RECORDINGS, not to everything recorded. The trainer
-globs data/recordings/samples/ recursively, so scoring these gates against that tree
+globs data/recordings/<wake_word>/samples/ recursively, so scoring these gates against that tree
 measures memorisation; `src/eval/src/paths.py` carries the split and warns if a run is pointed
 back inside it. The `_runon` directories are excluded here on purpose - this file
 builds its own command-following case by concatenating a command onto a plain clip,
 so a real run-on recording among the positives would be scored as the phrase alone.
 
 Usage, from the repo root:
-    python -m eval.eval_model --model output/<wake_word>/oww/<wake_word>_<commit>.onnx   # the eval image
-    src/eval/.venv/bin/python src/eval/src/eval_model.py --model output/<wake_word>/oww/<wake_word>_<commit>.onnx   # the host env
-    python -m eval.eval_model --model M --positives data/recordings/holdout/speaker1
-    python -m eval.eval_model --model M --threshold 0.7 --verbose
+    python -m eval.eval_model --wake-word "<wake word>" --model output/<wake_word>/oww/<wake_word>_<commit>.onnx   # the eval image
+    src/eval/.venv/bin/python src/eval/src/eval_model.py --wake-word "<wake word>" --model output/<wake_word>/oww/<wake_word>_<commit>.onnx   # the host env
+    python -m eval.eval_model --wake-word "<wake word>" --model M --positives data/recordings/<wake_word>/holdout/speaker1
+    python -m eval.eval_model --wake-word "<wake word>" --model M --threshold 0.7 --verbose
 
 Needs onnxruntime and an importable openwakeword for .onnx models, plus a TFLite
 runtime and pymicro-features for microWakeWord ones. The `eval` compose service has
@@ -251,7 +251,7 @@ def load_dir(directory, recursive=True):
     return out, skipped
 
 
-def load_by_speaker(directories, limit=None):
+def load_by_speaker(directories, limit=None, wake_word=None):
     """{speaker: clips}, one entry per directory, in the order given.
 
     THE SPEAKER TRAVELS BESIDE THE CLIPS, NOT INSIDE THEM. Folding it into the clip
@@ -271,7 +271,7 @@ def load_by_speaker(directories, limit=None):
             clips = clips[:limit]
         if not clips:
             continue
-        label = paths.speaker_label(directory)
+        label = paths.speaker_label(directory, wake_word)
         # Two directories can share a basename when they come from different trees.
         by_speaker[str(directory) if label in by_speaker else label] = clips
     return by_speaker, skipped_total
@@ -402,13 +402,17 @@ def main():
     parser = argparse.ArgumentParser(
         description="Score a wake-word model against the pipeline's gates",
         formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--wake-word", required=True,
+                        help="The word the model was trained for - selects "
+                             "data/recordings/<wake_word>/ and data/corpus/<wake_word>/eval/")
     parser.add_argument("--model", required=True, help="Trained .onnx or .tflite model")
     parser.add_argument("--positives", nargs="+", default=None,
                         help="Directories of positive clips, searched recursively "
                              "(default: the held-out speaker directories under "
-                             "data/recordings/holdout/, excluding the _runon ones)")
-    parser.add_argument("--negatives", default=str(paths.NEGATIVES_DIR),
-                        help="Directory from generate_negatives.py (default: %(default)s)")
+                             "data/recordings/<wake_word>/holdout/, excluding the _runon ones)")
+    parser.add_argument("--negatives", default=None,
+                        help="Directory from generate_negatives.py (default: "
+                             "data/corpus/<wake_word>/eval/negatives_tts)")
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--command-gap-ms", type=float, default=300,
                         help="Pause to test alongside the no-pause case (default: %(default)s)")
@@ -444,10 +448,12 @@ def main():
     backend = backends.load(args.model, sliding_window_size=args.sliding_window_size)
     rng = np.random.default_rng(0)
 
-    positive_dirs = args.positives or [str(d) for d in paths.holdout_dirs(runon=False)]
-    paths.warn_if_trained_on(positive_dirs)
+    if args.negatives is None:
+        args.negatives = str(paths.negatives_dir(args.wake_word))
+    positive_dirs = args.positives or [str(d) for d in paths.holdout_dirs(runon=False, wake_word=args.wake_word)]
+    paths.warn_if_trained_on(positive_dirs, args.wake_word)
 
-    by_speaker, skipped_p = load_by_speaker(positive_dirs, limit=args.limit)
+    by_speaker, skipped_p = load_by_speaker(positive_dirs, limit=args.limit, wake_word=args.wake_word)
     positives = [clip for clips in by_speaker.values() for clip in clips]
     speaker_spans = spans_for(by_speaker)
 

@@ -28,21 +28,21 @@ an int8 output has 256 levels and the sweep goes to 0.01.
 
 Usage, from the repo root:
     # every held-out speaker, plain and run-on found automatically
-    python -m eval.compare_models --models output/<wake_word>/oww/*.onnx
+    python -m eval.compare_models --wake-word "<wake word>" --models output/<wake_word>/oww/*.onnx
 
     # or name the directories explicitly
-    python -m eval.compare_models --models M \\
-        --positives data/recordings/holdout/speaker1 \\
-        --runon data/recordings/holdout/speaker1_runon
+    python -m eval.compare_models --wake-word "<wake word>" --models M \\
+        --positives data/recordings/<wake_word>/holdout/speaker1 \\
+        --runon data/recordings/<wake_word>/holdout/speaker1_runon
 
     # one model, with a threshold sweep for choosing a deployment operating point
     python -m eval.compare_models \\
-        --models output/<wake_word>/oww/<wake_word>_<commit>.tflite --sweep
+        --wake-word "<wake word>" --models output/<wake_word>/oww/<wake_word>_<commit>.tflite --sweep
 
     # openWakeWord ship candidate against the microWakeWord model, on the Mac.
     # Pass the mWW .json, not its .tflite: the manifest carries the cutoff and the
     # sliding window, so scoring it puts those under test too.
-    docker compose run --rm eval python -m eval.compare_models --models \\
+    docker compose run --rm eval python -m eval.compare_models --wake-word "<wake word>" --models \\
         output/<wake_word>/oww/<wake_word>_<commit>.onnx \\
         output/<wake_word>/mww/<wake_word>_<commit>.json
 
@@ -52,7 +52,7 @@ Usage, from the repo root:
 
 POSITIVES MUST BE RECORDINGS THE MODEL HAS NOT TRAINED ON, which is why the defaults
 come from `src/eval/src/paths.py` rather than being spelled out here: the trainer globs
-data/recordings/samples/ recursively, so scoring against that tree reports training
+data/recordings/<wake_word>/samples/ recursively, so scoring against that tree reports training
 accuracy - it overstated detection by ~10 points during this work. Passing a
 directory inside samples/ anyway is warned about, not blocked.
 
@@ -163,18 +163,22 @@ def main():
     parser = argparse.ArgumentParser(
         description="Compare wake-word models at matched false-accept rates",
         formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--wake-word", required=True,
+                        help="The word the models were trained for - selects "
+                             "data/recordings/<wake_word>/ and data/corpus/<wake_word>/eval/")
     parser.add_argument("--models", nargs="+", required=True,
                         help=".onnx or .tflite models to compare")
     parser.add_argument("--positives", nargs="+", default=None,
                         help="Held-out clips of the phrase alone (default: every "
-                             "speaker directory under data/recordings/holdout/ "
+                             "speaker directory under data/recordings/<wake_word>/holdout/ "
                              "that is not a _runon one)")
     parser.add_argument("--runon", nargs="+", default=None,
                         help="Held-out clips of the phrase running into a command "
                              "(default: the _runon directories under "
-                             "data/recordings/holdout/)")
-    parser.add_argument("--negatives", default=str(paths.NEGATIVES_DIR),
-                        help="Corpus from generate_negatives.py (default: %(default)s)")
+                             "data/recordings/<wake_word>/holdout/)")
+    parser.add_argument("--negatives", default=None,
+                        help="Corpus from generate_negatives.py (default: "
+                             "data/corpus/<wake_word>/eval/negatives_tts)")
     parser.add_argument("--sweep", action="store_true",
                         help="Also print a threshold sweep per model, for choosing a "
                              "deployment operating point")
@@ -205,9 +209,11 @@ def main():
     # Resolved separately so the two sets stay disjoint. Both loaders recurse, so a
     # single --positives pointed at the holdout root would swallow the _runon
     # directories too and report them as clean detections.
-    plain_dirs = args.positives or [str(d) for d in paths.holdout_dirs(runon=False)]
-    runon_dirs = args.runon or [str(d) for d in paths.holdout_dirs(runon=True)]
-    paths.warn_if_trained_on(plain_dirs + runon_dirs)
+    if args.negatives is None:
+        args.negatives = str(paths.negatives_dir(args.wake_word))
+    plain_dirs = args.positives or [str(d) for d in paths.holdout_dirs(runon=False, wake_word=args.wake_word)]
+    runon_dirs = args.runon or [str(d) for d in paths.holdout_dirs(runon=True, wake_word=args.wake_word)]
+    paths.warn_if_trained_on(plain_dirs + runon_dirs, args.wake_word)
 
     # `spans` records where each speaker's clips sit in the flat list, so the
     # per-speaker view below is slicing done after one scoring pass - never a second
@@ -221,7 +227,7 @@ def main():
             found, _ = ev.load_dir(path)
             if found:
                 key_spans.append(
-                    (paths.speaker_label(path), len(clips), len(clips) + len(found)))
+                    (paths.speaker_label(path, args.wake_word), len(clips), len(clips) + len(found)))
                 clips.extend(found)
                 used.append(path)
         if clips:

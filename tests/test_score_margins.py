@@ -276,9 +276,9 @@ def test_an_empty_adversarial_set_refuses_naming_the_directory():
 def test_empty_positives_refuse_naming_the_directories():
     try:
         sm.require_measurable([0.5], [], "neg_dir",
-                              ["data/recordings/holdout/jay"])
+                              ["data/recordings/okay_jarvis/holdout/jay"])
     except SystemExit as e:
-        assert "data/recordings/holdout/jay" in str(e), e
+        assert "data/recordings/okay_jarvis/holdout/jay" in str(e), e
     else:
         raise AssertionError("an empty positive set must refuse")
 

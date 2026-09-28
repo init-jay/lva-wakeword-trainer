@@ -373,9 +373,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model", required=True,
                    help="manifest .json (preferred for microWakeWord), .tflite or .onnx")
+    p.add_argument("--wake-word", required=True,
+                   help="the word the model was trained for")
     p.add_argument("--clips", default=None,
                    help="Directory used for the self-check (default: the first "
-                        "held-out speaker directory under data/recordings/holdout/)")
+                        "held-out speaker directory under "
+                        "data/recordings/<wake_word>/holdout/)")
     p.add_argument("--limit", type=int, default=8)
     p.add_argument("--sliding-window-size", type=int, default=None)
     args = p.parse_args()
@@ -392,9 +395,9 @@ def main():
     # One speaker is enough: this is a self-check on the backend, not a measurement
     # of the model, so it wants a handful of real clips rather than the whole holdout.
     if args.clips is None:
-        held_out = paths.holdout_dirs(runon=False)
+        held_out = paths.holdout_dirs(runon=False, wake_word=args.wake_word)
         if not held_out:
-            sys.exit(f"no held-out recordings under {paths.HOLDOUT_DIR}; record some "
+            sys.exit(f"no held-out recordings under {paths.holdout_dir(args.wake_word)}; record some "
                      f"with `record_samples.py --holdout --speaker NAME`, or pass "
                      f"--clips")
         args.clips = str(held_out[0])

@@ -556,7 +556,7 @@ def artifact_for(target, wake_word, out_dir, tag):
     return out_dir / f"{safe}_{tag}.onnx"
 
 
-def eval_cmd(eval_python, artifact, json_path, voice_holdout_set=None):
+def eval_cmd(eval_python, wake_word, artifact, json_path, voice_holdout_set=None):
     """The eval subprocess command for one filed run.
 
     Plain-path invocation, not `python -m eval.eval_model`: the module form
@@ -572,6 +572,7 @@ def eval_cmd(eval_python, artifact, json_path, voice_holdout_set=None):
     versus the real holdout - the recipe's `voice_holdout:` section).
     """
     cmd = [str(eval_python), str(REPO_ROOT / "src" / "eval" / "src" / "eval_model.py"),
+           "--wake-word", wake_word,
            "--model", str(artifact), "--json", str(json_path)]
     if voice_holdout_set:
         cmd += ["--voice-holdout-set", str(voice_holdout_set)]
@@ -807,7 +808,7 @@ def main():
             json_path = out_dir / "eval" / f"{tag}.json"
             json_path.parent.mkdir(parents=True, exist_ok=True)
             result = run_stage("eval",
-                               eval_cmd(eval_python, artifact, json_path,
+                               eval_cmd(eval_python, wake_word, artifact, json_path,
                                         voice_holdout_set),
                                stage_times)
             if result.returncode != 0 or not json_path.is_file():

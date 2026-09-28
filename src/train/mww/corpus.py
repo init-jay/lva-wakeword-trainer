@@ -162,7 +162,9 @@ def main():
                         "corpus identity: a different value refuses the --skip reuse.")
     p.add_argument("--child-fraction", type=float, default=CHILD_STRETCH_FRACTION)
     p.add_argument("--corpus-root", default="data/corpus")
-    p.add_argument("--real-samples", default="data/recordings/samples")
+    p.add_argument("--real-samples", default=None,
+                   help="the word's real recordings (default: "
+                        "data/recordings/<wake_word>/samples)")
     p.add_argument("--negatives-file", default=None)
     p.add_argument("--clean", action="store_true",
                    help="delete an existing corpus first. Required to regenerate - "
@@ -197,6 +199,8 @@ def main():
                         "(the manifest written at the end of this stage) rather "
                         "than rebuilding it.")
     args = p.parse_args()
+    if args.real_samples is None:
+        args.real_samples = f"data/recordings/{args.wake_word.replace(' ', '_').lower()}/samples"
 
     if args.seed:
         # BEFORE any draw below: the stage must be a function of the seed, not

@@ -164,7 +164,7 @@ logs/ dir as `training-<word>-macos-<stamp>.log`.
 ## What survives a run, and what doesn't
 
 - The trainers `rmtree` their corpus **every run** — `data/corpus/` is
-  generated material. `data/recordings/` (samples + holdout) is what the
+  generated material. `data/recordings/` (per word: samples + holdout) is what the
   trainers read and is untouched. Never park personal data in `data/corpus/`.
 - A tag is code + data: `<commit>-d<audio hash>`. The data half moves between
   runs even when nothing changed (TTS is not bit-reproducible). A different

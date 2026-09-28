@@ -13,7 +13,7 @@ ones that move.
 - c half: data/corpus/<wake_word>/<target> - sha256 of the corpus.json manifest
   bytes if present (cheap to re-hash, names the audio across re-renders), else a
   tree digest over the scoped directory. Recordings are covered, not a separate
-  half: the build copies real clips into the corpus. data/recordings/holdout/ is
+  half: the build copies real clips into the corpus. data/recordings/<wake_word>/holdout/ is
   NOT hashed - recording more holdout must not change a model's identity. Fixed
   downloads (audioset, fma, rirs, ambient) and the derived feature caches are not
   hashed either.
@@ -95,7 +95,7 @@ def components(wake_word, target=None):
     if target is not None:
         corpus_root = corpus_root / target
     return [
-        ("recordings", REPO_ROOT / "data" / "recordings" / "samples"),
+        ("recordings", REPO_ROOT / "data" / "recordings" / safe / "samples"),
         ("corpus", corpus_root),
     ]
 

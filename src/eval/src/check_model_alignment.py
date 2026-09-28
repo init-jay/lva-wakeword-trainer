@@ -44,17 +44,17 @@ unlike `check_alignment.py` this does not run on a bare host. The eval image has
 everything the .onnx path needs and runs on the Mac:
 
     docker compose run --rm eval python -m eval.check_model_alignment \\
-        --model output/<wake_word>/oww/<wake_word>_<commit>.onnx
+        --wake-word "<wake word>" --model output/<wake_word>/oww/<wake_word>_<commit>.onnx
 
 A .tflite needs ai-edge-litert, which the eval image does not carry - it uses the
 deployment runtime's bundled interpreter instead - so use the trainer image for that.
 
 Usage:
     python -m eval.check_model_alignment \\
-        --model output/<wake_word>/oww/<wake_word>_<commit>.onnx
-    python -m eval.check_model_alignment --model M \\
-        --positives data/recordings/holdout/speaker1
-    python -m eval.check_model_alignment --model M --step 20 --max-gap 600
+        --wake-word "<wake word>" --model output/<wake_word>/oww/<wake_word>_<commit>.onnx
+    python -m eval.check_model_alignment --wake-word "<wake word>" --model M \\
+        --positives data/recordings/<wake_word>/holdout/speaker1
+    python -m eval.check_model_alignment --wake-word "<wake word>" --model M --step 20 --max-gap 600
 
 Run it as a MODULE, from the repo root (`python -m eval.check_model_alignment`, from
 /app in the image). The plain-path form (`python src/eval/src/check_model_alignment.py`)
@@ -224,6 +224,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="Measure the window alignment a trained model prefers",
         formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--wake-word", required=True,
+                        help="The word the model was trained for - selects "
+                             "data/recordings/<wake_word>/ for the defaults")
     parser.add_argument("--model", required=True,
                         help="Trained .onnx or .tflite model. Prefer the .tflite "
                              "if that is what you deploy - the two are not "
@@ -231,8 +234,8 @@ def main():
     parser.add_argument("--positives", nargs="+", default=None,
                         help="Directories of positive clips, searched recursively "
                              "(default: the held-out speaker directories under "
-                             "data/recordings/holdout/). Point it at "
-                             "data/recordings/samples/ to ask the same question of "
+                             "data/recordings/<wake_word>/holdout/). Point it at "
+                             "data/recordings/<wake_word>/samples/ to ask the same question of "
                              "the clips the model trained on.")
     parser.add_argument("--total-length", type=int, default=32000,
                         help="Window size in samples (default: %(default)s, what "
@@ -262,8 +265,8 @@ def main():
         print("       Pass --total-length to match the value training used.")
         sys.exit(1)
 
-    positive_dirs = args.positives or [str(d) for d in paths.holdout_dirs(runon=False)]
-    paths.warn_if_trained_on(positive_dirs)
+    positive_dirs = args.positives or [str(d) for d in paths.holdout_dirs(runon=False, wake_word=args.wake_word)]
+    paths.warn_if_trained_on(positive_dirs, args.wake_word)
 
     clips = load_clips(positive_dirs, trim=not args.no_trim, limit=args.limit)
     if not clips:
