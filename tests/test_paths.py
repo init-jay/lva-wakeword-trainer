@@ -117,11 +117,14 @@ def test_speaker_label_is_the_basename_without_a_word():
 # ---------------------------------------------------------------------------
 
 # The old layout's path strings, in prose or code. The <word> placeholder is
-# the only correct form: data/recordings/<word>/samples etc.
+# the only correct form: data/recordings/<word>/samples etc. Both trees were
+# wordless in the old layout - corpus/eval/ was the wordless eval half, now
+# data/corpus/<word>/eval/.
 WORDLESS = {
     "data/recordings/samples": "data/recordings/<word>/samples",
     "data/recordings/holdout": "data/recordings/<word>/holdout",
     "data/recordings/raw": "data/recordings/<word>/raw",
+    "data/corpus/eval": "data/corpus/<word>/eval",
 }
 # A join of a name straight to one of the recordings children, with no word
 # expression in between:  rec / "samples"   (the f0_coverage shape)
@@ -136,16 +139,24 @@ ASSIGN_TO_RECORDINGS = re.compile(r"^(\w+)\s*=[^=].*['\"]recordings['\"]\s*(?:#.
 # opening paren/comma): `samples = word / "samples"` has its variable on the
 # right and must not read as the recordings root being rejoined.
 JOIN_BACK = re.compile(r"(?:^|[\s(,])(\w+)\s*/\s*['\"](?:samples|holdout|raw)['\"]")
+# The recordings-root CONSTANT joined to a child, wherever it was defined -
+# the cross-file form neither of the two rules above sees: paths.py and
+# record_samples.py both name their wordless root RECORDINGS_ROOT, and an
+# import of it joined straight to a child is the f0_coverage bug re-armed.
+# The samples/holdout/raw children exist only under a word dir, so such a
+# join is a regression by construction; a word in between never matches.
+ROOT_CONSTANT_JOIN = re.compile(r"\bRECORDINGS_ROOT\s*/\s*['\"](?:samples|holdout|raw)['\"]")
 
 SKIP_DIRS = {".git", "__pycache__", ".venv", "data", "output", "logs", "node_modules"}
 SKIP_NAMES = {"uv.lock"}
 
 
 def _tracked_files():
-    # The same traversal test_record_pointers.py uses: everything in the repo
-    # except the untracked/generated trees (data/, output/ hold all the
-    # legitimate wordless-free content, and no tracked file should carry a
-    # wordless path).
+    # The same traversal test_record_pointers.py uses: every text file in the
+    # working tree, except the untracked/generated trees (data/, output/, .venv,
+    # logs - all gitignored, so nothing legitimate hides there and nothing
+    # tracked is skipped). Untracked scratch at the repo root IS scanned, which
+    # is the point: a wordless path in a note still reads like the new layout.
     for path in sorted(REPO_ROOT.rglob("*")):
         if not path.is_file() or path.name in SKIP_NAMES or path == Path(__file__):
             continue
@@ -168,8 +179,22 @@ def test_no_tracked_file_carries_a_wordless_recordings_path():
             if ADJACENT_JOIN.search(ln):
                 hits.append(f"{rel}:{i}: {ln.strip()}  (join with no word in between)")
     assert not hits, (
-        "wordless data/recordings path(s) back in the tree - the word is the "
-        "first level under recordings/ in this layout:\n    " + "\n    ".join(hits[:20]))
+        "wordless data/ path(s) back in the tree - the word is the first "
+        "level under recordings/ and corpus/ in this layout:\n    " + "\n    ".join(hits[:20]))
+
+
+def test_no_recordings_root_constant_joins_a_child():
+    # RECORDINGS_ROOT is the wordless root by its very name; the
+    # samples/holdout/raw children exist only under a word dir, so joining it
+    # to one without a word expression in between is the regression itself.
+    # Kept apart from the scan above because this one is an identifier rule
+    # (the quoted-string rules do not see a constant import).
+    hits = [f"{rel}:{i}: {ln.strip()}"
+            for rel, lines in _tracked_files() if rel.suffix == ".py"
+            for i, ln in enumerate(lines, 1) if ROOT_CONSTANT_JOIN.search(ln)]
+    assert not hits, (
+        "RECORDINGS_ROOT joined to a recordings child with no word in between:\n    "
+        + "\n    ".join(hits[:20]))
 
 
 def test_no_variable_rejoins_the_recordings_root_without_a_word():
