@@ -17,7 +17,7 @@ PY_MWW := src/train/train-mww-applesilicon/.venv/bin/python
 
 .DEFAULT_GOAL := help
 
-.PHONY: help smoke-oww smoke-mww test fleet eval eval-docker corpus-oww corpus-mww render-voice-holdout .WAKE-CHECK
+.PHONY: help status smoke-oww smoke-mww test fleet eval eval-docker corpus-oww corpus-mww render-voice-holdout .WAKE-CHECK
 
 # Order-only prerequisite of every WAKE-consuming target: a recipe exit is
 # reported as "Error <n>" and makes stop with its own exit 2, so the guard is
@@ -27,6 +27,9 @@ PY_MWW := src/train/train-mww-applesilicon/.venv/bin/python
 
 help:
 	@echo "make help           this list"
+	@echo "make status         where the pipeline stands: recipes, venvs, external data,"
+	@echo "                    recordings per speaker, last run, ledger, staging. Seconds,"
+	@echo "                    read-only, no venv; JSON=1 for machine-readable output"
 	@echo "make smoke-oww      end-to-end check of the oww pipeline; minutes on a Mac,"
 	@echo "                    scaling with corpus size (measured timings: docs/SPEED.md)"
 	@echo "                    (corpus REUSED, no TTS; the cost is the forced feature recompute)"
@@ -53,6 +56,12 @@ help:
 # train 200 steps, do the real tflite conversion. The model lands in a smoke
 # directory; the canonical model and .last_run_tag are untouched (src/train/oww/
 # train.py --smoke).
+
+# The single state surface (src/scripts/status.py): read-only over the ledger,
+# .last_run_tag and the scorecards; stdlib only, so it runs on a cold clone
+# before any venv exists. JSON=1 is the agent path.
+status:
+	@python3 src/scripts/status.py $(if $(JSON),--json)
 smoke-oww: | .WAKE-CHECK
 	SMOKE=1 ./src/scripts/run-oww-training-applesilicon.sh "$(WAKE)"
 

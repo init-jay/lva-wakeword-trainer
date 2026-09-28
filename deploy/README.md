@@ -37,7 +37,8 @@ for r in map(json.loads, open('deploy/scorecards.jsonl')):
 ```
 
 This file keeps the rules for changing what is staged and the traps that produce wrong
-rows. Numbers belong in the JSONL and in the curve CSVs under `logs/scorecurves/`.
+rows. Numbers belong in the JSONL and in the curve CSVs, wherever the operator's
+`--csv` pointed.
 
 The narrative that does not fit in a row — what is on a given satellite, what was retracted,
 what no measurement here has cleared — lives per wake word in `deploy/<word>.md`, beside the
@@ -53,8 +54,9 @@ the adversarial set it loaded (`ADV_FA_CONSTRAINT`, the largest count strictly i
 so the budget moves with the set instead of being a number somebody typed.
 
 Every row is read at that budget or tighter, on the held-out real recordings, in **one
-scoring pass over one set of clips**. Curves land in `logs/scorecurves/*.csv`; that
-directory is gitignored, so a reviewer cannot open them — regenerate any row with
+scoring pass over one set of clips**. Curves land where the operator's `--csv`
+points (for the example word that tree is committed with its scorecard rows, in the
+word's record, since a gitignored tree cannot be reviewed); regenerate any row with
 
 ```bash
 src/eval/.venv/bin/python src/scripts/score_margins.py --model <path> \
@@ -152,8 +154,8 @@ relying on them, they are not ours to keep stable.
 - **New measurement → new `scorecards.jsonl` row**, with `artifact`, `md5_prefix`,
   `threshold`, `positives`, `negatives` and `budget` filled in. A row without them is not
   checkable, and an unchecked row gets cited as fact.
-- **The threshold in each row is measured**, from the curve in `logs/scorecurves/`, not
-  defaulted — and it is the threshold the satellite runs at, not a nearby one.
+- **The threshold in each row is measured**, from the curve CSV the `--csv`
+  invocation wrote for that row, not defaulted — and it is the threshold the satellite runs at, not a nearby one.
 - **`status` belongs to the artifact, and exactly one row per target is `staged`.** That row's
   `threshold` is the cutoff the staged manifest or ESPHome JSON actually ships. Every other row
   for the same artifact is a curve reading: give it `reference` and say in `note` why it exists.

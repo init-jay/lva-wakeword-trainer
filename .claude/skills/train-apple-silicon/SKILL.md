@@ -90,8 +90,11 @@ check exists:
   do not hand-patch — re-run `./src/scripts/setup-applesilicon-trainer.sh`; nothing
   in the run script ever writes to the clone.
 
-The log lands in the repo's **logs/** as `training-<word>-macos-YYYYMMDD-HHMMSS.log`
-(three stages to watch: corpus generation, feature extraction, training).
+The log lands in the repo's top-level **logs/** as `training-<word>-macos-YYYYMMDD-HHMMSS.log`
+(three stages to watch: corpus generation, feature extraction, training). The run
+scripts print `log: <path>` as their first line of output, and the run ends with
+`=== DONE` (the model was written) or `=== TRAINING FAILED` - grep for those rather
+than the exit code.
 
 **The real signal is the footer, not the exit code.** Whether the model was
 *written, and changed since before the run* (md5), is what the script checks —
@@ -158,7 +161,7 @@ directories are writable (the Docker trainers run as root), and verifies the
 clone is still at the pinned commit and still carries that patch — if either
 check fails, re-run the setup script (it forces the pin and re-applies). Same knobs as the container path:
 `SKIP_CORPUS=1`, `SKIP_FEATURES=1`, `MAX_FAPH=…`. The log lands in the repo's
-logs/ dir as `training-<word>-macos-<stamp>.log`.
+top-level logs/ dir as `training-<word>-macos-<stamp>.log`.
 
 
 ## What survives a run, and what doesn't

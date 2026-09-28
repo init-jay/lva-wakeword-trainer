@@ -63,7 +63,9 @@ __pycache__/
 *.zip
 .claude/settings.json
 
-# training logs - one per run, written by the run-*.sh scripts into src/logs/
+# training logs - one per run, written by the run-*.sh scripts into logs/
+# (the top-level dir is the only one: a split into src/logs/ went unnoticed for
+# months because this bare pattern matches at any depth)
 logs/
 *.log
 
