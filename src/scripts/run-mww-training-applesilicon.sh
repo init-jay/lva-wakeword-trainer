@@ -6,7 +6,7 @@
 #     ./src/scripts/setup-mww-applesilicon-trainer.sh                     # once
 #     uv run --project src/tts-service/engines/piper python -m piper_engine --port 8898   # another terminal
 #     uv run --project src/tts-service/engines/kokoro_mlx python -m kokoro_mlx_engine --port 8900  # another, for the default 30% mix
-#     ./src/scripts/run-mww-training-applesilicon.sh "hey seeree"
+#     ./src/scripts/run-mww-training-applesilicon.sh "<wake word>"
 #
 # KOKORO_FRACTION (default 0.3, or --kokoro-fraction on the command line) is the
 # share of the PHRASE-ALONE positive budget Kokoro renders instead of Piper -
@@ -56,7 +56,7 @@
 # models once, not per request (corpus/piper.py, PiperFleet):
 #
 #     PIPER_URLS="$(./src/scripts/start-tts-fleet.sh 4)" \
-#         ./src/scripts/run-mww-training-applesilicon.sh "hey seeree"
+#         ./src/scripts/run-mww-training-applesilicon.sh "<wake word>"
 #
 # One server stays PIPER_URL, unchanged; PIPER_URLS wins over it when both are
 # set, because a comma list is an explicit statement and a bare PIPER_URL left
@@ -70,7 +70,7 @@
 # smoke-<stamp> run directory (src/train/mww/train.py --smoke). The smoke-named model
 # files in output/<wake>/mww/ cannot be mistaken for a real run's archive:
 #
-#     SMOKE=1 ./src/scripts/run-mww-training-applesilicon.sh "hey seeree"
+#     SMOKE=1 ./src/scripts/run-mww-training-applesilicon.sh "<wake word>"
 
 set -euo pipefail
 

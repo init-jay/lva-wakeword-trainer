@@ -65,7 +65,7 @@ def rec(tag, seed, value, det, fa, extend=(9, 148), hey_other=(2, 150),
     adv_n = extend[1] + hey_other[1]
     adv_fired = extend[0] + hey_other[0]
     eval_block = {
-        "model": f"output/hey_seeree/oww/hey_seeree_{tag}.onnx",
+        "model": f"output/okay_jarvis/oww/okay_jarvis_{tag}.onnx",
         "threshold": threshold,
         "backend": "openWakeWord via openwakeword.model.Model (onnx)",
         "timestamp": "2026-09-23T00:00:00+00:00",
@@ -92,7 +92,7 @@ def rec(tag, seed, value, det, fa, extend=(9, 148), hey_other=(2, 150),
             "rate": det,
             "latency_median_ms": 27.03125,
             "latency_p90_ms": 155.0625,
-            "missed": [f"hey_seeree_{i:04d}.wav" for i in range(pos_n - pos_det)],
+            "missed": [f"okay_jarvis_{i:04d}.wav" for i in range(pos_n - pos_det)],
         },
         "per_speaker": {
             "jay": {"n": jay[1], "detected": jay[0],
@@ -128,13 +128,13 @@ def rec(tag, seed, value, det, fa, extend=(9, 148), hey_other=(2, 150),
             "missed": [],
         }
     return {
-        "wake_word": "hey seeree",
+        "wake_word": "okay jarvis",
         "target": "oww",
         "tag": tag,
         "corpus_id": corpus_id,
         "seed": seed,
         "config": {"steps": 25000, "lr": 0.003,
-                   "target_phrase": "hey seeree", "seed": seed},
+                   "target_phrase": "okay jarvis", "seed": seed},
         "wall_time": {"training (oww)": 938.6, "eval": 70.9},
         "eval_block": eval_block,
         "grid": {"real-vtlp": value},
@@ -152,7 +152,7 @@ def _run(records, grid_key="real-vtlp"):
         path.write_text("".join(json.dumps(r) + "\n" for r in records))
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            compare_arms.main(["--wake-word", "hey seeree",
+            compare_arms.main(["--wake-word", "okay jarvis",
                                "--grid-key", grid_key,
                                "--ledger", str(path)])
     return out.getvalue(), err.getvalue()

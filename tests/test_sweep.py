@@ -75,7 +75,7 @@ def test_grid_value_reaches_the_rendered_command_oww():
     # THE grid assertion: for every job, the grid value is in the exact
     # command string the real loop would run.
     for pi, gp, repeat, seed in _jobs():
-        cmd = sweep.trainer_cmd("oww", "/venv/bin/python", "hey seeree",
+        cmd = sweep.trainer_cmd("oww", "/venv/bin/python", "okay jarvis",
                                 base_args=[], point_args=sweep.options_to_args(gp),
                                 seed=seed)
         joined = " ".join(cmd)
@@ -87,7 +87,7 @@ def test_grid_value_reaches_the_rendered_command_oww():
 
 def test_grid_value_reaches_the_rendered_command_mww():
     for pi, gp, repeat, seed in _jobs():
-        cmd = sweep.trainer_cmd("mww", "/venv/bin/python", "hey seeree",
+        cmd = sweep.trainer_cmd("mww", "/venv/bin/python", "okay jarvis",
                                 base_args=[], point_args=sweep.options_to_args(gp),
                                 seed=seed, tag="some-tag")
         joined = " ".join(cmd)
@@ -100,7 +100,7 @@ def test_grid_overrides_base_not_the_other_way_around():
     # last occurrence, and trainer_cmd puts point_args after base_args.
     base = sweep.options_to_args({"training-steps": 50000})
     point = sweep.options_to_args({"training-steps": 25000})
-    cmd = sweep.trainer_cmd("oww", "python", "hey seeree", base, point, seed=1)
+    cmd = sweep.trainer_cmd("oww", "python", "okay jarvis", base, point, seed=1)
     i_base = cmd.index("50000")
     i_point = cmd.index("25000")
     assert i_point > i_base, "grid must come AFTER base to override it"
@@ -113,7 +113,7 @@ def test_repeated_grid_key_names_the_config_the_tag_would_name():
     # naming a different config from the run was the grid bug's mww half.
     for pi, gp, repeat, seed in _jobs():
         tag_args = [] + sweep.options_to_args(gp)
-        cmd = sweep.trainer_cmd("mww", "python", "hey seeree", [],
+        cmd = sweep.trainer_cmd("mww", "python", "okay jarvis", [],
                                 sweep.options_to_args(gp), seed=seed, tag="t")
         for i, a in enumerate(tag_args):
             assert a in cmd, f"tag argument {a!r} not in the run command"
@@ -139,7 +139,7 @@ def test_point_zero_repeats_run_corpus_reuse_not_auto():
     # main() computes, and it must reduce to exactly this rule when
     # corpus_axes is absent.
     for pi, gp, repeat, seed in _jobs():
-        cmd = sweep.trainer_cmd("oww", "python", "hey seeree", [],
+        cmd = sweep.trainer_cmd("oww", "python", "okay jarvis", [],
                                 sweep.options_to_args(gp), seed=seed,
                                 corpus_reuse=sweep.job_corpus_reuse(
                                     sweep.is_first_job(pi, repeat), repeat,
@@ -160,10 +160,10 @@ def test_mww_dry_run_build_label_only_for_first_job():
     # train stage itself takes no corpus mode flag (the corpus stage owns
     # the check), so there is no one-word equivalent to fix here - this
     # test pins that the label was already right and stays that way.
-    corpus = REPO_ROOT / "data" / "corpus" / "hey_seeree" / "mww"
+    corpus = REPO_ROOT / "data" / "corpus" / "okay_jarvis" / "mww"
     features = corpus / "features"
     for pi, gp, repeat, seed in _jobs():
-        action, _ = sweep.corpus_action("hey seeree", "mww", corpus, features,
+        action, _ = sweep.corpus_action("okay jarvis", "mww", corpus, features,
                                         pi == 0, True, "/python", [], {},
                                         first_job=sweep.is_first_job(pi, repeat))
         if pi == 0 and repeat == 0:
@@ -414,7 +414,7 @@ def test_mww_ambient_dirs_follow_the_ambient_flag():
     amb = ["data/external/mww_ambient/dinner_party",
            "data/external/mww_ambient/dinner_party_eval",
            "data/external/mww_ambient/speech"]
-    cmd = sweep.trainer_cmd("mww", "python", "hey seeree", base_args=[],
+    cmd = sweep.trainer_cmd("mww", "python", "okay jarvis", base_args=[],
                             point_args=["--training-steps", "10000"], seed=1,
                             tag="t", ambient=amb)
     assert "--ambient" in cmd, f"--ambient missing from {cmd!r}"
@@ -428,7 +428,7 @@ def test_mww_ambient_dirs_follow_the_ambient_flag():
 
 
 def test_mww_no_ambient_means_no_empty_ambient_flag():
-    cmd = sweep.trainer_cmd("mww", "python", "hey seeree", base_args=[],
+    cmd = sweep.trainer_cmd("mww", "python", "okay jarvis", base_args=[],
                             point_args=[], seed=1, tag="t", ambient=[])
     joined = " ".join(cmd)
     assert "--ambient" not in joined, \

@@ -81,7 +81,7 @@ def _build(**overrides):
     # emitted config, so a throwaway path per call keeps the assertions
     # about the weights and the tag-relevant top level, not the layout.
     kwargs = dict(
-        wake_word="hey seeree",
+        wake_word="okay jarvis",
         positives_dir=Path("tmp") / "pos",
         negatives_dir=Path("tmp") / "neg",
         ambient_dirs=[],
@@ -139,7 +139,7 @@ def test_the_clips_factory_does_not_hand_the_split_back_to_upstream():
     mmap_feature_set), which is precisely why nothing else would notice it being wired up
     with a seed later.
     """
-    fs = mww.clips_feature_set("dir", "hey seeree", 1.0, 0.1, [], [])
+    fs = mww.clips_feature_set("dir", "okay jarvis", 1.0, 0.1, [], [])
     settings = fs["clips_settings"]
     assert settings["random_split_seed"] is None, settings
     assert settings["split_count"] == 0.1, settings

@@ -156,7 +156,7 @@ PY
 
 echo
 echo "==> ready. Train with:"
-echo "      ./src/scripts/run-mww-training-applesilicon.sh \"hey seeree\""
+echo "      ./src/scripts/run-mww-training-applesilicon.sh \"<wake word>\""
 echo
 echo "    The corpus stage needs the engines running; start them in other terminals:"
 echo "      uv run --project src/tts-service/engines/piper python -m piper_engine --port 8898"

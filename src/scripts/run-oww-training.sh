@@ -3,9 +3,9 @@
 # Run a full training pass on the trainer host.
 #
 # Usage:
-#   ./src/scripts/run-oww-training.sh "hey seeree"
-#   ./src/scripts/run-oww-training.sh "hey seeree" --samples-per-voice 400 --training-steps 100000
-#   SKIP_CORPUS=1 ./src/scripts/run-oww-training.sh "hey seeree"
+#   ./src/scripts/run-oww-training.sh "<wake word>"
+#   ./src/scripts/run-oww-training.sh "<wake word>" --samples-per-voice 400 --training-steps 100000
+#   SKIP_CORPUS=1 ./src/scripts/run-oww-training.sh "<wake word>"
 #
 # Any extra arguments are passed through to train.py.
 #
@@ -42,7 +42,7 @@ if [[ ! "$WAKE_WORD" =~ ^[A-Za-z][A-Za-z\'â€™-]*([[:space:]]+[A-Za-z][A-Za-z\'â€
         echo "       It contains '='. Environment assignments must come BEFORE the" >&2
         echo "       script, and a pasted line continuation often loses them:" >&2
         echo "         export KOKORO_EXTERNAL=1 KOKORO_URL=tcp://<box>:8899" >&2
-        echo "         $0 \"hey seeree\"" >&2
+        echo "         $0 \"<wake word>\"" >&2
     fi
     exit 2
 fi
@@ -160,7 +160,7 @@ elif [[ -n "${KOKORO_EXTERNAL:-}" ]]; then
     # host engine (the in-process mlx one on a Mac, say) is:
     #
     #     KOKORO_EXTERNAL=1 KOKORO_URL=tcp://host.docker.internal:8900 \
-    #         ./src/scripts/run-oww-training.sh "hey seeree"
+    #         ./src/scripts/run-oww-training.sh "<wake word>"
     if [[ -z "${KOKORO_URL:-}" ]]; then
         echo "ERROR: KOKORO_EXTERNAL=1 but KOKORO_URL is unset." >&2
         echo "       Nothing will be started, so there is nothing to fall back to." >&2

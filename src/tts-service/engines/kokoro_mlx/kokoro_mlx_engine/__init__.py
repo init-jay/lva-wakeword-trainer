@@ -20,7 +20,7 @@ luxury: run-on positives are cut just after the wake word, and that boundary com
 from per-word times. The mechanism is exact rather than heuristic - Kokoro predicts a
 duration for every phoneme and the audio is rendered from precisely those durations,
 so word boundaries are correct by construction. Verified against Kokoro-FastAPI on
-the same phrase and voice: the cut after "seeree" agreed to 3 ms, against a
+the same phrase and voice: the cut after the wake word agreed to 3 ms, against a
 RUNON_TAIL_MS of 150-300 and the +153 ms error of the estimate-based fallback.
 
     upstream: https://github.com/gabrimatic/kokoro-mlx

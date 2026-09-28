@@ -11,7 +11,7 @@ implement inference itself - it drives two libraries from `__main__.py`:
 Both are used here exactly as LVA uses them, down to the chunk size and the order of
 calls. 
 
-    backend = load("output/hey_seeree/mww/hey_seeree_705c23b.json")
+    backend = load("output/<wake_word>/mww/<wake_word>_<commit>.json")
     scores, offsets = backend.score(pcm_int16)
 
 `offsets[k]` is how many samples of the clip had been fed when `scores[k]` came out -

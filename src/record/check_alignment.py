@@ -10,7 +10,7 @@ before committing to a multi-hour training run.
 
 Usage:
     python check_alignment.py ../../data/recordings/samples/
-    python check_alignment.py ../output/hey_seeree/oww/positive_train --verbose
+    python check_alignment.py ../output/<wake_word>/oww/positive_train --verbose
     python check_alignment.py ../../data/recordings/samples/ --total-length 32000
 
 Only needs numpy + scipy, so it runs on the host where you record.

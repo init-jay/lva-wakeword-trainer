@@ -64,7 +64,7 @@ def _make_samples(tmp):
     for speaker in ("ryan", "jay"):
         d = samples / speaker
         d.mkdir(parents=True)
-        _sine(d / f"hey_seeree_0000.wav", freq=220.0 if speaker == "ryan" else 150.0)
+        _sine(d / f"okay_jarvis_0000.wav", freq=220.0 if speaker == "ryan" else 150.0)
     return samples
 
 

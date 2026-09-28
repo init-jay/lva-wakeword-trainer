@@ -21,7 +21,7 @@
 # reloads than the single instance would have done.
 #
 #     PIPER_URLS="$(./src/scripts/start-tts-fleet.sh 4)" \
-#         ./src/scripts/run-mww-training-applesilicon.sh "hey seeree"
+#         ./src/scripts/run-mww-training-applesilicon.sh "<wake word>"
 #
 # The run scripts take the list as PIPER_URLS (or --piper-url): only this
 # script's LAST line is on stdout - the comma-joined tcp:// URL list - and

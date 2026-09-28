@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The run ledger: output/<wake_word_safe>/runs.jsonl, one JSON object per line.
 
-    python -m train.ledger --wake-word "hey seeree" [--show] [--grid-keys K [K...]]
+    python -m train.ledger --wake-word "<wake word>" [--show] [--grid-keys K [K...]]
 
 One line per COMPLETED training run: target, the full run tag (code + corpus +
 config; the name of the model directory), the corpus id (the manifest's short-7

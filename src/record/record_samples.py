@@ -24,8 +24,8 @@ PyAudio needs PortAudio:  brew install portaudio && uv sync --extra pyaudio
 Usage:
     cd src/record
     uv run record_samples.py --list-devices
-    uv run record_samples.py --wake-word "hey seeree"
-    uv run record_samples.py --wake-word "hey seeree" --output-dir ../../data/recordings/samples/speaker1
+    uv run record_samples.py --wake-word "<wake word>"
+    uv run record_samples.py --wake-word "<wake word>" --output-dir ../../data/recordings/samples/speaker1
 """
 import argparse
 import re
@@ -370,7 +370,7 @@ def segment_utterances(data, noise_rms, min_ms=180.0, max_ms=2000.0,
     Energy-gated against the measured room tone rather than a fixed level, so it
     adapts to the room instead of needing a threshold tuned by hand. Frames above
     the gate are grouped, runs closer together than `gap_ms` are merged (the pause
-    inside "hey ... seeree" must not split the phrase in two), and each run is
+    inside the wake word must not split the phrase in two), and each run is
     padded by `pad_ms` so the word onset and release survive.
 
     Runs outside [min_ms, max_ms] are dropped and reported: a very short one is a
@@ -569,7 +569,7 @@ def resolve_output_dir(args) -> Path:
 
 def main():
     parser = argparse.ArgumentParser(description="Record voice samples for wake word training")
-    parser.add_argument("--wake-word", default="hey seeree", help="Wake word you're recording")
+    parser.add_argument("--wake-word", required=True, help="Wake word you're recording")
     parser.add_argument("--raw-dir", default=None,
                         help="Where unsplit --continuous recordings go (default: "
                              "data/recordings/raw/, mirroring the speaker "

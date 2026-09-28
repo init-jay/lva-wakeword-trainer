@@ -31,7 +31,7 @@ requires-python = ">=3.12,<3.13"
 #   eval   Docker, unchanged
 #
 #     ./src/scripts/setup-mww-applesilicon-trainer.sh
-#     ./src/scripts/run-mww-training-applesilicon.sh "hey seeree"
+#     ./src/scripts/run-mww-training-applesilicon.sh "<wake word>"
 
 dependencies = [
     # Pinned to the SAME version Dockerfile.mww.cpu installs from PyPI. This

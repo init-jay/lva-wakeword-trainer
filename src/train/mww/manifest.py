@@ -5,7 +5,7 @@ microWakeWord produces only the .tflite. ESPHome needs a JSON manifest beside it
 and the values in it are not cosmetic - two of them change detection behaviour and
 one has to match how the model was trained.
 
-    python -m train.mww.manifest --wake-word "hey seeree" --run 20260902-063606
+    python -m train.mww.manifest --wake-word "<wake word>" --run 20260902-063606
 
 THE CUTOFF COMES FROM THE MEASUREMENT, NOT FROM A DEFAULT. Training writes
 tflite_streaming_roc.txt: false rejection rate and false accepts per hour at every
@@ -133,7 +133,7 @@ def choose_cutoff(rows, max_faph):
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--wake-word", default="hey seeree")
+    p.add_argument("--wake-word", required=True)
     p.add_argument("--run", required=True, help="run directory name under the model dir")
     p.add_argument("--models-dir", default="output")
     p.add_argument("--max-faph", type=float, default=0.0,

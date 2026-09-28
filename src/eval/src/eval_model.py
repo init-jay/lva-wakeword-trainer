@@ -61,8 +61,8 @@ builds its own command-following case by concatenating a command onto a plain cl
 so a real run-on recording among the positives would be scored as the phrase alone.
 
 Usage, from the repo root:
-    python -m eval.eval_model --model output/hey_seeree/oww/hey_seeree_705c23b.onnx   # the eval image
-    src/eval/.venv/bin/python src/eval/src/eval_model.py --model output/hey_seeree/oww/hey_seeree_705c23b.onnx   # the host env
+    python -m eval.eval_model --model output/<wake_word>/oww/<wake_word>_<commit>.onnx   # the eval image
+    src/eval/.venv/bin/python src/eval/src/eval_model.py --model output/<wake_word>/oww/<wake_word>_<commit>.onnx   # the host env
     python -m eval.eval_model --model M --positives data/recordings/holdout/speaker1
     python -m eval.eval_model --model M --threshold 0.7 --verbose
 
@@ -255,7 +255,7 @@ def load_by_speaker(directories, limit=None):
     """{speaker: clips}, one entry per directory, in the order given.
 
     THE SPEAKER TRAVELS BESIDE THE CLIPS, NOT INSIDE THEM. Folding it into the clip
-    name instead - `speaker1/hey_seeree_0001.wav` - would be tidier and would silently
+    name instead - `speaker1/<wake_word>_0001.wav` - would be tidier and would silently
     invalidate every number this harness has ever produced: `clip_rng` derives each
     clip's padding noise from its name, so renaming the clips reseeds the noise and
     moves the scores. Hence a mapping alongside, and `wav.name` left alone.

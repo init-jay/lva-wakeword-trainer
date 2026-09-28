@@ -17,7 +17,7 @@ DERIVED KEYS ARE NOT WRITTEN HERE. `spectrogram_length`,
 `spectrogram_length_final_layer`, `training_input_shape` and `stride` are
 computed by model_train_eval.py:60-93; a stale copy is worse than none.
 
-    python -m train.mww.config --wake-word "hey seeree" --out training_parameters.yaml
+    python -m train.mww.config --wake-word "<wake word>" --out training_parameters.yaml
 """
 
 import argparse
@@ -244,7 +244,7 @@ def build(wake_word, positives_dir, negatives_dir, ambient_dirs, output_dir,
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--wake-word", default="hey seeree")
+    p.add_argument("--wake-word", required=True)
     # mWW owns its corpus, built by mww/corpus.py. Reading the openWakeWord one in
     # place was tried and rejected: train.py rmtree's it at the start of every run.
     p.add_argument("--positives", default=None,

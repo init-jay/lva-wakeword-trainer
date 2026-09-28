@@ -4,7 +4,7 @@ The pipeline is designed to be driven by an agent — see `.claude/skills/`. Thi
 the same four steps done by hand.
 
 Steps 1 and 4 need a microphone and run on your machine; steps 2 and 3 run in
-Docker. Replace `"hey seeree"` with your wake word throughout. For what happens
+Docker. For what happens
 inside each step, see [../ARCHITECTURE.md](../ARCHITECTURE.md).
 
 **0 · Recipes and data.** The phrases are the one part that does not transfer
@@ -22,8 +22,8 @@ holdout in the same session — it is evaluated against and never trained on.
 ```bash
 cd src/record
 uv run record_samples.py --list-devices
-uv run record_samples.py --wake-word "hey seeree" --device 0 --speaker speaker1
-uv run record_samples.py --wake-word "hey seeree" --device 0 --holdout --speaker speaker1
+uv run record_samples.py --wake-word "<wake word>" --device 0 --speaker speaker1
+uv run record_samples.py --wake-word "<wake word>" --device 0 --holdout --speaker speaker1
 uv run python check_alignment.py data/recordings/samples/speaker1
 ```
 
@@ -33,8 +33,8 @@ for an adult has measured 24% for a child.
 **2 · Train.** One script per target; they are independent and can run separately.
 
 ```bash
-./src/scripts/run-oww-training.sh "hey seeree"     # server — one command, builds its own corpus
-./src/scripts/run-mww-training.sh "hey seeree"     # ESP32  — chains corpus, features, train, manifest
+./src/scripts/run-oww-training.sh "<wake word>"     # server — one command, builds its own corpus
+./src/scripts/run-mww-training.sh "<wake word>"     # ESP32  — chains corpus, features, train, manifest
 ```
 
 Both name their output after the code *and* the audio that produced it, so two runs
@@ -45,8 +45,8 @@ If a run dies *after* the corpus is built — a CUDA OOM at the feature array is
 usual way — resume without paying for the TTS again:
 
 ```bash
-SKIP_CORPUS=1 ./src/scripts/run-oww-training.sh "hey seeree"
-SKIP_CORPUS=1 ./src/scripts/run-mww-training.sh "hey seeree"
+SKIP_CORPUS=1 ./src/scripts/run-oww-training.sh "<wake word>"
+SKIP_CORPUS=1 ./src/scripts/run-mww-training.sh "<wake word>"
 ```
 
 For resuming, not for tuning. Training flags still apply; the ones that shape the
@@ -70,20 +70,20 @@ cd .. && docker compose stop kokoro
 
 # the four gates, one model (still in src/eval/; model paths are relative to /app)
 docker compose run --rm eval python -m eval.eval_model \
-    --model output/hey_seeree/oww/<tag>.onnx
+    --model output/<wake_word>/oww/<tag>.onnx
 
 # is this run better than the last one?
 docker compose run --rm eval python -m eval.compare_models \
-    --models output/hey_seeree/oww/<new>.onnx output/hey_seeree/oww/<previous-best>.onnx
+    --models output/<wake_word>/oww/<new>.onnx output/<wake_word>/oww/<previous-best>.onnx
 
 # the two targets side by side: server vs ESP32
 docker compose run --rm eval python -m eval.compare_models --models \
-    output/hey_seeree/oww/<tag>.onnx \
-    output/hey_seeree/mww/<tag>.json
+    output/<wake_word>/oww/<tag>.onnx \
+    output/<wake_word>/mww/<tag>.json
 
 # one model, swept, to pick a deployment operating point
 docker compose run --rm eval python -m eval.compare_models --sweep \
-    --models output/hey_seeree/mww/<tag>.json
+    --models output/<wake_word>/mww/<tag>.json
 ```
 
 Comparing the two targets is legitimate *only* through matched false accepts. An
@@ -107,7 +107,7 @@ refused because it is not what the device runs.
 
 ```bash
 cd src/preflight
-uv run test_model.py --model ../../output/hey_seeree/mww/<tag>.json
+uv run test_model.py --model ../../output/<wake_word>/mww/<tag>.json
 ```
 
 If peaks sit just under your threshold, the operating point is wrong for the room —

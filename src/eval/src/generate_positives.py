@@ -24,7 +24,7 @@ training saw, which is why generation is organised as sweeps:
 The `command` sweep is the one worth explaining. `eval_model.py` already tests this
 by concatenating a positive recording onto an unrelated command recording, but that
 splice has no coarticulation and an audible seam - the phrase ends the way an
-isolated phrase ends, then unrelated audio begins. Rendering "hey seeree, what's the
+isolated phrase ends, then unrelated audio begins. Rendering "<wake word>, what's the
 time?" as a single utterance instead gives the prosody of someone actually talking
 to a device: the phrase runs into the command, and its final syllable is shaped by
 what follows. It is generated in two variants, `cmd_run` with no punctuation and
@@ -41,19 +41,19 @@ grouped by it afterwards.
 Examples
 --------
     # everything, against the MLX engine on the Mac (or the Docker kokoro service)
-    python -m eval.generate_positives --wake-word "hey seeree" \\
+    python -m eval.generate_positives --wake-word "<wake word>" \\
         --url tcp://127.0.0.1:8900
 
     # Piper instead of Kokoro (protocol port 8898; the voice list is then the
     # audited selection from src/train/corpus/piper.py, so its exclusion tables apply)
-    python -m eval.generate_positives --wake-word "hey seeree" \\
+    python -m eval.generate_positives --wake-word "<wake word>" \\
         --tts piper --piper-url tcp://127.0.0.1:8898
 
     # just the axis you care about
-    python -m eval.generate_positives --wake-word "hey seeree" --sweeps speed
+    python -m eval.generate_positives --wake-word "<wake word>" --sweeps speed
 
     # see what would be produced without calling the server
-    python -m eval.generate_positives --wake-word "hey seeree" --dry-run
+    python -m eval.generate_positives --wake-word "<wake word>" --dry-run
 
 `--url` accepts ONLY the `tcp://` protocol form, for the reason spelled out in
 generate_negatives.py's docstring: the old `http://...` and `mlx://` forms used

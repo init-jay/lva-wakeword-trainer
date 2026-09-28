@@ -11,7 +11,9 @@
 # corpus digest that exists on disk when it is written; a re-run against a
 # rebuilt corpus would fail the pinned-digest check, and should - it would
 # no longer be comparable to the results it reproduces.
-wake_word: "hey seeree"
+# Template: replace with the wake word whose recipes/<word>.yaml exists - this is
+# data, and the sweep mechanism is word-agnostic (sweep.py requires wake_word).
+wake_word: "<wake word>"
 target: oww
 base: {}
 grid:

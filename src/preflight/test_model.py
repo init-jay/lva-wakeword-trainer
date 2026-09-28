@@ -7,8 +7,8 @@ needs the mic. Nothing here is containerised.
 
     cd src/preflight
     uv run test_model.py --list-devices
-    uv run test_model.py --model ../../output/hey_seeree/oww/hey_seeree_705c23b.tflite
-    uv run test_model.py --model ../../output/hey_seeree/mww/hey_seeree_705c23b.json
+    uv run test_model.py --model ../../output/<wake_word>/oww/<wake_word>_<tag>.tflite
+    uv run test_model.py --model ../../output/<wake_word>/mww/<wake_word>_<tag>.json
 
 
 THE THRESHOLD IS THE POINT OF THE EXERCISE. Say the phrase ten or twenty times, at the

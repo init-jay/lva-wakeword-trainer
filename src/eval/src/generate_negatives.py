@@ -194,8 +194,8 @@ def main():
     p.add_argument("--out", default=DEFAULT_OUT,
                    help="output directory for the WAVs (default: %(default)s, where "
                         "the eval tools look for them)")
-    p.add_argument("--wake-word", default="hey seeree",
-                   help="picks recipes/<wake_word>.yaml (default: %(default)s)")
+    p.add_argument("--wake-word", required=True,
+                   help="picks recipes/<wake_word>.yaml")
     p.add_argument("--recipe", default=None,
                    help="explicit path to a recipe YAML, instead of --wake-word")
     p.add_argument("--categories", nargs="+", default=list(recipe.EVAL_CATEGORIES),

@@ -40,7 +40,7 @@ Request / response shapes (both sides build and check these):
     optional and engine-specific: Piper honours both, Kokoro ignores both.
 
     {"op": "render", "voice": "af_bella" | ["en_US-lessac-medium", "12"],
-     "speed": 1.0, "text": "hey seeree", "timestamps": true}
+     "speed": 1.0, "text": "<wake word>", "timestamps": true}
       -> {"ok": true, "clip": "<wav b64>" | null,
           "timestamps": [{"word","start_time","end_time"}, ...] | null}
       -> {"ok": false, "error": "..."}

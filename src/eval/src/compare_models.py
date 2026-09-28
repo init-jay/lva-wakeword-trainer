@@ -28,7 +28,7 @@ an int8 output has 256 levels and the sweep goes to 0.01.
 
 Usage, from the repo root:
     # every held-out speaker, plain and run-on found automatically
-    python -m eval.compare_models --models output/hey_seeree/oww/*.onnx
+    python -m eval.compare_models --models output/<wake_word>/oww/*.onnx
 
     # or name the directories explicitly
     python -m eval.compare_models --models M \\
@@ -37,14 +37,14 @@ Usage, from the repo root:
 
     # one model, with a threshold sweep for choosing a deployment operating point
     python -m eval.compare_models \\
-        --models output/hey_seeree/oww/hey_seeree_705c23b.tflite --sweep
+        --models output/<wake_word>/oww/<wake_word>_<commit>.tflite --sweep
 
     # openWakeWord ship candidate against the microWakeWord model, on the Mac.
     # Pass the mWW .json, not its .tflite: the manifest carries the cutoff and the
     # sliding window, so scoring it puts those under test too.
     docker compose run --rm eval python -m eval.compare_models --models \\
-        output/hey_seeree/oww/hey_seeree_705c23b.onnx \\
-        output/hey_seeree/mww/hey_seeree_705c23b.json
+        output/<wake_word>/oww/<wake_word>_<commit>.onnx \\
+        output/<wake_word>/mww/<wake_word>_<commit>.json
 
     # the same, on the host env (src/scripts/setup-eval-host.sh) - plain-path form,
     # from the repo root: the `-m eval.X` module form is the image's mount

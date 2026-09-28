@@ -129,7 +129,7 @@ uv run --project src/tts-service/tts_protocol python -m tts_protocol \
     --speaker 1 --speed 1.2 -o /tmp/test.wav
 uv run --project src/tts-service/tts_protocol python -m tts_protocol \
     --server tcp://127.0.0.1:8900 --voice af_heart --batch \
-    "hey seeree" "hey seeree, can you hear me" --out-dir /tmp/batch
+    "<wake word>" "<wake word>, can you hear me" --out-dir /tmp/batch
 ```
 
 The package's own venv (`tts_protocol/.venv`) has exactly the protocol - no

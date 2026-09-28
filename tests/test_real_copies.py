@@ -29,7 +29,7 @@ def _make_tree(root, clips_per_speaker):
         data = (20000 * np.sin(2 * np.pi * 220 * np.arange(SR // 2) / SR)
                 ).astype(np.int16)
         for i in range(n):
-            scipy.io.wavfile.write(str(d / f"hey_seeree_{i:04d}.wav"), SR, data)
+            scipy.io.wavfile.write(str(d / f"okay_jarvis_{i:04d}.wav"), SR, data)
 
 
 def test_per_speaker_override_changes_only_that_speakers_copies():
@@ -74,7 +74,7 @@ def test_vtlp_copies_add_variants_not_raw_duplicates():
         # ratios land in the child-lever range and differ across copies
         ratios = {float(p.name.split("_")[2]) for p in v}
         assert all(1.15 <= r <= 1.30 for r in ratios), ratios
-        raw = (out / "real_0_ryan_hey_seeree_0000.wav").read_bytes()
+        raw = (out / "real_0_ryan_okay_jarvis_0000.wav").read_bytes()
         assert any(p.read_bytes() != raw for p in v), \
             "shifted copies are byte-identical to the raw clip - inert"
         # NOT near-silence: the dtype bug (float into the int16 contract) produces

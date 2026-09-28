@@ -49,7 +49,7 @@ seed input at all, so the same corpus gives the same split every run and no RNG 
 consumed by the corpus order the way Clips' shuffle did. See src/train/mww/split.py for why
 "no seed" is the point rather than an omission.
 
-    python -m train.mww.features --wake-word "hey seeree"
+    python -m train.mww.features --wake-word "<wake word>"
 """
 
 import argparse
@@ -180,7 +180,7 @@ def build_split(clips_dir: Path, out_root: Path, name: str, impulse, background,
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--wake-word", default="hey seeree")
+    p.add_argument("--wake-word", required=True)
     p.add_argument("--corpus-root", default="data/corpus")
     # Joined with only the BASENAME of IMPULSE_DIRS/BACKGROUND_DIRS below, so this
     # is the single place that decides where the third-party corpora are read from.

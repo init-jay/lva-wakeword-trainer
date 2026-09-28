@@ -24,7 +24,7 @@ sys.path.insert(0, str(REPO_ROOT / "src" / "scripts"))
 import score_margins as sm  # noqa: E402
 
 
-def _pair(root, manifest_body, tflite_bytes=b"weights-A", name="hey_seeree"):
+def _pair(root, manifest_body, tflite_bytes=b"weights-A", name="okay_jarvis"):
     """A run dir laid out the way the mww trainer lays one out."""
     root = Path(root)
     (root / f"{name}.json").write_text(json.dumps(manifest_body))
@@ -166,7 +166,7 @@ def test_a_corpus_tree_model_is_refused():
         root, saved = Path(d), sm.REPO_ROOT
         try:
             sm.REPO_ROOT = root
-            shared = (root / "data" / "corpus" / "hey_seeree" / "mww" / "c574e978" /
+            shared = (root / "data" / "corpus" / "okay_jarvis" / "mww" / "c574e978" /
                       "tflite_stream_state_internal_quant" /
                       "stream_state_internal_quant.tflite")
             shared.parent.mkdir(parents=True)
@@ -181,7 +181,7 @@ def test_a_corpus_tree_model_is_refused():
                 raise AssertionError("a model inside data/corpus/ must not be scored")
 
             # The guard must not catch the thing it exists to force: the per-run copy.
-            run = (root / "output" / "hey_seeree" / "mww" / "c574e978-h5835241" /
+            run = (root / "output" / "okay_jarvis" / "mww" / "c574e978-h5835241" /
                    "stream_state_internal_quant.tflite")
             run.parent.mkdir(parents=True)
             run.write_bytes(b"per-run")

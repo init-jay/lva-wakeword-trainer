@@ -44,7 +44,7 @@ including a laptop:
 
 ```bash
 uv run --with numpy --with scipy \
-    audit_voices.py --wake-word "hey seeree" --tts tcp://<tts-host>:8899 \
+    audit_voices.py --wake-word "<wake word>" --tts tcp://<tts-host>:8899 \
     --asr <asr-host>:10300 --out-dir voice_audit_piper
 ```
 
@@ -80,7 +80,7 @@ exclusion list even though it is sometimes fine.
 
 ### What to write down afterwards
 
-Two lists. The first is per wake word — how a voice handles "seeree" says nothing
+Two lists. The first is per wake word — how a voice handles that word's distinctive syllable says nothing
 about how it would handle another phrase — so it lives in that word's YAML. The second
 is a property of the voice rather than of the phrase, so it stays in code.
 

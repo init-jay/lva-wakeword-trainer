@@ -7,7 +7,7 @@ list actually used, the per-bucket clip counts, EVERY corpus-shaping flag the
 build was run with, the recipe hash, the seed, the wall time, and a content
 digest of the final wav tree. The file IS the corpus's identity.
 
-    python -m train.corpus.manifest --corpus-dir data/corpus/hey_seeree/mww --show
+    python -m train.corpus.manifest --corpus-dir data/corpus/<wake_word>/mww --show
     python -m train.corpus.manifest --corpus-dir ... --check-requested '{"seed": 42}'
 
 DURING A SWEEP THE CORPUS IS A HELD-FIXED INDEPENDENT VARIABLE. The TTS engines

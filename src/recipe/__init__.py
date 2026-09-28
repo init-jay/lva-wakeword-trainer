@@ -3,7 +3,7 @@
 THE RECIPES ARE THE PART OF THIS PIPELINE THAT DOES NOT TRANSFER. Everything else
 - the trainers, the augmentation, the gates, the eval harness - works unchanged for
 any wake word. The phrases do not: "hey serious" probes the decision boundary of
-"hey seeree" and says nothing at all about "okay jarvis". Leaving them hardcoded in
+a wake word and says nothing at all about "okay jarvis". Leaving them hardcoded in
 generate_negatives.py made the repo look general while quietly being about one phrase.
 
 So they live here, one YAML file per wake word, and `.claude/skills/write-recipes`
@@ -51,7 +51,7 @@ Both trainers and the eval harness read this, so it imports nothing from either.
   the holdout was its own file it was repo-level, on the argument that "a voice is
   an engine property, not a property of the phrase it renders". Folding it into
   the recipe buys one configuration per wake word, and costs that argument: a
-  voice reserved for `hey seeree`'s ranking set may still appear in some other
+  voice reserved for a wake word's ranking set may still appear in some other
   word's training corpus, because that word's recipe says nothing about it. What
   the measurement needs is the narrower property - the ranking set for a word must
   be voice-disjoint from THAT word's corpora - so the trade is real but the

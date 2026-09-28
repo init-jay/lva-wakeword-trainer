@@ -14,7 +14,7 @@
 # contaminates the answer; the measurements are in docs/SPEED.md.
 #
 #   ./src/scripts/setup-applesilicon-trainer.sh                      # once
-#   ./src/scripts/run-oww-training-applesilicon.sh "hey seeree" --skip-corpus
+#   ./src/scripts/run-oww-training-applesilicon.sh "<wake word>" --skip-corpus
 #
 # --skip-corpus IS THE INTENDED WAY TO USE THIS. Generation needs TTS servers, and
 # this script starts nothing: the engines are the uv projects in
@@ -41,7 +41,7 @@
 # whole run (corpus/piper.py, PiperFleet):
 #
 #     PIPER_URLS="$(./src/scripts/start-tts-fleet.sh 4)" \
-#         ./src/scripts/run-oww-training-applesilicon.sh "hey seeree" --piper-fraction 0.3
+#         ./src/scripts/run-oww-training-applesilicon.sh "<wake word>" --piper-fraction 0.3
 #
 # SMOKE=1: a few-minute end-to-end check that a changed src/train/ tree still runs the
 # whole pipeline: corpus reuse, feature recompute, 200-step training, real tflite
@@ -50,7 +50,7 @@
 # output/<wake>/oww/smoke-<stamp>/ and the canonical model, the .last_run_tag and
 # the archive stay untouched (src/train/oww/train.py --smoke):
 #
-#     SMOKE=1 ./src/scripts/run-oww-training-applesilicon.sh "hey seeree"
+#     SMOKE=1 ./src/scripts/run-oww-training-applesilicon.sh "<wake word>"
 
 set -euo pipefail
 
