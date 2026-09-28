@@ -27,7 +27,7 @@ MWW_COMMIT="4665173cd35f1cff9a61e06fc427f124766c488e"
 if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
     echo "ERROR: this is the Apple Silicon host path; you are on $(uname -s)/$(uname -m)." >&2
     echo "       Everywhere else, use the containers:" >&2
-    echo "         COMPOSE_FILE=docker-compose.yml:docker-compose.cpu.yml" >&2
+    echo "         COMPOSE_FILE=docker/docker-compose.yml:docker/docker-compose.cpu.yml" >&2
     exit 2
 fi
 

@@ -48,9 +48,12 @@ if [[ ! "$WAKE_WORD" =~ ^[A-Za-z][A-Za-z\'â€™-]*([[:space:]]+[A-Za-z][A-Za-z\'â€
 fi
 shift
 
-# The REPO ROOT, not this script's directory - it moved to src/scripts/ in the reorg
-# and every docker compose call below needs the compose file in the working dir.
+# The REPO ROOT, not this script's directory - it moved to src/scripts/ in the reorg,
+# and the compose file in docker/ below it resolves relative to where compose runs.
 cd "$(dirname "$0")/../../"
+# The file moved to docker/, so the default no longer finds it by cwd. The :- form
+# keeps a COMPOSE_FILE the caller already exported (base:overlay), which wins.
+export COMPOSE_FILE="${COMPOSE_FILE:-docker/docker-compose.yml}"
 
 # tr rather than ${x,,} so this does not need bash 4 (macOS ships 3.2).
 SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
@@ -97,7 +100,7 @@ fi
 
 # Piper, only when the run actually asks for it. Unlike Kokoro it is NOT stopped
 # before training: it runs CPU-only (--use-cuda measured 2.5x slower, see
-# docker-compose.yml), so it holds no CUDA context and none of the VRAM that the
+# docker/docker-compose.yml), so it holds no CUDA context and none of the VRAM that the
 # GPU-resident feature patch needs. That is the whole reason the Kokoro dance below
 # exists, and it does not apply here.
 WANTS_PIPER=""
@@ -131,7 +134,7 @@ elif [[ -n "${KOKORO_EXTERNAL:-}" ]]; then
     # through, so a Metal Kokoro has to be a HOST process. On a Mac that host
     # engine is the in-process mlx one on 8900, and it takes precedence: the
     # Mac does not run docker kokoro at all - which is also why no compose
-    # service publishes 8900 (docker-compose.yml).
+    # service publishes 8900 (docker/docker-compose.yml).
     #
     # Measured on an M1 Max, same Kokoro-FastAPI v0.8.1 install throughout,
     # only DEVICE_TYPE changed:
@@ -277,7 +280,7 @@ fi
 # `script` as a single string.
 CMD="docker compose run --rm"
 # -e OVERRIDES THE SERVICE'S OWN KOKORO_URL, and without it this whole path is inert.
-# docker-compose.yml sets KOKORO_URL=tcp://kokoro:8899,tcp://kokoro2:8899 in the
+# docker/docker-compose.yml sets KOKORO_URL=tcp://kokoro:8899,tcp://kokoro2:8899 in the
 # oww-trainer service, and a value in `environment:` beats the one inherited from the
 # shell - so exporting KOKORO_URL alone would be silently ignored and the run would
 # dial the containers KOKORO_EXTERNAL=1 deliberately did not start.

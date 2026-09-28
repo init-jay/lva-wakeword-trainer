@@ -71,7 +71,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# PINNED TO THE VERSION THE DOCKER IMAGE USES. docker-compose.yml builds Kokoro from
+# PINNED TO THE VERSION THE DOCKER IMAGE USES. docker/docker-compose.yml builds Kokoro from
 # ghcr.io/remsky/kokoro-fastapi-cpu:v0.8.1, and a host server on a different version
 # would make "the Mac corpus differs from the VM corpus" ambiguous between the engine
 # and the device. Bump both together or neither.

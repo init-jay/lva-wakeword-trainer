@@ -19,7 +19,7 @@ CLONE_DIR="src/train/openwakeword"
 if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
     echo "ERROR: this is the Apple Silicon host path; you are on $(uname -s)/$(uname -m)." >&2
     echo "       Everywhere else, use the containers:" >&2
-    echo "         COMPOSE_FILE=docker-compose.yml:docker-compose.cpu.yml" >&2
+    echo "         COMPOSE_FILE=docker/docker-compose.yml:docker/docker-compose.cpu.yml" >&2
     exit 2
 fi
 
@@ -59,7 +59,7 @@ fi
 # gpu-resident-features.py is omitted: it moves the 17.28 GB feature array into VRAM,
 # and there is none here. On a 64 GB Mac the array simply lives in memory, which
 # removes the problem rather than working around it - a memory setting, not a
-# hardware limit (docker-compose.cpu.yml).
+# hardware limit (docker/docker-compose.cpu.yml).
 #
 # Each patch prints "WARNING: patch target not found" and exits 0 rather than
 # failing if upstream has moved, so re-running after an openWakeWord update is safe

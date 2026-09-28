@@ -53,9 +53,12 @@ if [[ ! "$WAKE_WORD" =~ ^[A-Za-z][A-Za-z\'â€™-]*([[:space:]]+[A-Za-z][A-Za-z\'â€
 fi
 shift
 
-# The REPO ROOT, not this script's directory - every docker compose call below needs
-# the compose file in the working directory.
+# The REPO ROOT, not this script's directory - the compose file in docker/ below it
+# resolves relative to where compose runs.
 cd "$(dirname "$0")/../../"
+# The file moved to docker/, so the default no longer finds it by cwd. The :- form
+# keeps a COMPOSE_FILE the caller already exported (base:overlay), which wins.
+export COMPOSE_FILE="${COMPOSE_FILE:-docker/docker-compose.yml}"
 
 # tr rather than ${x,,} so this does not need bash 4 (macOS ships 3.2).
 SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"

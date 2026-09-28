@@ -122,7 +122,7 @@ print('ai-edge-litert OK')"
 # directory over the top, so editing a trainer does not mean rebuilding a CUDA image:
 # the copy is what the build verified, the mount is what actually runs. The TTS
 # protocol client rides along the same way: src/tts-service/ is copied here and mounted
-# over it in docker-compose.yml, and src/train/corpus/__init__.py adds it to sys.path, so
+# over it in docker/docker-compose.yml, and src/train/corpus/__init__.py adds it to sys.path, so
 # the import check below exercises it. The engines are not in this image - the
 # trainers are protocol clients and the engines are the kokoro/piper compose
 # services.

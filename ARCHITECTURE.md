@@ -119,6 +119,10 @@ far.
 ├── deploy/                       the current deployment candidate, staged out of
 │   └── README.md                 output/ with its measured status - one at a time
 ├── docker/
+│   ├── docker-compose.yml        base project: TTS + trainers, no GPU required; the eval step
+│   │                             has its own file in src/eval/
+│   ├── docker-compose.cuda.yml   overlay: NVIDIA devices - kokoro, trainers
+│   ├── docker-compose.cpu.yml    overlay: CPU trainers - Apple Silicon, or any non-NVIDIA box
 │   ├── Dockerfile.oww.cuda       trains on an NVIDIA GPU, linux/amd64
 │   ├── Dockerfile.mww.cuda       trains on an NVIDIA GPU, linux/amd64
 │   ├── Dockerfile.oww.cpu        same trainer, no GPU - multi-arch, native on arm64
@@ -145,9 +149,6 @@ far.
 │   ├── setup-mww-applesilicon-trainer.sh what Dockerfile.mww.cpu does, on the host
 │   └── run-mww-training-applesilicon.sh  2 · four stages, no container
 ├── .dockerignore                 keeps data/ (~43 GB) out of every build context
-├── docker-compose.yml            no GPU required; the eval step has its own file in src/eval/
-├── docker-compose.cuda.yml       overlay: NVIDIA devices - kokoro, trainers
-├── docker-compose.cpu.yml        overlay: CPU trainers - Apple Silicon, or any non-NVIDIA box
 ├── src/train/train-applesilicon/           host uv env for the oww trainer (route evidence: docs/SPEED.md)
 └── src/train/train-mww-applesilicon/       host uv env for the mww trainer (route evidence: docs/SPEED.md)
 ```

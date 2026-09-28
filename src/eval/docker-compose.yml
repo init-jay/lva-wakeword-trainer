@@ -1,6 +1,6 @@
 # The evaluation step, self-contained: this file, Dockerfile and the Python
 # sources in this directory are everything a machine needs to score a model.
-# It is deliberately NOT in ../../docker-compose.yml - the base file is the
+# It is deliberately NOT in ../../docker/docker-compose.yml - the base file is the
 # training project (trainers, TTS), and an eval-only machine would otherwise
 # be asked to build trainer images it will never run.
 #
