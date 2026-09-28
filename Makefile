@@ -12,7 +12,6 @@
 # make WAKE="your wake word" <target>. There is deliberately no default: one with
 # the example word in it would make main look general while carrying one word.
 WAKE ?=
-PY_OWW := src/train/train-applesilicon/.venv/bin/python
 PY_MWW := src/train/train-mww-applesilicon/.venv/bin/python
 
 .DEFAULT_GOAL := help
@@ -70,10 +69,15 @@ smoke-oww: | .WAKE-CHECK
 smoke-mww: | .WAKE-CHECK
 	SMOKE=1 ./src/scripts/run-mww-training-applesilicon.sh "$(WAKE)"
 
-# No venv in this repo carries pytest (tests/_runner.py), so the suite is plain
-# `python tests/test_<x>.py` runs; stop at the first failing file.
+# The suite has its own env (tests/pyproject.toml: numpy, scipy, pyyaml, tqdm,
+# pytest - everything the test modules pull in, no torch), so the fast loop no
+# longer sits behind the multi-GB trainer venv; `uv run --project tests` builds
+# that venv on first use, which is the whole fresh-clone story. pytest collects
+# the plain-assert test_*() functions and one run reports EVERY failure instead
+# of stopping at the first file; `python tests/test_<x>.py` (tests/_runner.py)
+# stays as the no-uv fallback.
 test:
-	@for t in tests/test_*.py; do $(PY_OWW) "$$t" || exit 1; done
+	uv run --project tests pytest -q tests
 
 # src/scripts/start-tts-fleet.sh prints the comma-joined list PIPER_URLS wants;
 # the instances keep running in the background until killed.

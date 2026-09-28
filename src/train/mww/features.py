@@ -70,6 +70,7 @@ from microwakeword.audio.augmentation import Augmentation  # noqa: E402
 from microwakeword.audio.clips import Clips  # noqa: E402
 from microwakeword.audio.spectrograms import SpectrogramGeneration  # noqa: E402
 
+from train import external_data  # noqa: E402
 from train.mww import config as mww_config  # noqa: E402
 # The partition rules live in their own dependency-free module so they can be
 # tested without microwakeword; see src/train/mww/split.py.
@@ -222,6 +223,12 @@ def main():
     impulse = [data / Path(x).name for x in mww_config.IMPULSE_DIRS]
     background = [data / Path(x).name for x in mww_config.BACKGROUND_DIRS]
 
+    # EXTERNAL DATA BEFORE ANY BUILD: the same guard as the oww route
+    # (train/oww/train.py), beside the clips guard below - a missing tree fails
+    # in seconds naming the download script, not after the corpus's TTS spend.
+    # Existence only: see train/external_data.py for why not more.
+    external_data.check(data, "mww", external_data.mww_external_paths(data))
+
     for label, clips_dir in (("positives", corpus / "positives"),
                              ("negatives", corpus / "negatives")):
         n = len(list(clips_dir.glob("*.wav"))) if clips_dir.is_dir() else 0
@@ -235,7 +242,7 @@ def main():
     print(f"\nDONE  features under {corpus / 'features'}")
     print("\nNext:")
     print(f'  python -m train.mww.train --wake-word "{args.wake_word}" \\')
-    print("      --ambient data/external/mww_ambient/speech data/external/mww_ambient/no_speech")
+    print("      --ambient " + " ".join(str(data / s) for s in external_data.AMBIENT_SETS))
 
 
 if __name__ == "__main__":
