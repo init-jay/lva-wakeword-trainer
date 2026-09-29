@@ -77,6 +77,11 @@ SLIDING_WINDOW_SIZE = 5
 DEFAULT_TENSOR_ARENA_SIZE = 30000
 MINIMUM_ESPHOME_VERSION = "2024.7.0"
 
+# A chosen cutoff above this is the firehose signature: the init needed an
+# abnormally high threshold to reach the faph budget. Calibrated on the measured
+# hey_seeree manifests (healthy inits 0.09-0.62, degenerate 0.73-0.96, 2026-09-30).
+DEFAULT_MAX_CUTOFF = 0.70
+
 # Attribution, shown by ESPHome and by Home Assistant's wake-word picker. Defaults
 # rather than flags because a manifest without them is an anonymous model, and the
 # one thing nobody remembers to pass is the one that identifies who built it.
@@ -96,7 +101,7 @@ def parse_roc(path: Path):
     return rows
 
 
-def choose_cutoff(rows, max_faph):
+def choose_cutoff(rows, max_faph, max_cutoff=DEFAULT_MAX_CUTOFF):
     """Lowest cutoff whose faph is within budget - i.e. best recall for that budget.
 
     Lower cutoff means more detections, so more false accepts AND fewer false
@@ -112,6 +117,17 @@ def choose_cutoff(rows, max_faph):
     whose model cannot fire; measured on held-out recordings, the same model detects
     97% of one speaker's clips at 0.5. Nothing downstream could have caught it: a cutoff of
     1.0 is a legal value and ESPHome loads it without complaint.
+
+    THE DEGENERATE-INIT REFUSAL (max_cutoff): a weak-ambient ("firehose") init needs
+    an abnormally HIGH threshold just to bring its ambient false-accepts to budget,
+    so its lowest in-budget cutoff lands far up the curve while its recall still
+    looks respectable - the shape no faph criterion catches. Measured on hey_seeree
+    (2026-09-30, same corpus c2a0b135, three trainings): the unseeded init chose
+    0.88 (83% recall) while seed 111/222 chose 0.25/0.29 (94-95%); across the
+    measured manifests the healthy inits sit at 0.09-0.62 and the degenerate ones
+    at 0.73-0.96. 0.70 sits in that gap: a chosen cutoff above it is the firehose
+    signature, and the init - not the corpus or the TTS source - is the variable
+    (both ruled out by the held-corpus retrainings).
     """
     real = [r for r in rows if r[1] < 1.0]
     if not real:
@@ -127,7 +143,19 @@ def choose_cutoff(rows, max_faph):
             f"lowest measured is {best[2]} at cutoff {best[0]} (frr {best[1]}). "
             f"Raise --max-faph, or treat this as the model not being good enough "
             f"to deploy.")
-    return min(eligible, key=lambda r: r[0])
+    chosen = min(eligible, key=lambda r: r[0])
+    cutoff, frr, faph = chosen
+    if cutoff > max_cutoff:
+        raise SystemExit(
+            f"chosen cutoff {cutoff} is above the degenerate-init threshold "
+            f"{max_cutoff}: the model needs an abnormally high threshold to bring "
+            f"its ambient false-accepts to budget (frr {frr} at that point) - the "
+            f"firehose signature of a weak-ambient TRAINING INIT, not a data "
+            f"problem. The held-corpus retrains (2026-09-30, corpus c2a0b135) "
+            f"show the init is the variable: unseeded chose 0.88, seeds 111/222 "
+            f"chose 0.25/0.29 on the same audio. Retrain with a different --seed, "
+            f"or record this one deliberately with a higher --max-cutoff.")
+    return chosen
 
 
 def main():
@@ -138,6 +166,10 @@ def main():
     p.add_argument("--models-dir", default="output")
     p.add_argument("--max-faph", type=float, default=0.0,
                    help="false accepts per hour budget (default: %(default)s)")
+    p.add_argument("--max-cutoff", type=float, default=DEFAULT_MAX_CUTOFF,
+                   help="refuse a chosen cutoff above this - the firehose "
+                        "signature (default: %(default)s; measured healthy "
+                        "inits 0.09-0.62, degenerate 0.73-0.96)")
     p.add_argument("--tensor-arena-size", type=int, default=DEFAULT_TENSOR_ARENA_SIZE)
     p.add_argument("--author", default=DEFAULT_AUTHOR)
     p.add_argument("--website", default=DEFAULT_WEBSITE)
@@ -160,7 +192,7 @@ def main():
     if not rows:
         sys.exit(f"no 'Cutoff ...: frr=...; faph=...' lines in {roc}")
 
-    cutoff, frr, faph = choose_cutoff(rows, args.max_faph)
+    cutoff, frr, faph = choose_cutoff(rows, args.max_faph, args.max_cutoff)
     print(f"{len(rows)} cutoffs measured; {roc}")
     print(f"  chosen cutoff {cutoff}: {100 * (1 - frr):.2f}% recall, "
           f"{faph} false accepts/hour (budget {args.max_faph})")
