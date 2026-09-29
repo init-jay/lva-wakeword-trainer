@@ -34,6 +34,22 @@
 #
 # SKIP_CORPUS=1 / SKIP_FEATURES=1 behave exactly as in run-mww-training.sh.
 #
+# The train stage is SEEDED BY DEFAULT: TRAIN_SEED (default 1, or --seed on the
+# command line, which wins; TRAIN_SEED=0 restores the historical unseeded
+# behaviour). 2026-09-30, held-corpus retrains (same corpus c2a0b135 three ways):
+# the unseeded init chose manifest cutoff 0.88 (83% recall, the firehose corner)
+# while seeds 111/222 chose 0.25/0.29 (94-95%) - the TF INIT is the variable,
+# with the corpus, the TTS source, and render stochasticity all ruled out. A
+# fixed seed makes an init reproducible; the degenerate-init gate below still
+# refuses a bad one. The corpus DRAW stays unseeded (the runner passes no --seed
+# to the corpus stage) - the corpus's own --seed=0 is its historical default.
+#
+# MAX_CUTOFF (default 0.70, passed to the manifest stage as --max-cutoff)
+# refuses a chosen cutoff above it - the firehose signature. Calibrated on the
+# measured hey_seeree manifests: healthy inits 0.09-0.62, degenerate 0.73-0.96.
+# A refused manifest does NOT fail the run (the model files are still written);
+# the run's NOTE says to retrain with a different --seed.
+#
 # The corpus stage needs a Piper engine, and - at the default 30% mix - a Kokoro
 # one too. This script starts nothing: the engines are the uv projects in
 # src/tts-service/engines/ (commands above) - in-process piper-tts on 8898 and
@@ -209,6 +225,21 @@ fi
 # no Kokoro server at all.
 if [[ "$KOKORO_FRACTION" == "0" || "$KOKORO_FRACTION" == "0.0" ]]; then
     KOKORO_FRACTION=""
+fi
+
+# Seed the TRAIN stage's TF init by default (see header). The seed must reach the
+# train stage (TRAIN_ARGS -> "$@" below), not the corpus stage - the corpus keeps
+# its own unseeded draw. A --seed the caller already passed wins over the env
+# default; TRAIN_SEED=0 restores the historical unseeded init. The tag's config
+# half hashes the seed, so two inits of one corpus get distinct tags and never
+# collide in the ledger.
+_seed_seen=0
+for _a in "${TRAIN_ARGS[@]-}"; do
+    case "$_a" in --seed|--seed=*) _seed_seen=1 ;; esac
+done
+if [[ "$_seed_seen" -eq 0 ]]; then
+    TRAIN_ARGS+=(--seed "${TRAIN_SEED:-1}")
+    run "train stage seeded (TRAIN_SEED=${TRAIN_SEED:-1}) - pass --seed to override, TRAIN_SEED=0 for unseeded"
 fi
 set -- "${TRAIN_ARGS[@]+"${TRAIN_ARGS[@]}"}"
 
@@ -507,17 +538,24 @@ fi
 #
 # The same stage with the same non-fatal semantics as run-mww-training.sh: a
 # manifest failure does NOT fail the run, because choosing probability_cutoff is
-# a judgement, not a build step. Default budget 0.2 there, same here.
+# a judgement, not a build step. Default budget 0.2 there, same here. MAX_CUTOFF
+# (default 0.70) refuses a chosen cutoff above it - the firehose signature the
+# held-corpus retrains pinned on the init (header); a refusal is the non-fatal
+# NOTE below, and the fix is a different --seed, not a looser gate.
 MAX_FAPH="${MAX_FAPH:-0.2}"
-run "cutting the ESPHome manifest (--max-faph $MAX_FAPH)"
+MAX_CUTOFF="${MAX_CUTOFF:-0.70}"
+run "cutting the ESPHome manifest (--max-faph $MAX_FAPH --max-cutoff $MAX_CUTOFF)"
 MANIFEST=""
 if PYTHONPATH=src "$ENV_DIR/.venv/bin/python" -m train.mww.manifest \
-        --wake-word "$WAKE_WORD" --run "$TAG" --max-faph "$MAX_FAPH" 2>&1 | tee -a "$LOG"
+        --wake-word "$WAKE_WORD" --run "$TAG" --max-faph "$MAX_FAPH" \
+        --max-cutoff "$MAX_CUTOFF" 2>&1 | tee -a "$LOG"
 then
     MANIFEST="${RUN_DIR}/${SAFE_NAME}.json"
 else
-    echo "    NOTE: manifest not written. The model is fine; pick a cutoff from"
-    echo "          $ROC and rerun:"
+    echo "    NOTE: manifest not written. If the cutoff gate refused it (firehose"
+    echo "          signature - chosen cutoff above $MAX_CUTOFF), the init is the"
+    echo "          variable: retrain with a different --seed. Otherwise pick a"
+    echo "          cutoff from $ROC and rerun:"
     echo "          $ENV_DIR/.venv/bin/python -m train.mww.manifest \\"
     echo "              --wake-word \"$WAKE_WORD\" --run $TAG --max-faph <budget>"
 fi
