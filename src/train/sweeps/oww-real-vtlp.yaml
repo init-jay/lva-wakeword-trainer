@@ -22,4 +22,4 @@ eval:
   python: eval/.venv/bin/python
   # The 45-clip synthetic set: the low-variance arm-ranking number lands in
   # each filed eval block (voice_holdout_set), complementing the real holdout.
-  voice-holdout-set: data/corpus/eval/voice_holdout_tts
+  voice-holdout-set: data/corpus/hey_seeree/eval/voice_holdout_tts

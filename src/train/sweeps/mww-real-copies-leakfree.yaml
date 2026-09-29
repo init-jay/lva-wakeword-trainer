@@ -42,7 +42,7 @@ base_seed: 900
 eval:
   enabled: true
   python: eval/.venv/bin/python
-  voice-holdout-set: data/corpus/eval/voice_holdout_tts
+  voice-holdout-set: data/corpus/hey_seeree/eval/voice_holdout_tts
 
 # RESULT, 2026-09-24 - and the answer so far is "mWW training is the noisy part, not the
 # split". Six runs of one 10x configuration, two split policies:

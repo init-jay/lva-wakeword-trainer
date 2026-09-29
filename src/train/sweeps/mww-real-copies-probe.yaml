@@ -40,7 +40,7 @@ base_seed: 700
 eval:
   enabled: true
   python: eval/.venv/bin/python
-  voice-holdout-set: data/corpus/eval/voice_holdout_tts
+  voice-holdout-set: data/corpus/hey_seeree/eval/voice_holdout_tts
 
 # RESULT, 2026-09-24 (2 runs, corpus 574e978): PRESENCE IS THE LEVER. At threshold 0.5
 # the 10x runs read pooled 86% and 80% with 2.3% / 2.0% adversarial FA - jay 34/35 and

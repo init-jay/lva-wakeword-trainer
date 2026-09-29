@@ -44,7 +44,7 @@ base_seed: 300
 eval:
   enabled: true
   python: eval/.venv/bin/python
-  voice-holdout-set: data/corpus/eval/voice_holdout_tts
+  voice-holdout-set: data/corpus/hey_seeree/eval/voice_holdout_tts
 
 # RESULT, 2026-09-24 (4 runs, corpus 6bb4cca): NOT a win. At the arms' own
 # matched-FA budget, negative-class-weight 20 reads det 72.5% [68.6-76.5] and 8 reads
