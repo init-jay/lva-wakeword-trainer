@@ -9,8 +9,13 @@
 #   data/audit/         src/scripts/ one-off measurement output
 #
 #   output/             trained oww + mww models, training_config.yaml, scorecards
-data/
-output/
+# Contents ignored, the dirs themselves tracked via .gitkeep (a fresh clone
+# has the trees present; the negation is required because git cannot
+# re-include a file whose parent directory is excluded).
+data/*
+!data/.gitkeep
+output/*
+!output/.gitkeep
 
 # Written by src/train/oww/train.py at the START of every run and handed to
 # openwakeword as --training_config. Purely intermediate: nothing else reads it, and
@@ -63,8 +68,12 @@ __pycache__/
 *.zip
 .claude/settings.json
 
-# training logs - one per run, written by the run-*.sh scripts into src/logs/
-logs/
+# training logs - one per run, written by the run-*.sh scripts into logs/
+# (the top-level dir is the only one: a split into src/logs/ went unnoticed for
+# months while the bare pattern matched at any depth; the contents-only form
+# below also keeps the .gitkeep tracked, as above)
+logs/*
+!logs/.gitkeep
 *.log
 
 # deployment staging dir: the RECORD is tracked, the blobs are not.

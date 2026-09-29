@@ -33,10 +33,10 @@
 # on failure and on Ctrl-C (a port that fails to come up takes the rest down
 # with it - a half fleet renders a half corpus, and the run script's probe
 # would have reported exactly this anyway). On a CLEAN exit the trap is
-# removed first and the PIDs go to src/logs/tts-fleet/pids, which is also how you
+# removed first and the PIDs go to logs/tts-fleet/pids, which is also how you
 # stop the fleet later:
 #
-#     kill $(cat src/logs/tts-fleet/pids)
+#     kill $(cat logs/tts-fleet/pids)
 #
 # IDEMPOTENT: a port that already answers a voices round trip is NOT started
 # again (a second process on it would fail with EADDRINUSE anyway) - the
@@ -66,7 +66,7 @@ fi
 BASE_PORT=8898
 PROJECT="src/tts-service/engines/piper"
 VOICES_DIR="data/external/piper/voices"
-LOG_DIR="src/logs/tts-fleet"
+LOG_DIR="logs/tts-fleet"
 # 2 s x 120: covers a cold uv sync plus the engine's startup catalog; a dead
 # process fails the kill -0 check fast and never burns the whole window.
 WAIT_ROUNDS=120

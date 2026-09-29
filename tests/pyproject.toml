@@ -1,0 +1,26 @@
+[project]
+name = "tests"
+version = "0.1.0"
+description = "The test suite's own environment - the one that must stay cheap, since it is the fast feedback loop"
+requires-python = ">=3.10"
+
+# The suite used to run under the oww trainer venv (Makefile), a multi-GB torch
+# install that no test file imports: it was the only env pytest happened to live
+# next to, so the fast loop sat behind the most expensive setup in the repo.
+# These are everything the 22 test modules actually pull in: numpy and scipy
+# (the corpus and eval modules, and tts_protocol, which src/train/corpus/
+# __init__.py reaches by path), pyyaml (recipe and the mww config), tqdm (the
+# corpus-generation modules), and pytest, which collects the plain-assert
+# test_*() functions unchanged - no fixture, no import, per tests/_runner.py.
+# `uv run --project tests` builds this on first use; that is the fresh-clone
+# story, and it costs a small venv, not a torch one.
+dependencies = [
+    "numpy",
+    "scipy",
+    "pyyaml",
+    "tqdm",
+    "pytest",
+]
+
+[tool.uv]
+package = false

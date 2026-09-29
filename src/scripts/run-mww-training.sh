@@ -63,8 +63,11 @@ export COMPOSE_FILE="${COMPOSE_FILE:-docker/docker-compose.yml}"
 # tr rather than ${x,,} so this does not need bash 4 (macOS ships 3.2).
 SAFE_NAME="$(printf '%s' "$WAKE_WORD" | tr ' [:upper:]' '_[:lower:]')"
 STAMP="$(date +%Y%m%d-%H%M%S)"
-mkdir -p src/logs
-LOG="src/logs/training-mww-${SAFE_NAME}-${STAMP}.log"
+mkdir -p logs
+LOG="logs/training-mww-${SAFE_NAME}-${STAMP}.log"
+# The FIRST line of output: a backgrounded run's stdout is often never read,
+# so the log handle must be discoverable before any stage can fail.
+echo "log: $LOG"
 CORPUS="data/corpus/${SAFE_NAME}/mww"
 OUT_DIR="output/${SAFE_NAME}/mww"
 MAX_FAPH="${MAX_FAPH:-0.2}"
@@ -170,7 +173,7 @@ sys.exit('piper did not start listening on piper:8898 within 180s')
 "
     run "Piper ready"
 
-    run "building corpus (log: $LOG)"
+    run "building corpus"
     : > "$LOG"
     # --kokoro-fraction 0 is EXPLICIT, not the module default, on purpose: this
     # script never starts the kokoro services, so a container corpus here is

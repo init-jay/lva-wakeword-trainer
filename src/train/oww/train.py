@@ -74,7 +74,7 @@ from train.corpus.real import (  # noqa: E402
     balanced_copy_weights, copy_real_samples, parse_balance_spec,
     speaker_clip_counts,
 )
-from train import ownership, provenance  # noqa: E402
+from train import external_data, ownership, provenance  # noqa: E402
 from train.corpus import manifest as corpus_manifest  # noqa: E402
 from recipe import (exclude_voice_holdout, voice_exclusions,  # noqa: E402
                        voice_holdout)
@@ -498,10 +498,13 @@ def create_config(wake_word: str, n_samples: int, training_steps: int,
     # by this value but sizes the output array from the unmultiplied directory, so
     # without the patch the extra rounds are computed and discarded.
     config["augmentation_rounds"] = augmentation_rounds
-    config["rir_paths"] = [f'{data_dir}/mit_rirs']
-    config["background_paths"] = [f'{data_dir}/audioset_16k', f'{data_dir}/fma']
-    config["false_positive_validation_data_path"] = f"{data_dir}/validation_set_features.npy"
-    config["feature_data_files"] = {"ACAV100M_sample": f"{data_dir}/openwakeword_features_ACAV100M_2000_hrs_16bit.npy"}
+    # The external-data names come from train/external_data.py - the same single
+    # copy the pre-corpus guard in main() checks, so the config and the guard
+    # cannot drift.
+    config["rir_paths"] = [f'{data_dir}/{external_data.OWW_RIR_DIR}']
+    config["background_paths"] = [f'{data_dir}/{d}' for d in external_data.OWW_BACKGROUND_DIRS]
+    config["false_positive_validation_data_path"] = f"{data_dir}/{external_data.OWW_VALIDATION_FEATURES_NPY}"
+    config["feature_data_files"] = {"ACAV100M_sample": f"{data_dir}/{external_data.OWW_ACAV_FEATURES_NPY}"}
     config.pop("piper_sample_generator_path", None)  # We use Kokoro, not Piper
 
     # SEED THE SUBPROCESS. openwakeword's train.py (via patches/seed-augment.py)
@@ -1066,6 +1069,14 @@ def main():
 
     wake_word = args.wake_word
     safe_name = wake_word.replace(" ", "_").lower()
+
+    # EXTERNAL DATA BEFORE ANY STAGE: the corpora under --data-dir feed the
+    # augmentation and feature stages, which run AFTER corpus generation - the
+    # TTS spend. A missing or half-finished tree must fail here in seconds,
+    # naming the idempotent download script, not there with a deep stack trace.
+    # Existence only: see train/external_data.py for why not more.
+    external_data.check(args.data_dir, "oww",
+                        external_data.oww_external_paths(args.data_dir))
 
     # === SMOKE MODE: decided here, before any stage, so a contradiction costs
     # zero seconds. The whole contract is loud and local to this block.
