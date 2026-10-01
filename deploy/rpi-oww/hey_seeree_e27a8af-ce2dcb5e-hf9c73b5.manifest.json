@@ -1,0 +1,8 @@
+{
+  "type": "openWakeWord",
+  "wake_word": "Hey Seeree v0.3",
+  "model": "hey_seeree_e27a8af-ce2dcb5e-hf9c73b5.tflite",
+  "openWakeWord": {
+    "probability_cutoff": 0.611
+  }
+}

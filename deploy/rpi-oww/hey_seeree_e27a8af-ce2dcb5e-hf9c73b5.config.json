@@ -19,12 +19,12 @@
   "feature_data_files": {
     "ACAV100M_sample": "data/external/openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
   },
-  "layer_size": 64,
+  "layer_size": 128,
   "lr": 0.0001,
   "max_negative_weight": 2000,
   "model_name": "hey_seeree",
   "model_type": "dnn",
-  "n_samples": 9457,
+  "n_samples": 8690,
   "n_samples_val": 1000,
   "output_dir": "/Users/jay/Documents/Repos/lva-wakeword-trainer/output/hey_seeree/oww",
   "rir_paths": [

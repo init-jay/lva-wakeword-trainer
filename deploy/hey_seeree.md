@@ -10,12 +10,17 @@ has cleared.
 
 ```
 esp32-mww/hey_seeree_ecbf160-dirty-da01854d.{tflite,json}   unchanged since 2026-09-08
-rpi-oww/hey_seeree_55e182a-dirty-c9897b91-hf37e3df.tflite   staged 2026-09-24
-rpi-oww/hey_seeree_55e182a-dirty-c9897b91-hf37e3df.config.json
-rpi-oww/hey_seeree_55e182a-dirty-c9897b91-hf37e3df.manifest.json   LVA discovery manifest (added 2026-09-25)
+rpi-oww/hey_seeree_e27a8af-ce2dcb5e-hf9c73b5.tflite        staged 2026-10-01 (layer 128 arm)
+rpi-oww/hey_seeree_e27a8af-ce2dcb5e-hf9c73b5.config.json
+rpi-oww/hey_seeree_e27a8af-ce2dcb5e-hf9c73b5.manifest.json   LVA discovery manifest
 ```
 
-Their measured operating points are the rows `oww-hf37e3df-584` and `mww-da01854d-009` -
+The previous Raspberry Pi candidate, `hey_seeree_55e182a-dirty-c9897b91-hf37e3df` ("Hey Seeree
+v0.2"), was superseded on 2026-10-01; its files were removed from this directory per the
+one-candidate rule and its row `oww-hf37e3df-584` now reads `superseded`. Its measurements
+stand in `scorecards.jsonl` and the curve `logs/scorecurves/oww-bal-s8001-tflite.csv`.
+
+Their measured operating points are the rows `oww-hf9c73b5-611` and `mww-da01854d-009` -
 one `staged` row per target, at the cutoff each satellite actually ships. The ESP32 one is
 above the FA budget, and `mww-da01854d-150` is the `reference` reading of the same artifact
 squeezed to budget: quote that one for a comparison, but know that the satellite is not
@@ -25,16 +30,16 @@ running it.
 `probability_cutoff` 0.60), not the trainer's resolved config (`*.config.json`); stage
 both the `.tflite` and the `.manifest.json`.
 
-**Run the Raspberry Pi model at threshold 0.58–0.60, not at 0.5.** That band is flat in
-detection and it is the tight edge of the measured curve; the numbers are in row
-`oww-hf37e3df-584`, whose own threshold field is 0.584. 0.5 is not this model's operating
-point and nothing about it is calibrated there.
+**Run the Raspberry Pi model at threshold 0.611.** It is the lowest threshold on the shipped
+tflite's curve that meets the derived budget (5 fires = the largest count strictly inside 2%
+of the 298-clip adversarial set): 5/298 fires, jay 28/35, jen 9/10, ryan 1/6. The empty-room
+margin gate (max ambient + 0.2, measured 2026-10-01) sets a floor of 0.241; 0.611 clears it
+with 0.570 of margin, twice the v0.2 champion's 0.288.
 
-The shipped manifest says **0.60**, and no row measures 0.60 — the row carries
-`shipped_cutoff: 0.6` and says so in its `note`. Per `README.md` that is an open item, not a
-resolved state: closing it means measuring at 0.60, or moving the manifest to 0.584
-deliberately and re-deploying. It is *not* closed by editing the manifest to match a
-measurement already taken, and the satellite is already deployed against 0.60. The ESP32 manifest's `probability_cutoff: 0.09` is unchanged and
+The shipped manifest said **0.241** between staging and this correction — that cutoff met the
+ambient floor but fired 10/298 (3.4%) adversarially, above the 2% budget, and has been moved
+deliberately to 0.611 with the curve row measured there. The satellite must re-copy the
+manifest. The v0.2-era open item (manifest 0.60 vs row 0.584) left with the champion. The ESP32 manifest's `probability_cutoff: 0.09` is unchanged and
 remains *its* measured point — see `mww-da01854d-009` for why that point is above budget.
 
 The Pi candidate is preferred over the model that was firing in the house not because it
@@ -63,11 +68,12 @@ On the Pi they land in the dir `WAKE_WORD_DIR` points at — on the current inst
 `/var/lib/docker/volumes/lva_wakeword_custom/_data/` — and `WAKE_MODEL` is set in the compose
 `.env` to the manifest's stem. The manifest's `wake_word` field is a *display label*: HA
 builds its wake-word dropdown as a dict keyed on that phrase (`esphome/select.py`), so two
-models sharing a label collapse to one option in the UI — the staged v0.2 manifest therefore
-reads `"Hey Seeree v0.2"` to stay selectable beside the house `hey_seeree_v0.1`. The
+models sharing a label collapse to one option in the UI — the staged v0.3 manifest therefore
+reads `"Hey Seeree v0.3"` to stay selectable beside the house `hey_seeree_v0.1` and the
+superseded `"Hey Seeree v0.2"` files left on satellites. The
 `WAKE_MODEL` env is only the *default*; the active model comes from HA's preference and
 overrides it, and the Wake Word 1 sensitivity (0.700 persisted) follows the slot, not the
-model — re-set it to 0.60 after switching.
+model — re-set it to 0.611 after switching.
 
 ## Reading the rows
 
@@ -80,7 +86,7 @@ without the gitignored `.tflite` being in the repo:
 
 | artifact | md5 |
 |---|---|
-| `deploy/rpi-oww/hey_seeree_55e182a-dirty-c9897b91-hf37e3df.tflite` | `5cadbc531b0fc272b7ca7859157584e5` |
+| `deploy/rpi-oww/hey_seeree_e27a8af-ce2dcb5e-hf9c73b5.tflite` | `6857703a51b3ae206bd4ece549b879ca` |
 | `deploy/esp32-mww/hey_seeree_ecbf160-dirty-da01854d.tflite` | `248a15d88e601ece87b33070ec3836cc` |
 
 The manifests carry no digest of their own and are not edited after deployment, so the row's
@@ -125,6 +131,19 @@ copy — see README's "Which bytes a microWakeWord row belongs to". The eight 10
 
 ## Corrections to what is written above
 
+- **2026-10-01 — the layer-128 headline was measured on the wrong backend.** Before staging,
+  the ls128 arm was reported at +8 adults over the champion at matched FA=2 — that sweep ran
+  on the *onnx tuning backend* (`compare_models.py` over `.onnx`), not the deployment runtime.
+  Re-measured on the shipped tflite curves, both models' own: at budget 5 ls128 is **37/45 vs
+  35/45** (jay +2, jen tie, ryan −1), and at budgets 2–4 adults tie at 35 with ryan 0/6 vs the
+  champion's 2/6. The ship call rests on the +2 at budget 5 plus the ambient margin (0.570 vs
+  0.288), not on the retracted +8.
+- **2026-10-01 — first staged cutoff 0.241 was above FA budget; moved to 0.611.** 0.241 is the
+  empty-room ambient floor only (max 0.041 + 0.2). On the adversarial curve it fires 10/298 =
+  3.4%, above the derived 2% budget. Per the README rule ("move the shipped point
+  deliberately"), the manifest now ships 0.611 with row `oww-hf9c73b5-611` measured there.
+- **2026-10-01 — `oww-hf37e3df-584` status `staged` → `superseded`**, a lifecycle field, not a
+  measurement: its numbers are untouched. ls128 is now the only `staged` oww row.
 - **2026-09-26 — `mww-da01854d-009` recorded the wrong threshold's reading.** It claimed
   ryan 5/6 and pooled 38/51 at cutoff 0.09; the curve reads ryan **4/6** and pooled **37/51**
   at 0.09. Ryan's fifth clip peaks at 0.0875, which fires at 0.0875 and not at the shipped
