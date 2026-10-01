@@ -210,6 +210,12 @@ def report(model, pos_dirs, neg_dir, budget, top_n, csv_path=None, window=None):
     all_pos = [p for rows in pos_peaks.values() for _, p in rows]
     require_measurable(adv, all_pos, neg_dir, pos_dirs)
 
+    # Derive the budget BEFORE the threshold: operating_threshold compares against
+    # it, so a None budget (the advertised default) would crash the comparison.
+    if budget is None:
+        budget = default_budget(len(adv))
+        print(f"  budget derived: {budget} fire(s) = the largest count strictly inside "
+              f"{ADV_FA_CONSTRAINT:.0%} of the {len(adv)}-clip adversarial set")
     t = operating_threshold(adv, budget)
     artifact, digest = artifact_of(model)
     print("=" * 78)
@@ -218,10 +224,6 @@ def report(model, pos_dirs, neg_dir, budget, top_n, csv_path=None, window=None):
     # the basename cannot tell one run's model from another's.
     print(f"{model}  ->  {artifact}  md5 {digest}")
     print(backend.describe())
-    if budget is None:
-        budget = default_budget(len(adv))
-        print(f"  budget derived: {budget} fire(s) = the largest count strictly inside "
-              f"{ADV_FA_CONSTRAINT:.0%} of the {len(adv)}-clip adversarial set")
     # A separate flag, not `t is None`: the fallback below overwrites t, and reading
     # the budget back off the threshold is what made an unreachable curve look
     # matched in the first place.
